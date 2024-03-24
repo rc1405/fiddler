@@ -12,6 +12,8 @@ use crate::{InputBatch, OutputBatch};
 use super::{Input, Output, Processor, Error};
 
 mod registration;
+mod validate;
+pub use validate::parse_configuration_item;
 pub use registration::register_plugin;
 
 
@@ -96,59 +98,7 @@ pub struct Config {
 }
 
 impl Config {
-    fn check_item(&self, itype: ItemType, map: &HashMap<String, Value>) -> Result<ParsedRegisteredItem, Error> {
-        let keys: Vec<String> = map.keys().into_iter().map(|k| k.clone()).collect();
-        let first_key = keys.first().ok_or(
-            Error::ConfigFailedValidation(format!("unable to determine {} key", itype))
-        )?;
-        let item = self.get_item(&itype, first_key)?;
-
-        let content = map.get(first_key).ok_or(
-            Error::ConfigFailedValidation(format!("unable to validate {} key {}", itype, first_key))
-        )?;
-        let content_str = serde_yaml::to_string(content)?;
-        item.format.validate(&content_str)?;
-        match itype {
-            ItemType::Input => {
-                let creator = (item.creator)(content)?;
-                match &creator {
-                    ExecutionType::Input(_) => {},
-                    _ => return Err(Error::ConfigFailedValidation("invalid type returned for input".into())),
-                };
-
-                Ok(ParsedRegisteredItem{
-                    execution_type: creator,
-                    item_type: ItemType::Input,
-                })
-            },
-            ItemType::InputBatch => Err(Error::NotYetImplemented),
-            ItemType::Output => {
-                let creator = (item.creator)(content)?;
-                match &creator {
-                    ExecutionType::Output(_) => {},
-                    _ => return Err(Error::ConfigFailedValidation("invalid type returned for output".into())),
-                };
-
-                Ok(ParsedRegisteredItem{
-                    execution_type: creator,
-                    item_type: ItemType::Output,
-                })
-            },
-            ItemType::OutputBatch => Err(Error::NotYetImplemented),
-            ItemType::Processor => {
-                let creator = (item.creator)(content)?;
-                match &creator {
-                    ExecutionType::Processor(_) => {},
-                    _ => return Err(Error::ConfigFailedValidation("invalid type returned for processor".into())),
-                };
-
-                Ok(ParsedRegisteredItem{
-                    execution_type: creator,
-                    item_type: ItemType::Processor,
-                })
-            }
-        }
-    }
+    
 
     pub fn validate(self) -> Result<ParsedConfig, Error> {
         if self.input.extra.len() > 1 {
@@ -163,14 +113,14 @@ impl Config {
             return Err(Error::Validation("pipeline must contain at least one processor".into()))
         };
         
-        let input = self.check_item(ItemType::Input, &self.input.extra)?;
+        let input = parse_configuration_item(ItemType::Input, &self.input.extra)?;
 
-        let output = self.check_item(ItemType::Output, &self.output.extra)?;
+        let output = parse_configuration_item(ItemType::Output, &self.output.extra)?;
 
         let mut processors = Vec::new();
 
         for p in &self.pipeline.processors {
-            let proc = self.check_item(ItemType::Processor, &p.extra)?;
+            let proc = parse_configuration_item(ItemType::Processor, &p.extra)?;
             processors.push(proc);
         };
 
@@ -185,23 +135,6 @@ impl Config {
             pipeline: parsed_pipeline,
             output,
         })
-    }
-
-    fn get_item(&self, itype: &ItemType, key: &String) -> Result<RegisteredItem, Error> {
-        match ENV.lock() {
-            Ok(lock) => {
-                match lock.get(itype) {
-                    Some(i) => {
-                        if let Some(item) = i.get(key) {
-                            return Ok(item.clone())
-                        }
-                    },
-                    None => return Err(Error::UnableToSecureLock),
-                };
-            },
-            Err(_) => return Err(Error::UnableToSecureLock),
-        };
-        return Err(Error::ConfigurationItemNotFound(key.clone()))
     }
 }
 

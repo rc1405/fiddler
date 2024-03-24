@@ -30,10 +30,12 @@ pub struct Validate {
 impl Output for Validate {
     async fn write(self: &Self, message: Message) -> Result<(), Error> {
         let prefix = &self.prefix;
-        let pattern = format!(r"{prefix}: Hello World (\d+)");
+        println!("received prefix {prefix}");
+        let pattern = format!(r#"{prefix}: Hello World (\d+)|{prefix}: \{{\"Hello World\": (\d+)\}}|^\{{\"Hello World\": (\d+), \"Python\": \"rocks\"\}}"#);
+        println!("Have pattern: {pattern}");
         let re = Regex::new(&pattern).unwrap();
         let msg = String::from_utf8(message.bytes).unwrap();
-        // println!("{}", msg);
+        println!("{}", msg);
 
         match self.expected.lock() {
             Ok(c) => {
@@ -47,7 +49,8 @@ impl Output for Validate {
                 let call = re.captures(&msg).unwrap().get(1).map_or(0, |m| m.as_str().parse::<isize>().unwrap());
                 if call > self.total {
                     panic!("Received an extra event")
-                };                
+                };     
+                
         
                 Ok(())
             },

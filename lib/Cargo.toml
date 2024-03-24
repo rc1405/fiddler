@@ -11,6 +11,7 @@ async-trait = "0.1.78"
 crossbeam-channel = "0.5.12"
 fiddler-macros = { version = "0.1.0", path = "../macros" }
 futures = "0.3.30"
+jmespath = "0.3.0"
 jsonschema = "0.17.1"
 lazy_static = "1.4.0"
 log = { version = "0.4.21", features = ["kv", "kv_serde"] }

@@ -197,24 +197,38 @@ impl Environment {
             match input.try_recv() {
                 Ok(msg) => {
                     // println!("Received processing message");
-                    let m = p.process(msg.message.clone()).await?;
-                    for i in m {
-                        let mut new_msg = msg.clone();
-                        new_msg.message = i;
-                        match new_msg.active_count.lock() {
-                            Ok(mut lock) => {
-                                *lock += 1;
-                            },
-                            Err(_) => return Err(Error::UnableToSecureLock),
-                        };
-
-                        output.send(new_msg).map_err(|e| Error::UnableToSendToChannel(format!("{}", e)))?;
-                        
-                    };
+                    match p.process(msg.message.clone()).await {
+                        Ok(m) => {
+                            for i in m {
+                                let mut new_msg = msg.clone();
+                                new_msg.message = i;
+                                match new_msg.active_count.lock() {
+                                    Ok(mut lock) => {
+                                        *lock += 1;
+                                    },
+                                    Err(_) => return Err(Error::UnableToSecureLock),
+                                };
+        
+                                output.send(new_msg).map_err(|e| Error::UnableToSendToChannel(format!("{}", e)))?;
+                                
+                            };
+                        },
+                        Err(e) => {
+                            println!("Processing error {}", e);
+                            match e {
+                                Error::ConditionalCheckfailed => {
+                                    output.send(msg).map_err(|e| Error::UnableToSendToChannel(format!("{}", e)))?;                                    
+                                },
+                                _ => return Err(e),
+                            }
+                        }
+                    }
+                    
                 },
                 Err(e) => {
                     match e {
                         TryRecvError::Disconnected => {
+                            p.close()?;
                             println!("exiting processor");
                             return Ok(())
                         },
@@ -240,17 +254,33 @@ impl Environment {
             match input.try_recv() {
                 Ok(msg) => {
                     // println!("writing message");
-                    o.write(msg.message.clone()).await.map_err(|e| Error::UnableToSendToChannel(format!("{}", e)))?;
-                    match msg.active_count.lock() {
-                        Ok(mut lock) => {
-                            *lock -= 1;
-                            if *lock == 0 {
-                                (msg.closure)(msg.original)?
-                            }
+                    // o.write(msg.message.clone()).await.map_err(|e| Error::UnableToSendToChannel(format!("{}", e)))?;
+
+                    match o.write(msg.message.clone()).await {
+                        Ok(_) => {
+                            match msg.active_count.lock() {
+                                Ok(mut lock) => {
+                                    *lock -= 1;
+                                    if *lock == 0 {
+                                        (msg.closure)(msg.original)?
+                                    }
+                                },
+                                Err(_) => return Err(Error::UnableToSecureLock),
+                            };
                         },
-                        Err(_) => return Err(Error::UnableToSecureLock),
-                    };
-                    
+                        Err(e) => {
+                            println!("Processing error {}", e);
+                            match e {
+                                Error::ConditionalCheckfailed => {
+                                    println!("Failed conditional check on output");
+                                },
+                                _ => {
+                                    println!("Found another error {}", e);
+                                    return Err(e)
+                                },
+                            }
+                        }
+                    }                    
                 },
                 Err(e) => {
                     match e {

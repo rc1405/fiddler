@@ -7,7 +7,7 @@ pub use env::Environment;
 
 mod macros;
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct Message{
     pub bytes: Vec<u8>,
 }
@@ -74,6 +74,8 @@ pub enum Error {
     #[error("PipelineProcessingError: {0}")]
     UnableToSendToChannel(String),
     #[error("ProcessorFailure: {0}")]
-    ProcessingError(String)
+    ProcessingError(String),
+    #[error("ConditionalCheckfailed")]
+    ConditionalCheckfailed
 }
 
