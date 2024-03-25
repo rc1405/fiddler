@@ -6,10 +6,3 @@ macro_rules! include_plugins {
 }
 
 pub(crate) use include_plugins;
-
-// #[proc_macro_attribute]
-// pub fn register_plugin(item: TokenStream) -> TokenStream {
-//     let input = parse_macro_input!(item);
-//     // fn REGISTER_PLUGIN() -> Result<(), Error> {
-//     // }
-// }

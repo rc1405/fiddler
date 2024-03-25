@@ -1,5 +1,6 @@
 use crate::Error;
 use super::{ENV, RegisteredItem, ItemType, ConfigSpec, Callback};
+use tracing::{debug, error};
 
 pub fn register_plugin(name: String, itype: ItemType, format: ConfigSpec, creator: Callback) -> Result<(), Error> {
     let r = RegisteredItem{
@@ -12,27 +13,22 @@ pub fn register_plugin(name: String, itype: ItemType, format: ConfigSpec, creato
             match lock.get_mut(&itype) {
                 Some(i) => {
                     if let Some(_) = i.insert(name.clone(), r) {
+                        error!(name = name.clone(), "plugin is already registered");
                         return Err(Error::DuplicateRegisteredName(name))
-                    }
+                    };
+                    debug!(name = name.clone(), "plugin registered")
                 },
-                None => return Err(Error::UnableToSecureLock),
+                None => {
+                    error!(kind = "unable to borrow mut", "InternalServerError");
+                    return Err(Error::UnableToSecureLock)
+                },
             };
         },
-        Err(_) => return Err(Error::UnableToSecureLock),
+        Err(_) => {
+            error!( kind = "unable to secure lock", "InternalServerError");
+            return Err(Error::UnableToSecureLock)
+        },
     };
 
     Ok(())
 }
-
-// #[cfg(test)]
-// mod test {
-//     use super::*;
-//     use crate::modules::processors::noop;
-
-//     #[test]
-//     fn add_input() {
-//         let nope = noop::NoOp{};
-
-//         // register_processor()
-//     }
-// }

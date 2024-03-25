@@ -5,6 +5,7 @@ use futures::stream::FuturesOrdered;
 use futures::stream::StreamExt;
 use futures::future::FutureExt;
 use tokio::task::yield_now;
+use tracing::{debug, error, info, trace};
 
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
@@ -50,10 +51,12 @@ impl Environment {
             outputs::register_plugins().unwrap();
             processors::register_plugins().unwrap();
         });
+        trace!("plugins registered");
         
         let conf: Config = serde_yaml::from_str(config)?;
         let parsed_conf = conf.validate()?;
 
+        debug!("environment is ready");
         Ok(Environment{
             config: parsed_conf,
         })
@@ -66,25 +69,30 @@ impl Environment {
         let processors = self.pipeline(&self.config.pipeline, input_rx, processor_tx);
         let output = self.output(&self.config.output, processor_rx);
 
-        println!("waiting on futures");
+        info!("pipeline started");
 
         let (input_result, proc_result, output_result) = join!(input, processors, output);
         input_result?;
         proc_result?;
         output_result?;
 
+        info!("pipeline finished");
         Ok(())
     }
 
 
     async fn input(&self, input: &ParsedRegisteredItem, output: Sender<InternalMessage>) -> Result<(), Error> {
-        println!("started input");
+        trace!("started input");
         let i = match &input.execution_type {
             ExecutionType::Input(i) => i,
-            _ => return Err(Error::Validation("invalid execution type".into())),
+            _ => {
+                error!("invalid execution type for input");
+                return Err(Error::Validation("invalid execution type".into()))
+            },
         };
 
         i.connect()?;
+        debug!("input connected");
 
         let mut future = i.read().fuse();
 
@@ -93,25 +101,28 @@ impl Environment {
                 m = future => {
                     match m {
                         Ok((msg, closer)) => {
+                            trace!("message received from input");
                             let internal_msg = InternalMessage{
                                 original: msg.clone(),
                                 message: msg,
                                 closure: closer,
                                 active_count: Arc::new(Mutex::new(1)),
                             };
-                            // println!("received input message");
                             output.send(internal_msg).map_err(|e| Error::UnableToSendToChannel(format!("{}", e)))?;
-                            // println!("input message sent");
                             future = i.read().fuse();
                         },
                         Err(e) => {
                             i.close()?;
+                            debug!("input closed");
                             match e {
                                 Error::EndOfInput => {
-                                    println!("exiting input");
+                                    info!("shutting down input: end of input received");
                                     return Ok(())
                                 },
-                                _ => return Err(Error::ExecutionError(format!("Received error from read: {}", e))),
+                                _ => {
+                                    error!(error = format!("{}", e), "read error from input");
+                                    return Err(Error::ExecutionError(format!("Received error from read: {}", e)))
+                                },
                             }                    
                         },
                     }
@@ -124,7 +135,7 @@ impl Environment {
     }
 
     async fn pipeline(&self, pipeline: &ParsedPipeline, input: Receiver<InternalMessage>, output: Sender<InternalMessage>) -> Result<(), Error> {
-        // eprintln!("pipeline entered");
+        trace!("starting pipeline");
         let mut channels: HashMap<usize, InternalChannel> = HashMap::new();
         for n in 0..pipeline.processors.len() {
             let (tx, rx) = unbounded();
@@ -133,6 +144,8 @@ impl Environment {
                 rx,
             });
         };
+
+        debug!(num_processors = channels.len(), "starting processors");
 
         let mut pipelines = Vec::new();
         let mut rx: Receiver<InternalMessage> = input;
@@ -149,37 +162,40 @@ impl Environment {
             rx = ic.rx;
         };
 
-        // println!("futures ready");
+        
         let forwarder = self.channel_forward(rx, output).fuse();
         let futures = FuturesOrdered::from_iter(pipelines).fuse();
         let future_to_await = futures.collect::<Vec<Result<(), Error>>>();
-        // println!("waiting on pipelines");
         futures::pin_mut!(forwarder, future_to_await);
 
         // drop channels so processors will close once input does
         drop(channels);
 
-        // let results = futures.collect::<Vec<Result<(), Error>>>();
-        // let (fwd_output, vec_output) = join!(forwarder, futures.collect::<Vec<Result<(), Error>>>());
+        trace!("waiting for processors to finish");
         'outer: loop {
-            // println!("Checking status");
             select! {
                 fwd_output = forwarder => fwd_output?,
                 results = future_to_await => {
-                    println!("processor finished");
+                    debug!("processor finished");
                     for r in results {
-                        r?;
+                        match r {
+                            Ok(_) => {},
+                            Err(e) => {
+                                error!(error = format!("{}", e), "processing error");
+                                return Err(e)
+                            }
+                        }
                     };
                 },
                 complete => {
-                    println!("breaking outer");
+                    debug!("processors completed");
                     break 'outer
                 },
                 default => yield_now().await,
             };
             yield_now().await
         };
-        println!("pipelines done");
+        debug!("shutting down pipeline");
 
         Ok(())
 
@@ -187,16 +203,19 @@ impl Environment {
     }
 
     async fn run_processor(&self, input: Receiver<InternalMessage>, output: Sender<InternalMessage>, processor: &ParsedRegisteredItem) -> Result<(), Error> {
-        println!("Started processor");
+        trace!("Started processor");
         let p = match &processor.execution_type {
             ExecutionType::Processor(p) => p,
-            _ => return Err(Error::Validation("invalid execution type".into())),
+            _ => {
+                error!("invalid execution type for processor");
+                return Err(Error::Validation("invalid execution type".into()))
+            },
         };
 
         loop {
             match input.try_recv() {
                 Ok(msg) => {
-                    // println!("Received processing message");
+                    trace!("received processing message");
                     match p.process(msg.message.clone()).await {
                         Ok(m) => {
                             for i in m {
@@ -214,12 +233,15 @@ impl Environment {
                             };
                         },
                         Err(e) => {
-                            println!("Processing error {}", e);
                             match e {
                                 Error::ConditionalCheckfailed => {
+                                    debug!("conditional check failed for processor");
                                     output.send(msg).map_err(|e| Error::UnableToSendToChannel(format!("{}", e)))?;                                    
                                 },
-                                _ => return Err(e),
+                                _ => {
+                                    error!(error = format!("{}", e), "read error from processor");
+                                    return Err(e)
+                                },
                             }
                         }
                     }
@@ -229,12 +251,11 @@ impl Environment {
                     match e {
                         TryRecvError::Disconnected => {
                             p.close()?;
-                            println!("exiting processor");
+                            debug!("processor closed");
                             return Ok(())
                         },
                         TryRecvError::Empty => {}
                     }
-                    // return Err(Error::UnableToSendToChannel(format!("{}", e)))
                 },
             };
             yield_now().await;
@@ -242,20 +263,22 @@ impl Environment {
     }
 
     async fn output(self: &Self, output: &ParsedRegisteredItem, input: Receiver<InternalMessage>) -> Result<(), Error> {
-        println!("started output");
+        trace!("started output");
         let o = match &output.execution_type {
             ExecutionType::Output(o) => o,
-            _ => return Err(Error::Validation("invalid execution type".into())),
+            _ => {
+                error!("invalid execution type for output");
+                return Err(Error::Validation("invalid execution type".into()))
+            },
         };
 
         o.connect()?;
+        debug!("output connected");
 
         loop {
             match input.try_recv() {
                 Ok(msg) => {
-                    // println!("writing message");
-                    // o.write(msg.message.clone()).await.map_err(|e| Error::UnableToSendToChannel(format!("{}", e)))?;
-
+                    trace!("received output message");
                     match o.write(msg.message.clone()).await {
                         Ok(_) => {
                             match msg.active_count.lock() {
@@ -269,13 +292,12 @@ impl Environment {
                             };
                         },
                         Err(e) => {
-                            println!("Processing error {}", e);
                             match e {
                                 Error::ConditionalCheckfailed => {
-                                    println!("Failed conditional check on output");
+                                    debug!("conditional check failed for output");
                                 },
                                 _ => {
-                                    println!("Found another error {}", e);
+                                    error!(error = format!("{}", e), "write error from output");
                                     return Err(e)
                                 },
                             }
@@ -286,12 +308,11 @@ impl Environment {
                     match e {
                         TryRecvError::Disconnected => {
                             o.close()?;
-                            println!("exiting output");
+                            debug!("output closed");
                             return Ok(())
                         },
                         TryRecvError::Empty => {}
                     }
-                    // return Err(Error::UnableToSendToChannel(format!("{}", e)))
                 },
             };
             yield_now().await;
@@ -305,12 +326,11 @@ impl Environment {
                 Err(e) => {
                     match e {
                         TryRecvError::Disconnected => {
-                            println!("exiting forwarder");
+                            trace!("shutting down output forwarder");
                             return Ok(())
                         },
                         TryRecvError::Empty => {}
                     }
-                    // return Err(Error::UnableToSendToChannel(format!("{}", e)))
                 },
             };
             yield_now().await;

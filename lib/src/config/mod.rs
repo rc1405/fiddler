@@ -6,7 +6,7 @@ use jsonschema::{Draft, JSONSchema};
 use once_cell::sync::Lazy;
 use serde::{Deserialize, Serialize};
 use serde_yaml::Value;
-use log::{debug, error, info, warn, trace};
+use tracing::{debug, error, trace};
 
 use crate::{InputBatch, OutputBatch};
 use super::{Input, Output, Processor, Error};
@@ -89,7 +89,6 @@ pub struct Item {
     pub extra: HashMap<String, Value>,
 }
 
-
 #[derive(Debug, Deserialize, Serialize)]
 pub struct Config {
     pub input: Item,
@@ -102,14 +101,17 @@ impl Config {
 
     pub fn validate(self) -> Result<ParsedConfig, Error> {
         if self.input.extra.len() > 1 {
+            error!("input must only contain one entry");
             return Err(Error::Validation("input must only contain one entry".into()))
         };
 
         if self.output.extra.len() > 1 {
+            error!("output must only contain one entry");
             return Err(Error::Validation("output must only contain one entry".into()))
         };
 
         if self.pipeline.processors.len() == 0 {
+            error!("pipeline must contain at least one processor");
             return Err(Error::Validation("pipeline must contain at least one processor".into()))
         };
         
@@ -128,6 +130,8 @@ impl Config {
             label: self.pipeline.label.clone(),
             processors,
         };
+
+        debug!("configuration is valid");
 
         Ok(ParsedConfig{
             _config: self,
@@ -170,6 +174,8 @@ impl ConfigSpec {
                 Err(e) => return Err(Error::InvalidValidationSchema(format!("{}", e)))
             };
 
+        trace!("json schema is valid");
+
         Ok(ConfigSpec{
             raw_schema: conf.into(),
             schema,
@@ -183,6 +189,7 @@ impl ConfigSpec {
         let result = self.schema.validate(&f);
         if let Err(errors) = result {
             let errs: Vec<String> = errors.into_iter().map(|i| format!("{}", i)).collect();
+            error!(number_of_failures = errs.len(), errors = errs.join(" "), "validation failed");
             return Err(Error::ConfigFailedValidation(errs.join(" ")))
         };
         Ok(())

@@ -1,7 +1,7 @@
 use fiddler::Environment;
 
 mod dependencies;
-use dependencies::{generator, processor, output, jsongenerator};
+use dependencies::{generator, processor, output, jsongenerator, mock};
 use std::sync::Once;
 
 static REGISTER: Once = Once::new();
@@ -18,35 +18,15 @@ pipeline:
           echo: {}
 output:
   validate: 
-    expected: 5
-    prefix: echo";
+    expected: 
+      - 'echo: Hello World 4'
+      - 'echo: Hello World 3'
+      - 'echo: Hello World 2'
+      - 'echo: Hello World 1'
+      - 'echo: Hello World 0'";
 
     REGISTER.call_once(|| {
-        jsongenerator::register_json_generator().unwrap();
-        generator::register_generator().unwrap();
-        processor::register_echo().unwrap();
-        output::register_validate().unwrap();
-    });
-    
-    let env = Environment::from_config(config).unwrap();
-    env.run().await.unwrap();
-}
-
-#[tokio::test]
-async fn fiddler_go_brrrt() {
-    let config = "input:
-  generator: 
-    count: 5000
-pipeline:
-    processors:
-        - label: my_cool_mapping
-          echo: {}
-output:
-  validate: 
-    expected: 5000
-    prefix: echo";
-
-    REGISTER.call_once(|| {
+        mock::register_mock_input().unwrap();
         jsongenerator::register_json_generator().unwrap();
         generator::register_generator().unwrap();
         processor::register_echo().unwrap();
@@ -73,10 +53,15 @@ pipeline:
                 root = new_string.encode(\"utf-8\")
 output:
   validate: 
-    expected: 5
-    prefix: python";
+    expected: 
+      - 'python: Hello World 4'
+      - 'python: Hello World 3'
+      - 'python: Hello World 2'
+      - 'python: Hello World 1'
+      - 'python: Hello World 0'";
 
     REGISTER.call_once(|| {
+        mock::register_mock_input().unwrap();
         jsongenerator::register_json_generator().unwrap();
         generator::register_generator().unwrap();
         processor::register_echo().unwrap();
@@ -105,10 +90,15 @@ pipeline:
           echo: {}
 output:
   validate: 
-    expected: 5
-    prefix: python";
+    expected: 
+      - 'echo: python: Hello World 4'
+      - 'echo: python: Hello World 3'
+      - 'echo: python: Hello World 2'
+      - 'echo: python: Hello World 1'
+      - 'echo: python: Hello World 0'";
 
     REGISTER.call_once(|| {
+        mock::register_mock_input().unwrap();
         jsongenerator::register_json_generator().unwrap();
         generator::register_generator().unwrap();
         processor::register_echo().unwrap();
@@ -140,10 +130,15 @@ pipeline:
               echo: {}
 output:
   validate: 
-    expected: 5
-    prefix: echo";
+    expected: 
+      - 'echo: {\"Hello World\": 4}'
+      - 'echo: {\"Hello World\": 3}'
+      - 'echo: {\"Hello World\": 2}'
+      - 'echo: {\"Hello World\": 1}'
+      - 'echo: {\"Hello World\": 0}'";
 
     REGISTER.call_once(|| {
+        mock::register_mock_input().unwrap();
         jsongenerator::register_json_generator().unwrap();
         generator::register_generator().unwrap();
         processor::register_echo().unwrap();
@@ -176,10 +171,15 @@ pipeline:
               echo: {}
 output:
   validate: 
-    expected: 5
-    prefix: 'echo: python'";
+    expected: 
+      - 'echo: python: {\"Hello World\": 4}'
+      - 'echo: python: {\"Hello World\": 3}'
+      - 'echo: python: {\"Hello World\": 2}'
+      - 'echo: python: {\"Hello World\": 1}'
+      - 'echo: python: {\"Hello World\": 0}'";
 
     REGISTER.call_once(|| {
+        mock::register_mock_input().unwrap();
         jsongenerator::register_json_generator().unwrap();
         generator::register_generator().unwrap();
         processor::register_echo().unwrap();
@@ -208,16 +208,20 @@ pipeline:
 output:
   switch:
     - check:
-        condition: '\"Hellow World\" > `5`'
+        condition: '\"Hello World\" > `5`'
         output:
           validate: 
-            expected: 5
-            prefix: echo
+            expected: []
     - validate:
-        expected: 5
-        prefix: 'python'";
+        expected: 
+          - '{\"Hello World\": 4, \"Python\": \"rocks\"}'
+          - '{\"Hello World\": 3, \"Python\": \"rocks\"}'
+          - '{\"Hello World\": 2, \"Python\": \"rocks\"}'
+          - '{\"Hello World\": 1, \"Python\": \"rocks\"}'
+          - '{\"Hello World\": 0, \"Python\": \"rocks\"}'";
 
     REGISTER.call_once(|| {
+        mock::register_mock_input().unwrap();
         jsongenerator::register_json_generator().unwrap();
         generator::register_generator().unwrap();
         processor::register_echo().unwrap();
