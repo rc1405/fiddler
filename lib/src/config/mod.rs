@@ -91,6 +91,7 @@ pub struct Item {
 
 #[derive(Debug, Deserialize, Serialize)]
 pub struct Config {
+    pub label: Option<String>,
     pub input: Item,
     pub pipeline: Pipeline,
     pub output: Item,
@@ -130,11 +131,13 @@ impl Config {
             label: self.pipeline.label.clone(),
             processors,
         };
-
+        
+        let label = self.label.clone();
         debug!("configuration is valid");
 
         Ok(ParsedConfig{
             _config: self,
+            label,
             input,
             pipeline: parsed_pipeline,
             output,
@@ -144,6 +147,7 @@ impl Config {
 
 pub struct ParsedConfig {
     _config: Config,
+    pub label: Option<String>,
     pub input: ParsedRegisteredItem,
     pub pipeline: ParsedPipeline,
     pub output: ParsedRegisteredItem,

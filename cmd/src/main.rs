@@ -11,12 +11,15 @@ use futures::stream::StreamExt;
 use fiddler::Error;
 use fiddler::Environment;
 
+mod test;
+
 #[derive(Parser)]
 #[command(name = "fiddler")]
 #[command(bin_name = "fiddler")]
 enum FiddlerCli {
     Lint(LintArgs),
     Run(RunArgs),
+    Test(RunArgs),
 }
 
 #[derive(Args)]
@@ -82,27 +85,7 @@ async fn main() -> Result<(), Error> {
             process::exit(1);
         },
         FiddlerCli::Run(args) => {
-            let log_level = match args.log_level {
-                LogLevel::DEBUG => Some(LevelFilter::DEBUG),
-                LogLevel::ERROR => Some(LevelFilter::ERROR),
-                LogLevel::INFO => Some(LevelFilter::INFO),
-                LogLevel::TRACE => Some(LevelFilter::TRACE),
-                LogLevel::NONE => None,
-            };
-
-            if let Some(l) = log_level {
-
-                let filter = EnvFilter::builder()
-                    .with_default_directive(LevelFilter::OFF.into())
-                    .from_env().unwrap()
-                    .add_directive(format!("fiddler::env={}", l).parse().unwrap());
-
-                tracing_subscriber::fmt()
-                    .with_env_filter(filter)
-                    .compact()
-                    .json()
-                    .init();
-            };
+            setup_subscriber(args.log_level);
 
             let mut environments = Vec::new();
             for c in args.config {
@@ -121,5 +104,34 @@ async fn main() -> Result<(), Error> {
             };
             process::exit(0)
         },
+        FiddlerCli::Test(args) => {
+            setup_subscriber(args.log_level);
+            test::handle_tests(args.config).await?;
+            Ok(())
+        },
     }
+}
+
+fn setup_subscriber(arg_log_level: LogLevel) {
+    let log_level = match arg_log_level {
+        LogLevel::DEBUG => Some(LevelFilter::DEBUG),
+        LogLevel::ERROR => Some(LevelFilter::ERROR),
+        LogLevel::INFO => Some(LevelFilter::INFO),
+        LogLevel::TRACE => Some(LevelFilter::TRACE),
+        LogLevel::NONE => None,
+    };
+
+    if let Some(l) = log_level {
+
+        let filter = EnvFilter::builder()
+            .with_default_directive(LevelFilter::OFF.into())
+            .from_env().unwrap()
+            .add_directive(format!("fiddler::env={}", l).parse().unwrap());
+
+        tracing_subscriber::fmt()
+            .with_env_filter(filter)
+            .compact()
+            .json()
+            .init();
+    };
 }

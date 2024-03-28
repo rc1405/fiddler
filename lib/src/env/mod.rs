@@ -6,6 +6,7 @@ use futures::stream::StreamExt;
 use futures::future::FutureExt;
 use tokio::task::yield_now;
 use tracing::{debug, error, info, trace};
+use serde_yaml::Value;
 
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
@@ -13,7 +14,8 @@ use std::sync::Once;
 
 use super::Error;
 use super::Message;
-use crate::config::{ParsedConfig, Config, ParsedRegisteredItem, ParsedPipeline};
+use crate::config::parse_configuration_item;
+use crate::config::{ParsedConfig, Config, ParsedRegisteredItem, ParsedPipeline, ItemType};
 use crate::config::ExecutionType;
 use super::Callback;
 
@@ -60,6 +62,27 @@ impl Environment {
         Ok(Environment{
             config: parsed_conf,
         })
+    }
+
+    pub fn set_label(&mut self, label: Option<String>) -> Result<(), Error> {
+        self.config.label = label;
+        Ok(())
+    }
+
+    pub fn get_label(&self) -> Option<String> {
+        self.config.label.clone()
+    }
+
+    pub fn set_input(&mut self, input: &HashMap<String, Value>) -> Result<(), Error> {
+        let parsed_item = parse_configuration_item(ItemType::Input, input)?;
+        self.config.input = parsed_item;
+        Ok(())
+    }
+
+    pub fn set_output(&mut self, output: &HashMap<String, Value>) -> Result<(), Error> {
+        let parsed_item = parse_configuration_item(ItemType::Output, output)?;
+        self.config.output = parsed_item;
+        Ok(())
     }
 
     pub async fn run(self: &Self) -> Result<(), Error> {
