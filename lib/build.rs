@@ -24,6 +24,11 @@ fn main() {
     input_file.write_all("pub mod outputs;\n".as_bytes()).unwrap();
     input_file.write_all("pub mod processors;\n".as_bytes()).unwrap();
     input_file.flush().unwrap();
+
+    // check for certain dependencies
+    if env::var("CARGO_FEATURE_PYTHON").is_ok() {
+        find_python_pkg()
+    }
 }
 
 fn generate_mod_rs(out_dir: PathBuf, input_directories: ReadDir) {
@@ -60,6 +65,7 @@ fn generate_mod_rs(out_dir: PathBuf, input_directories: ReadDir) {
 fn contains_registration_function(module: PathBuf) -> bool {
     let listing = fs::read_dir(module.clone()).unwrap();
     let re = Regex::new(r"#\[fiddler_registration_func\]|fn fiddler_register_plugin\(\)").unwrap();
+    let feature_re = Regex::new(r#"#\[cfg_attr\(feature = "(\w+)", fiddler_registration_func\)\]"#).unwrap();
 
     for i in listing {
         let path = i.unwrap();
@@ -72,10 +78,53 @@ fn contains_registration_function(module: PathBuf) -> bool {
         let contents = fs::read_to_string(path.path()).unwrap();
         if re.is_match(&contents) {
             return true
+        } else if feature_re.is_match(&contents) {
+            let captures = feature_re.captures(&contents).unwrap();
+            let feature = captures.extract::<1>().1[0];
+            if env::var(format!("CARGO_FEATURE_{}", feature.to_uppercase().replace("-", "_"))).is_ok() {
+                return true
+            } else {
+                println!("cargo:warning=Skipping {} due to feature not being enabled.", module.clone().to_str().unwrap())    
+            }
         } else {
             println!("cargo:warning=Skipping {} due to no presence of fiddler registration function.", module.clone().to_str().unwrap())
         };
     }
 
     false
+}
+
+
+fn find_python_pkg() {
+    match pkg_config::Config::new().atleast_version("3.7.0").probe("python3") {
+        Ok(_lib) => {},
+        Err(e) => {
+            panic!(
+                "
+Failed to run pkg-config:
+{:?}
+
+You can try fixing this by installing pkg-config:
+
+    # On Ubuntu
+    sudo apt install pkg-config
+    # On Arch Linux
+    sudo pacman -S pkgconf
+    # On Fedora
+    sudo dnf install pkgconf-pkg-config
+
+Installing Python:
+    # On Ubuntu
+    sudo apt install python3
+    # On Arch Linux
+    sudo pacman -S python3
+    # On Fedora
+    sudo dnf install python3
+    # On Windows
+    https://www.python.org/downloads/
+",
+                e
+            );
+        }
+    }
 }

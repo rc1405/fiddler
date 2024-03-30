@@ -23,7 +23,7 @@ use crate::modules::inputs;
 use crate::modules::outputs;
 use crate::modules::processors;
 
-use crossbeam_channel::unbounded;
+use crossbeam_channel::bounded;
 use crossbeam_channel::{Sender, Receiver};
 
 static REGISTER: Once = Once::new();
@@ -86,8 +86,8 @@ impl Environment {
     }
 
     pub async fn run(self: &Self) -> Result<(), Error> {
-        let (input_tx, input_rx) = unbounded();
-        let (processor_tx, processor_rx) = unbounded();
+        let (input_tx, input_rx) = bounded(self.config.pipeline.max_in_flight.clone());
+        let (processor_tx, processor_rx) = bounded(1);
         let input = self.input(&self.config.input, input_tx);
         let processors = self.pipeline(&self.config.pipeline, input_rx, processor_tx);
         let output = self.output(&self.config.output, processor_rx);
@@ -103,6 +103,13 @@ impl Environment {
         Ok(())
     }
 
+    async fn yield_sender(&self, chan: &Sender<InternalMessage>, msg: InternalMessage) -> Result<(), Error> {
+        while chan.is_full() {
+            yield_now().await
+        };
+
+        chan.send(msg).map_err(|e| Error::UnableToSendToChannel(format!("{}", e)))
+    }
 
     async fn input(&self, input: &ParsedRegisteredItem, output: Sender<InternalMessage>) -> Result<(), Error> {
         trace!("started input");
@@ -131,7 +138,8 @@ impl Environment {
                                 closure: closer,
                                 active_count: Arc::new(Mutex::new(1)),
                             };
-                            output.send(internal_msg).map_err(|e| Error::UnableToSendToChannel(format!("{}", e)))?;
+
+                            self.yield_sender(&output, internal_msg).await?;
                             future = i.read().fuse();
                         },
                         Err(e) => {
@@ -161,7 +169,7 @@ impl Environment {
         trace!("starting pipeline");
         let mut channels: HashMap<usize, InternalChannel> = HashMap::new();
         for n in 0..pipeline.processors.len() {
-            let (tx, rx) = unbounded();
+            let (tx, rx) = bounded(pipeline.processors.len());
             channels.insert(n, InternalChannel{
                 tx,
                 rx,
@@ -250,8 +258,8 @@ impl Environment {
                                     },
                                     Err(_) => return Err(Error::UnableToSecureLock),
                                 };
-        
-                                output.send(new_msg).map_err(|e| Error::UnableToSendToChannel(format!("{}", e)))?;
+
+                                self.yield_sender(&output, new_msg).await?;
                                 
                             };
                         },
@@ -259,7 +267,8 @@ impl Environment {
                             match e {
                                 Error::ConditionalCheckfailed => {
                                     debug!("conditional check failed for processor");
-                                    output.send(msg).map_err(|e| Error::UnableToSendToChannel(format!("{}", e)))?;                                    
+
+                                    self.yield_sender(&output, msg).await?;                                  
                                 },
                                 _ => {
                                     error!(error = format!("{}", e), "read error from processor");
@@ -345,7 +354,9 @@ impl Environment {
     async fn channel_forward(&self, input: Receiver<InternalMessage>, output: Sender<InternalMessage>) -> Result<(), Error> {
         loop {
             match input.try_recv() {
-                Ok(msg) => output.send(msg).map_err(|e| Error::UnableToSendToChannel(format!("{}", e)))?,
+                Ok(msg) => {
+                    self.yield_sender(&output, msg).await?;
+                },
                 Err(e) => {
                     match e {
                         TryRecvError::Disconnected => {

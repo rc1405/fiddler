@@ -72,11 +72,13 @@ pub struct ParsedRegisteredItem {
 
 #[derive(Debug, Deserialize, Serialize)]
 pub struct Pipeline {
+    pub max_in_flight: Option<usize>,
     pub label: Option<String>,
     pub processors: Vec<Item>,
 }
 
 pub struct ParsedPipeline {
+    pub max_in_flight: usize,
     pub label: Option<String>,
     pub processors: Vec<ParsedRegisteredItem>,
 }
@@ -127,8 +129,14 @@ impl Config {
             processors.push(proc);
         };
 
+        let max_in_flight = match self.pipeline.max_in_flight {
+            Some(i) => i,
+            None => 1,
+        };
+
         let parsed_pipeline = ParsedPipeline{
             label: self.pipeline.label.clone(),
+            max_in_flight,
             processors,
         };
         

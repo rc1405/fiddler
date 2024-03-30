@@ -20,6 +20,7 @@ struct AssertSpec {
 pub struct Assert {
     expected: Vec<String>,
     count: Mutex<RefCell<usize>>,
+    errors: Mutex<RefCell<Vec<String>>>,
 }
 
 #[async_trait]
@@ -30,19 +31,29 @@ impl Output for Assert {
         match self.count.lock() {
             Ok(c) => {
                 let mut count = c.borrow_mut();
-                if *count > self.expected.len() - 1 {
-                    return Err(Error::ExecutionError("Received an extra event".into()))
-                };
-                if self.expected[*count] != msg_str {
-                    return Err(Error::ExecutionError(format!("Received unexpected message.  \n    Expected: {} \n    Actual:   {}", self.expected[*count], msg_str).into()))
-                };
+                match self.errors.lock() {
+                    Ok(err) => {
+                        let mut errors = err.borrow_mut();
 
-                *count+=1;
+                        if *count > self.expected.len() - 1 {
+                            errors.push(format!("Received unexpected message: {}", msg_str));
+                            *count+=1;
+                            return Ok(())
+                        };
 
-                return Ok(())
+                        if self.expected[*count] != msg_str {
+                            errors.push(format!("Received unexpected message.  \n  Expected: {} \n  Actual:   {}", self.expected[*count], msg_str).into());
+                        };
+
+                        *count+=1;
+                       
+                        return Ok(())
+                    },
+                    Err(_) => return Err(Error::ExecutionError(format!("Unable to get inner lock"))),                  
+                };              
 
             },
-            Err(_) => return Err(Error::ExecutionError(format!("Unable to get inner lock")))
+            Err(_) => return Err(Error::ExecutionError(format!("Unable to get inner lock"))),
         }  
     }
 }
@@ -50,9 +61,17 @@ impl Output for Assert {
 impl Closer for Assert {
     fn close(self: &Self) -> Result<(), Error> {
         let c = *self.count.lock().unwrap().borrow_mut();
+        let errors = self.errors.lock().unwrap();
+        let mut err = errors.borrow_mut();
+
         if c != self.expected.len() {
-            panic!("received {} calls: expected {}", c, self.expected.len());
+            err.push(format!("Received {} calls: expected {}", c, self.expected.len()));
         };
+
+        if err.len() > 0 {
+            return Err(Error::ExecutionError(err.join("\n")))
+        };
+
         Ok(())
     }
 }
@@ -68,6 +87,7 @@ fn create_assert(conf: &Value) -> Result<ExecutionType, Error> {
     return Ok(ExecutionType::Output(Box::new(Assert{
         expected: g.expected.clone(),
         count: Mutex::new(RefCell::new(0)),
+        errors: Mutex::new(RefCell::new(Vec::new())),
     })))
 }
 

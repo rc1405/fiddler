@@ -1,0 +1,6 @@
+- name: extra_event
+  inputs:
+    - Hello World
+    - Hello World
+  expected_outputs: 
+    - Hello World

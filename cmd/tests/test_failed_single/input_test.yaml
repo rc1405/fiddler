@@ -1,0 +1,5 @@
+- name: failing_test
+  inputs:
+    - Hello World
+  expected_outputs: 
+    - Hello Worlds

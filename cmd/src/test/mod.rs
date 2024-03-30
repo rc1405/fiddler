@@ -3,7 +3,8 @@ use futures::stream::StreamExt;
 use serde::Deserialize;
 use serde::Serialize;
 use serde_yaml::Value;
-use inline_colorization::{color_red, color_green, color_reset};
+use prettytable::{row, Table, format};
+use std::process;
 
 use std::collections::HashMap;
 use std::fs;
@@ -87,17 +88,23 @@ pub async fn handle_tests(configs: Vec<String>) -> Result<(), Error> {
     let future_to_await = new_futures.collect::<Vec<Result<(), Error>>>();
     futures::pin_mut!(future_to_await);
     let results = future_to_await.await;
+    let mut table = Table::new();
+    table.set_format(*format::consts::FORMAT_CLEAN);
+    let mut failures = 0;
     for (i, r) in results.iter().enumerate() {
         let label = proc_maps.get(&i).expect("Unable to track test");
         match r {
             Ok(_) => {
-                println!("{color_green}{label} passed{color_reset}");
+                table.add_row(row![label, bFg->"passed"]);
             },
             Err(e) => {
-                println!("{color_red}{label} failed{color_reset}\n  {e}");
+                failures += 1;
+                table.add_row(row![label, bFr->format!("{}", e).replace("ExecutionError: ", "failed\n")]);
             },
-        }
+        };
+        table.add_empty_row();
     };
-    
-    Ok(())
+
+    table.printstd();
+    process::exit(failures);
 }

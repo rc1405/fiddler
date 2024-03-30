@@ -8,3 +8,15 @@
     - Hello World
   expected_outputs: 
     - Hello Worlds
+- name: extra_event
+  inputs:
+    - Hello World
+    - Hello World
+  expected_outputs: 
+    - Hello World
+- name: missing_event
+  inputs:
+    - Hello World
+  expected_outputs: 
+    - Hello World
+    - Hello World

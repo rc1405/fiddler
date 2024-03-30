@@ -88,7 +88,7 @@ fn create_python(conf: &Value) -> Result<ExecutionType, Error> {
     return Ok(ExecutionType::Processor(Box::new(p)))
 }
 
-#[fiddler_registration_func]
+#[cfg_attr(feature = "python", fiddler_registration_func)]
 pub fn register_python() -> Result<(), Error> {
     let config = "type: object
 properties:

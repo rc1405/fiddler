@@ -1,0 +1,5 @@
+- name: input_test
+  inputs:
+    - Hello World
+  expected_outputs: 
+    - Hello World

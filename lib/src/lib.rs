@@ -76,6 +76,10 @@ pub enum Error {
     #[error("ProcessorFailure: {0}")]
     ProcessingError(String),
     #[error("ConditionalCheckfailed")]
-    ConditionalCheckfailed
+    ConditionalCheckfailed,
+    #[error("NotConnected")]
+    NotConnected,
+    #[error("InputError: {0}")]
+    InputError(String)
 }
 

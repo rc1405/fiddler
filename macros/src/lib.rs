@@ -13,4 +13,3 @@ pub fn fiddler_registration_func(_attr: TokenStream, input: TokenStream)  -> Tok
     };
     TokenStream::from(expanded)
 }
-
