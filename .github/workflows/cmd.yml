@@ -1,0 +1,88 @@
+permissions:
+  contents: read
+on:
+  push:
+    branches: [main]
+  pull_request:
+concurrency:
+  group: ${{ github.workflow }}-${{ github.head_ref || github.run_id }}
+  cancel-in-progress: true
+name: cli-tests
+jobs:
+  required:
+    runs-on: ubuntu-latest
+    name: ubuntu / ${{ matrix.toolchain }}
+    strategy:
+      matrix:
+        toolchain: [stable]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: true
+      - name: Install ${{ matrix.toolchain }}
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: ${{ matrix.toolchain }}
+      - name: cargo build --release --features all 
+        run: cargo build --release --features all
+      - name: run cli tests
+        working-directory: ./cmd/
+        shell: /usr/bin/bash {0}
+        run: |
+          lint_failures=`ls -1 tests|grep lint|grep failed`
+          for i in $lint_failures
+          do 
+              if [ `echo $i|grep lint|wc -l` -gt 0 ]
+              then 
+                  ../target/release/fiddler-cli lint -c tests/$i/input.yaml > /dev/null 
+                  if [ "$?" -eq 0 ]
+                  then
+                      echo lint $i succeeded when it should have failed
+                      exit 1
+                  fi
+              fi
+          done
+
+          lint_successes=`ls -1 tests|grep lint|grep success`
+          for i in $lint_successes
+          do 
+              if [ `echo $i|grep lint|wc -l` -gt 0 ]
+              then 
+                  ../target/release/fiddler-cli lint -c tests/$i/input.yaml > /dev/null
+                  if [ "$?" -ne 0 ]
+                  then
+                      echo lint $i failed
+                      exit 1
+                  fi
+              fi
+          done
+
+          test_failures=`ls -1 tests|grep test|grep failed`
+          for i in $test_failures
+          do 
+              if [ `echo $i|grep lint|wc -l` -gt 0 ]
+              then 
+                  ../target/release/fiddler-cli test -c tests/$i/input.yaml > /dev/null
+                  if [ "$?" -eq 0 ]
+                  then
+                      echo test $i succeeded when it should have failed
+                      exit 1
+                  fi
+              fi
+          done
+
+          test_successes=`ls -1 tests|grep test|grep success`
+          for i in $test_successes
+          do 
+              if [ `echo $i|grep lint|wc -l` -gt 0 ]
+              then 
+                  ../target/release/fiddler-cli test -c tests/$i/input.yaml > /dev/null
+                  if [ "$?" -ne 0 ]
+                  then
+                      echo test $i failed
+                      exit 1
+                  fi
+              fi
+          done
+
+          echo success          

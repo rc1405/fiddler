@@ -1,0 +1,37 @@
+[package]
+name = "fiddler"
+version = "0.1.0"
+edition = "2021"
+
+[package.metadata]
+msrv = "1.74.1"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+[features]
+default = []
+python = ["dep:pyo3"]
+all = ["python"]
+
+[dependencies]
+async-std = { version = "1.12.0", features = ["std"] }
+async-trait = "0.1.78"
+crossbeam-channel = "0.5.12"
+fiddler-macros = { version = "0.1.0", path = "../macros" }
+futures = "0.3.30"
+jmespath = "0.3.0"
+jsonschema = "0.17.1"
+lazy_static = "1.4.0"
+once_cell = "1.19.0"
+pyo3 = { version = "0.20.3", features = ["serde", "auto-initialize"], optional = true }
+serde = { version = "1.0.197", features = ["derive"] }
+serde_json = "1.0.114"
+serde_yaml = "0.9.32"
+thiserror = "1.0.58"
+tokio = { version = "1.36.0", features = ["full"] }
+tracing = "0.1.40"
+
+[build-dependencies]
+fs_extra = "1.3.0"
+regex = "1.10.3"
+pkg-config = "0.3.30"
+

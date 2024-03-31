@@ -1,0 +1,2 @@
+### Reporting a Vulnerability
+If you have found or suspect to have found a vulnerability in fiddler the please report it to security@fiddler-rs.dev.  Please not that we do not have a bug bounty program but appreciate any contributions that will help make this project safer.
