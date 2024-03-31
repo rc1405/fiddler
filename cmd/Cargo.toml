@@ -1,10 +1,11 @@
 [package]
 name = "fiddler-cli"
-version = "0.1.0"
+version = "0.1.1"
 edition = "2021"
 exclude = ["tests"]
 license-file = "../LICENSE"
 description = "Data Stream processor CLI written in rust"
+readme = "../README.md"
 
 [package.metadata]
 msrv = "1.74.1"

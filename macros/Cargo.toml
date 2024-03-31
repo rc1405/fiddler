@@ -1,6 +1,6 @@
 [package]
 name = "fiddler-macros"
-version = "0.1.0"
+version = "0.1.1"
 edition = "2021"
 license-file = "../LICENSE"
 description = "Macros for internal use of registering plugins in fiddler"
