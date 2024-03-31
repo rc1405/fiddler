@@ -18,9 +18,10 @@ Such as:
 
 ```
 input:
-    max_in_flight: 10
     stdin: {}
-processors:
+pipeline:
+  max_in_flight: 10
+  processors:
     - python: 
         string: true
         code: |
