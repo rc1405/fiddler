@@ -2,6 +2,8 @@
 name = "fiddler"
 version = "0.1.0"
 edition = "2021"
+license-file = "../LICENSE"
+description = "Data Stream processor written in rust"
 
 [package.metadata]
 msrv = "1.74.1"
