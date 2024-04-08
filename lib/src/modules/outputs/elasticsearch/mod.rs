@@ -86,21 +86,22 @@ impl Output for Elastic {
             .map_err(|e| Error::OutputError(format!("{}", e)))?;
 
         match json["errors"].as_bool() {
-            Some(e) => {
+            Some(_e) => {
                 match json["items"].as_array() {
                     Some(arr) => {
-                        let failed = arr.iter()
+                        let failed: Vec<String> = arr.iter()
                             .filter(|v| !v["error"].is_null())
+                            .map(|v| format!("{}", v["error"]))
                             .collect();
 
                         if failed.len() > 0 {
-                            return Error::OutputError("failed to insert record: {}", failed.join(","))
+                            return Err(Error::OutputError(format!("failed to insert record: {}", failed.join(","))))
                         }
                     },
-                    None => return Error::OutputError("unable to deteremine result".into()),
+                    None => return Err(Error::OutputError("unable to deteremine result".into())),
                 }
             },
-            None => return Error::OutputError("unable to deteremine result".into()),
+            None => return Err(Error::OutputError("unable to deteremine result".into())),
         }
 
         Ok(())
