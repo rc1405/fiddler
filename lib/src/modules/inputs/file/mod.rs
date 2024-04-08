@@ -43,7 +43,6 @@ impl Input for FileReader {
     async fn read(&self) -> Result<(Message, Callback), Error> {
         match self.lines.lock() {
             Ok(l) => {
-                // let swap = RefCell::new(None);
                 let mut lines = l.replace(None);
                 match lines {
                     Some(ref mut  f) => {

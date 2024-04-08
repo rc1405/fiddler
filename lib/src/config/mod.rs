@@ -1,7 +1,9 @@
 use std::collections::HashMap;
+use std::env;
 use std::fmt;
 use std::sync::Mutex;
 
+use handlebars::Handlebars;
 use jsonschema::{Draft, JSONSchema};
 use once_cell::sync::Lazy;
 use serde::{Deserialize, Serialize};
@@ -18,6 +20,7 @@ pub use validate::parse_configuration_item;
 
 type Callback = fn(&Value) -> Result<ExecutionType, Error>;
 
+/// Plugin Configuration Type
 #[derive(PartialEq, Eq, Hash)]
 pub enum ItemType {
     Input,
@@ -40,6 +43,7 @@ impl fmt::Display for ItemType {
     }
 }
 
+/// Enum for holding the implementation of the plugin trait to be called during processing
 pub enum ExecutionType {
     Input(Box<dyn Input + Send + Sync>),
     InputBatch(Box<dyn InputBatch + Send + Sync>),
@@ -58,17 +62,20 @@ static ENV: Lazy<Mutex<HashMap<ItemType, HashMap<String, RegisteredItem>>>> = La
     Mutex::new(m)
 });
 
+/// Parsed and validated configuration item
 #[derive(Clone)]
 pub struct RegisteredItem {
     pub creator: Callback,
     pub format: ConfigSpec,
 }
 
+/// Execution placeholder of the plugin to be used during processing
 pub struct ParsedRegisteredItem {
     pub item_type: ItemType,
     pub execution_type: ExecutionType,
 }
 
+/// Unparsed configuration pipeline prior to validation
 #[derive(Debug, Deserialize, Serialize)]
 pub struct Pipeline {
     pub max_in_flight: Option<usize>,
@@ -76,12 +83,14 @@ pub struct Pipeline {
     pub processors: Vec<Item>,
 }
 
+/// Parsed and validated pipeline to be used during processing
 pub struct ParsedPipeline {
     pub max_in_flight: usize,
     pub label: Option<String>,
     pub processors: Vec<ParsedRegisteredItem>,
 }
 
+/// Unparsed configuration item used prior to validation
 #[derive(Debug, Deserialize, Serialize)]
 pub struct Item {
     pub label: Option<String>,
@@ -90,6 +99,7 @@ pub struct Item {
     pub extra: HashMap<String, Value>,
 }
 
+/// Unparsed fiddler configuration
 #[derive(Debug, Deserialize, Serialize)]
 pub struct Config {
     pub label: Option<String>,
@@ -99,52 +109,86 @@ pub struct Config {
 }
 
 impl Config {
+    /// Validates the configuration object has valid and registered inputs, outputs, and processors.
+    /// Note: Plugins must be registered with the environment prior to calling validate.  This is
+    /// automatically done when using Environment
+    /// ```
+    /// # use fiddler::config::Config;
+    /// # use serde_yaml;
+    /// # use fiddler::modules::{inputs, outputs, processors};
+    /// # inputs::register_plugins().unwrap();
+    /// # outputs::register_plugins().unwrap();
+    /// # processors::register_plugins().unwrap();
+    /// let conf_str = r#"input:
+    ///   stdin: {}
+    /// pipeline:
+    ///   processors:
+    ///     - noop: {}
+    /// output:
+    ///   stdout: {}"#;
+    ///
+    /// let config: Config = serde_yaml::from_str(&conf_str).unwrap();
+    /// config.validate().unwrap();
+    /// ```
     pub fn validate(self) -> Result<ParsedConfig, Error> {
-        if self.input.extra.len() > 1 {
+        let mut environment_variables: HashMap<String, String> = HashMap::new();
+        for (key, value) in env::vars() {
+            let _ = environment_variables.insert(key, value);
+        }
+
+        let handle_bars = Handlebars::new();
+        let raw_config = serde_yaml::to_string(&self)?;
+        let populated_config = handle_bars
+            .render_template(&raw_config, &environment_variables)
+            .map_err(|e| Error::ConfigFailedValidation(format!("{}", e)))?;
+
+        let new_config: Config = serde_yaml::from_str(&populated_config)?;
+
+        if new_config.input.extra.len() > 1 {
             error!("input must only contain one entry");
             return Err(Error::Validation(
                 "input must only contain one entry".into(),
             ));
         };
 
-        if self.output.extra.len() > 1 {
+        if new_config.output.extra.len() > 1 {
             error!("output must only contain one entry");
             return Err(Error::Validation(
                 "output must only contain one entry".into(),
             ));
         };
 
-        if self.pipeline.processors.is_empty() {
+        if new_config.pipeline.processors.is_empty() {
             error!("pipeline must contain at least one processor");
             return Err(Error::Validation(
                 "pipeline must contain at least one processor".into(),
             ));
         };
 
-        let input = parse_configuration_item(ItemType::Input, &self.input.extra)?;
+        let input = parse_configuration_item(ItemType::Input, &new_config.input.extra)?;
 
-        let output = parse_configuration_item(ItemType::Output, &self.output.extra)?;
+        let output = parse_configuration_item(ItemType::Output, &new_config.output.extra)?;
 
         let mut processors = Vec::new();
 
-        for p in &self.pipeline.processors {
+        for p in &new_config.pipeline.processors {
             let proc = parse_configuration_item(ItemType::Processor, &p.extra)?;
             processors.push(proc);
         }
 
-        let max_in_flight = self.pipeline.max_in_flight.unwrap_or(1);
+        let max_in_flight = new_config.pipeline.max_in_flight.unwrap_or(1);
 
         let parsed_pipeline = ParsedPipeline {
-            label: self.pipeline.label.clone(),
+            label: new_config.pipeline.label.clone(),
             max_in_flight,
             processors,
         };
 
-        let label = self.label.clone();
+        let label = new_config.label.clone();
         debug!("configuration is valid");
 
         Ok(ParsedConfig {
-            _config: self,
+            _config: new_config,
             label,
             input,
             pipeline: parsed_pipeline,
@@ -153,6 +197,7 @@ impl Config {
     }
 }
 
+/// Parsed and validated fiddler configuration
 pub struct ParsedConfig {
     _config: Config,
     pub label: Option<String>,
@@ -161,6 +206,7 @@ pub struct ParsedConfig {
     pub output: ParsedRegisteredItem,
 }
 
+/// Plugin configuration validation snippet
 #[derive(Debug)]
 pub struct ConfigSpec {
     raw_schema: String,
@@ -174,6 +220,28 @@ impl Clone for ConfigSpec {
 }
 
 impl ConfigSpec {
+    /// Creates a snippet validation logic from the provided schema.  The schema is
+    /// jsonschema format, in yaml.  Rather than using yamlschema validation directly
+    /// this is converted to json and used with the jsonschema library.
+    /// For the following input format:
+    /// ```yaml
+    /// scanner:
+    ///   lines: true
+    /// ```
+    ///
+    /// The following code would provide the code validation snippet.
+    /// ```
+    /// # use fiddler::config::ConfigSpec;
+    /// # use serde_yaml;
+    /// let conf_str = r#"properties:
+    ///   scanner:
+    ///     type: object
+    ///     properties:
+    ///       lines:
+    ///         type: boolean"#;
+    ///
+    /// let config= ConfigSpec::from_schema(&conf_str).unwrap();
+    /// ```
     pub fn from_schema(conf: &str) -> Result<Self, Error> {
         let v: Value = serde_yaml::from_str(conf)?;
         let intermediate = serde_json::to_string(&v)?;
@@ -192,6 +260,24 @@ impl ConfigSpec {
         })
     }
 
+    /// Validates the configuration str against the validation schema provided to establish the
+    /// ConfigSpec
+    ///
+    /// The following code would provide the code validation snippet.
+    /// ```
+    /// # use fiddler::config::ConfigSpec;
+    /// # use serde_yaml;
+    /// # let schema_str = r#"properties:
+    /// #  scanner:
+    /// #    type: object
+    /// #    properties:
+    /// #      lines:
+    /// #        type: boolean"#;
+    /// # let config = ConfigSpec::from_schema(&schema_str).unwrap();
+    /// let config_str = r#"scanner:
+    ///   lines: true"#;
+    /// config.validate(config_str).unwrap();
+    /// ```
     pub fn validate(&self, content: &str) -> Result<(), Error> {
         let v: Value = serde_yaml::from_str(content)?;
         let intermediate = serde_json::to_string(&v)?;

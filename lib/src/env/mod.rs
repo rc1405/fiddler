@@ -28,12 +28,13 @@ use crossbeam_channel::{Receiver, Sender};
 
 static REGISTER: Once = Once::new();
 
+/// Represents a single data pipeline configuration environment to run
 pub struct Environment {
     config: ParsedConfig,
 }
 
 #[derive(Clone)]
-pub struct InternalMessage {
+struct InternalMessage {
     original: Message,
     message: Message,
     closure: Callback,
@@ -47,6 +48,21 @@ struct InternalChannel {
 }
 
 impl Environment {
+    /// The function takes the raw configuration of the data pipeline and registers built-in
+    /// plugins, validates the configuration and returns the Environment to run.
+    /// ```
+    /// use fiddler::Environment;
+    ///
+    /// let conf_str = r#"input:
+    ///  stdin: {}
+    ///pipeline:
+    ///  processors:
+    ///    - label: my_cool_mapping
+    ///      noop: {}
+    ///output:
+    ///  stdout: {}"#;
+    /// let env = Environment::from_config(conf_str).unwrap();
+    /// ```
     pub fn from_config(config: &str) -> Result<Self, Error> {
         REGISTER.call_once(|| {
             inputs::register_plugins().unwrap();
@@ -64,27 +80,135 @@ impl Environment {
         })
     }
 
+    /// The function sets the data pipeline with a label.
+    /// ```
+    /// # use fiddler::Environment;
+    /// # let conf_str = r#"input:
+    /// #   stdin: {}
+    /// # pipeline:
+    /// #   processors:
+    /// #    - label: my_cool_mapping
+    /// #      noop: {}
+    /// # output:
+    /// #   stdout: {}"#;
+    /// # let mut env = Environment::from_config(conf_str).unwrap();
+    /// env.set_label(Some("MyPipeline".into())).unwrap();
+    /// ```
+    /// or to remove a given label:
+    /// ```
+    /// # use fiddler::Environment;
+    /// # let conf_str = r#"input:
+    /// #  stdin: {}
+    /// # pipeline:
+    /// #   processors:
+    /// #    - label: my_cool_mapping
+    /// #      noop: {}
+    /// # output:
+    /// #   stdout: {}"#;
+    /// # let mut env = Environment::from_config(conf_str).unwrap();
+    /// env.set_label(None).unwrap();
+    /// ```
     pub fn set_label(&mut self, label: Option<String>) -> Result<(), Error> {
         self.config.label = label;
         Ok(())
     }
 
+    /// The function returns the currect label assigned to the pipeline
+    /// ```
+    /// # use fiddler::Environment;
+    /// # let conf_str = r#"input:
+    /// #   stdin: {}
+    /// # pipeline:
+    /// #   processors:
+    /// #    - label: my_cool_mapping
+    /// #      noop: {}
+    /// # output:
+    /// #   stdout: {}"#;
+    /// # let mut env = Environment::from_config(conf_str).unwrap();
+    /// # env.set_label(Some("MyPipeline".into())).unwrap();
+    /// assert_eq!(env.get_label().unwrap(), "MyPipeline".to_string());
+    /// ```
     pub fn get_label(&self) -> Option<String> {
         self.config.label.clone()
     }
 
+    /// The function replaces the existing input configuration with the provided input.
+    /// ```
+    /// # use fiddler::config::{ConfigSpec, ItemType, ExecutionType};
+    /// # use fiddler::modules::inputs;
+    /// # use std::collections::HashMap;
+    /// # use fiddler::Environment;
+    /// # let conf_str = r#"input:
+    /// #   stdin: {}
+    /// # pipeline:
+    /// #   processors:
+    /// #    - label: my_cool_mapping
+    /// #      noop: {}
+    /// # output:
+    /// #   stdout: {}"#;
+    /// # let mut env = Environment::from_config(conf_str).unwrap();
+    ///
+    /// use serde_yaml::Value;
+    /// let conf_str = r#"file:
+    ///    filename: tests/data/input.txt
+    ///    codec: ToEnd"#;
+    /// let parsed_input: HashMap<String, Value> = serde_yaml::from_str(conf_str).unwrap();
+    ///
+    /// env.set_input(&parsed_input).unwrap()
+    /// ```
     pub fn set_input(&mut self, input: &HashMap<String, Value>) -> Result<(), Error> {
         let parsed_item = parse_configuration_item(ItemType::Input, input)?;
         self.config.input = parsed_item;
         Ok(())
     }
 
+    /// The function replaces the existing output configuration with the provided output.
+    /// ```
+    /// # use fiddler::config::{ConfigSpec, ItemType, ExecutionType};
+    /// # use fiddler::modules::inputs;
+    /// # use std::collections::HashMap;
+    /// # use fiddler::Environment;
+    /// # let conf_str = r#"input:
+    /// #   stdin: {}
+    /// # pipeline:
+    /// #   processors:
+    /// #    - label: my_cool_mapping
+    /// #      noop: {}
+    /// # output:
+    /// #   stdout: {}"#;
+    /// # let mut env = Environment::from_config(conf_str).unwrap();
+    ///
+    /// use serde_yaml::Value;
+    /// let conf_str = r#"stdout: {}"#;
+    /// let parsed_output: HashMap<String, Value> = serde_yaml::from_str(conf_str).unwrap();
+    ///
+    /// env.set_output(&parsed_output).unwrap()
+    /// ```
     pub fn set_output(&mut self, output: &HashMap<String, Value>) -> Result<(), Error> {
         let parsed_item = parse_configuration_item(ItemType::Output, output)?;
         self.config.output = parsed_item;
         Ok(())
     }
 
+    /// The function runs the existing data pipeline until receiving an Error::EndOfInput
+    /// ```no_run
+    /// # use fiddler::config::{ConfigSpec, ItemType, ExecutionType};
+    /// # use fiddler::modules::inputs;
+    /// # use std::collections::HashMap;
+    /// # use fiddler::Environment;
+    /// # let conf_str = r#"input:
+    /// #   stdin: {}
+    /// # pipeline:
+    /// #   processors:
+    /// #    - label: my_cool_mapping
+    /// #      noop: {}
+    /// # output:
+    /// #   stdout: {}"#;
+    /// # let mut env = Environment::from_config(conf_str).unwrap();
+    /// # tokio_test::block_on(async {
+    /// env.run().await.unwrap();
+    /// # })
+    /// ```
     pub async fn run(&self) -> Result<(), Error> {
         let (input_tx, input_rx) = bounded(self.config.pipeline.max_in_flight);
         let (processor_tx, processor_rx) = bounded(1);
