@@ -58,6 +58,10 @@ jobs:
       #   if: runner.os == 'Windows'
       # - run: vcpkg install openssl:x64-windows-static-md
       #   if: runner.os == 'Windows'
+      - run: brew install docker
+        if: runner.os != 'Windows'
+      - run: colima start
+        if: runner.os != 'Windows'
       - uses: actions/checkout@v4
         with:
           submodules: true
