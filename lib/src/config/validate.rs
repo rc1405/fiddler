@@ -3,6 +3,24 @@ use crate::Error;
 use serde_yaml::Value;
 use std::collections::HashMap;
 
+/// The function takes the raw hashmap configuration item and looks up the registered
+/// plugin and returns the ParsedRegisteredItem with the execution logic for used during
+/// processing.
+/// ```
+/// # use fiddler::config::{ConfigSpec, ItemType, ExecutionType};
+/// # use fiddler::modules::inputs;
+/// # inputs::register_plugins().unwrap();
+/// # use std::collections::HashMap;
+/// use fiddler::config::parse_configuration_item;
+///
+/// use serde_yaml::Value;
+/// let conf_str = r#"file:
+///    filename: tests/data/input.txt
+///    codec: ToEnd"#;
+/// let parsed_config: HashMap<String, Value> = serde_yaml::from_str(conf_str).unwrap();
+///
+/// parse_configuration_item(ItemType::Input, &parsed_config).unwrap();
+/// ```
 pub fn parse_configuration_item(
     itype: ItemType,
     map: &HashMap<String, Value>,

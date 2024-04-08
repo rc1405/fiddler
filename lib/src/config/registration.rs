@@ -2,6 +2,21 @@ use super::{Callback, ConfigSpec, ItemType, RegisteredItem, ENV};
 use crate::Error;
 use tracing::{debug, error};
 
+/// Validates the configuration object has valid and registered inputs, outputs, and processors.
+/// Note: Plugins must be registered with the environment prior to calling validate.  This is
+/// automatically done when using Environment
+/// ```
+/// # use fiddler::config::{ConfigSpec, ItemType, ExecutionType};
+/// # use fiddler::modules::processors::noop::NoOp;
+/// use fiddler::config::register_plugin;
+///
+/// let conf_str = r#"type: object"#;
+/// let conf_spec = ConfigSpec::from_schema(conf_str).unwrap();
+///
+/// register_plugin("noop".into(), ItemType::Processor, conf_spec, |v| {
+///     Ok(ExecutionType::Processor(Box::new(NoOp{})))
+/// }).unwrap();
+/// ```
 pub fn register_plugin(
     name: String,
     itype: ItemType,

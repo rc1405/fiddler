@@ -81,6 +81,16 @@ The condition format utilized [jmespath](https://jmespath.org/specification.html
 1. `fiddler lint -c <path_to_config_file> [ -c ... ]`
 
 # Test
+Tests are expected in the format of `<filename>_test.yaml`.  I.e. if you have a configuration `input.yaml`.  The expected filename is `input_test.yaml`.  The test file syntax is as follows:
+```
+- name: name_of_test
+  inputs:
+   - list of expected input strings
+  expected_outputs:
+   - list of expected output strings
+```
+
+Tests can be run as `fiddler-cli test -c <path_to_configuration>.yaml`
 
 # Build
 Build with [Cargo](https://doc.rust-lang.org/cargo/getting-started/installation.html) `cargo build --release --features all`
@@ -185,6 +195,24 @@ output:
             expected: []
 ```
 * `array`: array of outputs, typically used with the `check` output.  
+
+### Elasticsearch
+```
+output:
+  elasticsearch:
+    url: http://example.com:9200
+    username: user
+    password: password
+    cloud_id: some_cloud_id
+    index: example
+```
+* `url`: if not using elasticsearch cloud, specify the url of the es cluster. i.e. http://127.0.0.1:9200
+* `username`: username for authentication
+* `password`: password for authentication
+* `cloud_id`: if using elasticsearch cloud, specify the cloud_id
+* `index`: index to insert events into
+
+**Note:**  Variables can be collected from the environment, so when providing password, you may set it to `password: "{{ ElasticSearchPassword }}"` and ElasticSearchPassword will be pulled from the environment variables and provided to the configuration.
 
 # Contributing
 

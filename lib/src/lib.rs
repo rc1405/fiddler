@@ -1,6 +1,6 @@
 use thiserror::Error;
 pub mod config;
-pub mod env;
+mod env;
 pub mod modules;
 use async_trait::async_trait;
 pub use env::Environment;
@@ -81,4 +81,6 @@ pub enum Error {
     NotConnected,
     #[error("InputError: {0}")]
     InputError(String),
+    #[error("OutputError: {0}")]
+    OutputError(String),
 }
