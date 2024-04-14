@@ -1,5 +1,6 @@
 use std::cell::RefCell;
 use std::sync::Mutex;
+use std::sync::Arc;
 
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
@@ -89,11 +90,11 @@ impl Connect for Assert {
 
 fn create_assert(conf: &Value) -> Result<ExecutionType, Error> {
     let g: AssertSpec = serde_yaml::from_value(conf.clone())?;
-    Ok(ExecutionType::Output(Box::new(Assert {
+    Ok(ExecutionType::Output(Arc::new(Box::new(Assert {
         expected: g.expected.clone(),
         count: Mutex::new(RefCell::new(0)),
         errors: Mutex::new(RefCell::new(Vec::new())),
-    })))
+    }))))
 }
 
 pub fn register_assert() -> Result<(), Error> {

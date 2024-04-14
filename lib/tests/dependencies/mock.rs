@@ -2,7 +2,7 @@ use async_trait::async_trait;
 use fiddler::config::register_plugin;
 use fiddler::config::ItemType;
 use fiddler::config::{ConfigSpec, ExecutionType};
-use fiddler::Callback;
+use fiddler::{CallbackChan, new_callback_chan};
 use fiddler::Message;
 use fiddler::{Closer, Connect, Error, Input};
 use serde::{Deserialize, Serialize};
@@ -21,17 +21,23 @@ pub struct MockInput {
 
 #[async_trait]
 impl Input for MockInput {
-    async fn read(self: &Self) -> Result<(Message, Callback), Error> {
+    async fn read(self: &Self) -> Result<(Message, CallbackChan), Error> {
         match self.input.lock() {
             Ok(c) => {
                 let mut input = c.borrow_mut();
+
+                let (tx, rx) = new_callback_chan();
+                tokio::spawn(async move {
+                    rx.await
+                });
 
                 match input.pop() {
                     Some(i) => Ok((
                         Message {
                             bytes: i.as_bytes().into(),
+                            ..Default::default()
                         },
-                        handle_message,
+                        tx,
                     )),
                     None => Err(Error::EndOfInput),
                 }
@@ -39,10 +45,6 @@ impl Input for MockInput {
             Err(_) => return Err(Error::ExecutionError(format!("Unable to get inner lock"))),
         }
     }
-}
-
-fn handle_message(_msg: Message) -> Result<(), Error> {
-    Ok(())
 }
 
 impl Closer for MockInput {

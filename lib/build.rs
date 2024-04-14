@@ -120,6 +120,7 @@ fn contains_registration_function(module: PathBuf) -> bool {
         if !file_name.ends_with(".rs") {
             continue;
         };
+        println!("cargo:rerun-if-changed={}", path.path().to_str().unwrap());
 
         let contents = fs::read_to_string(path.path()).unwrap();
         if re.is_match(&contents) {

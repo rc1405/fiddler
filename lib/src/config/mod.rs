@@ -2,6 +2,7 @@ use std::collections::HashMap;
 use std::env;
 use std::fmt;
 use std::sync::Mutex;
+use std::sync::Arc;
 
 use handlebars::Handlebars;
 use jsonschema::{Draft, JSONSchema};
@@ -21,7 +22,7 @@ pub use validate::parse_configuration_item;
 type Callback = fn(&Value) -> Result<ExecutionType, Error>;
 
 /// Plugin Configuration Type
-#[derive(PartialEq, Eq, Hash)]
+#[derive(PartialEq, Eq, Hash, Clone)]
 pub enum ItemType {
     Input,
     InputBatch,
@@ -44,12 +45,13 @@ impl fmt::Display for ItemType {
 }
 
 /// Enum for holding the implementation of the plugin trait to be called during processing
+#[derive(Clone)]
 pub enum ExecutionType {
-    Input(Box<dyn Input + Send + Sync>),
-    InputBatch(Box<dyn InputBatch + Send + Sync>),
-    Output(Box<dyn Output + Send + Sync>),
-    OutputBatch(Box<dyn OutputBatch + Send + Sync>),
-    Processor(Box<dyn Processor + Send + Sync>),
+    Input(Arc<Box<dyn Input + Send + Sync>>),
+    InputBatch(Arc<Box<dyn InputBatch + Send + Sync>>),
+    Output(Arc<Box<dyn Output + Send + Sync>>),
+    OutputBatch(Arc<Box<dyn OutputBatch + Send + Sync>>),
+    Processor(Arc<Box<dyn Processor + Send + Sync>>),
 }
 
 static ENV: Lazy<Mutex<HashMap<ItemType, HashMap<String, RegisteredItem>>>> = Lazy::new(|| {
@@ -70,6 +72,7 @@ pub struct RegisteredItem {
 }
 
 /// Execution placeholder of the plugin to be used during processing
+#[derive(Clone)]
 pub struct ParsedRegisteredItem {
     pub item_type: ItemType,
     pub execution_type: ExecutionType,
@@ -84,6 +87,7 @@ pub struct Pipeline {
 }
 
 /// Parsed and validated pipeline to be used during processing
+#[derive(Clone)]
 pub struct ParsedPipeline {
     pub max_in_flight: usize,
     pub label: Option<String>,
@@ -176,7 +180,7 @@ impl Config {
             processors.push(proc);
         }
 
-        let max_in_flight = new_config.pipeline.max_in_flight.unwrap_or(1);
+        let max_in_flight = new_config.pipeline.max_in_flight.unwrap_or(0);
 
         let parsed_pipeline = ParsedPipeline {
             label: new_config.pipeline.label.clone(),
@@ -188,7 +192,6 @@ impl Config {
         debug!("configuration is valid");
 
         Ok(ParsedConfig {
-            _config: new_config,
             label,
             input,
             pipeline: parsed_pipeline,
@@ -198,8 +201,8 @@ impl Config {
 }
 
 /// Parsed and validated fiddler configuration
+#[derive(Clone)]
 pub struct ParsedConfig {
-    _config: Config,
     pub label: Option<String>,
     pub input: ParsedRegisteredItem,
     pub pipeline: ParsedPipeline,

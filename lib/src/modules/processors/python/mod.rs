@@ -10,6 +10,7 @@ use serde_yaml::Value;
 use async_trait::async_trait;
 use fiddler_macros::fiddler_registration_func;
 use serde::{Deserialize, Serialize};
+use std::sync::Arc;
 
 #[derive(Clone, Deserialize, Serialize)]
 pub struct PyProcSpec {
@@ -54,6 +55,7 @@ impl Processor for PyProc {
 
                 Ok(vec![Message{
                     bytes: vec_str.as_bytes().into(),
+                    metadata: message.metadata.clone(),
                 }])
             } else {
                 
@@ -61,6 +63,7 @@ impl Processor for PyProc {
 
                 Ok(vec![Message{
                     bytes: result.as_bytes().to_vec(),
+                    metadata: message.metadata.clone(),
                 }])
             }
             
@@ -85,7 +88,7 @@ fn create_python(conf: &Value) -> Result<ExecutionType, Error> {
         p.use_string = b;
     };
 
-    Ok(ExecutionType::Processor(Box::new(p)))
+    Ok(ExecutionType::Processor(Arc::new(Box::new(p))))
 }
 
 #[cfg_attr(feature = "python", fiddler_registration_func)]

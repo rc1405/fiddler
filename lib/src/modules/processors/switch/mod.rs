@@ -7,11 +7,12 @@ use crate::MessageBatch;
 use serde_yaml::Value;
 use async_trait::async_trait;
 use fiddler_macros::fiddler_registration_func;
+use std::sync::Arc;
 
 mod check;
 
 pub struct Switch {
-    steps: Vec<Box<dyn Processor + Send + Sync>>,
+    steps: Vec<Arc<Box<dyn Processor + Send + Sync>>>,
 }
 
 #[async_trait]
@@ -61,7 +62,7 @@ fn create_switch(conf: &Value) -> Result<ExecutionType, Error> {
         steps,
     };
 
-    Ok(ExecutionType::Processor(Box::new(s)))
+    Ok(ExecutionType::Processor(Arc::new(Box::new(s))))
 }
 
 #[fiddler_registration_func]

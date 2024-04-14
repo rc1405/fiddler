@@ -7,6 +7,7 @@ use serde_yaml::Value;
 use async_trait::async_trait;
 use serde::Deserialize;
 use fiddler_macros::fiddler_registration_func;
+use std::sync::Arc;
 
 use elasticsearch::{
     auth::Credentials, 
@@ -22,6 +23,8 @@ use elasticsearch::{
         Url,
     }
 };
+
+use elasticsearch::cert::CertificateValidation;
 
 #[derive(Deserialize, Default)]
 pub struct Elastic {
@@ -50,6 +53,7 @@ impl Elastic {
             let credentials = Credentials::Basic(username, password);
             let transport = TransportBuilder::new(connection_pool)
                 .auth(credentials)
+                .cert_validation(CertificateValidation::None)
                 .build()
                 .map_err(|e| Error::ConfigFailedValidation(format!("{}", e)))?;
             Ok(Elasticsearch::new(transport))
@@ -133,7 +137,7 @@ fn create_elasticsearch(conf: &Value) -> Result<ExecutionType, Error> {
         return Err(Error::ConfigFailedValidation("cloud_id or url is required".into()))
     }
 
-    Ok(ExecutionType::Output(Box::new(elastic)))
+    Ok(ExecutionType::Output(Arc::new(Box::new(elastic))))
 }
 
 #[cfg_attr(feature = "elasticsearch", fiddler_registration_func)]

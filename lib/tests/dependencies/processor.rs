@@ -16,6 +16,7 @@ impl Processor for Echo {
         let msg_str = String::from_utf8(message.bytes).unwrap();
         Ok(vec![Message {
             bytes: format!("echo: {}", msg_str).as_bytes().into(),
+            ..Default::default()
         }])
     }
 }
