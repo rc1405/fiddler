@@ -14,6 +14,7 @@ async fn end_to_end() {
   generator: 
     count: 5
 pipeline:
+    max_in_flight: 1
     processors:
         - label: my_cool_mapping
           echo: {}
@@ -44,6 +45,7 @@ async fn fiddler_python_test() {
   generator: 
     count: 5
 pipeline:
+    max_in_flight: 1
     processors:
         - label: my_cool_mapping
           python: 
@@ -79,6 +81,7 @@ async fn fiddler_python_string_test() {
   generator: 
     count: 5
 pipeline:
+    max_in_flight: 1
     processors:
         - label: my_cool_mapping
           python: 
@@ -116,6 +119,7 @@ async fn fiddler_switch_check_test() {
   json_generator: 
     count: 5
 pipeline:
+    max_in_flight: 1
     processors:
         - switch:
             - check: 
@@ -156,6 +160,7 @@ async fn fiddler_switch_check_many_procs_test() {
   json_generator: 
     count: 5
 pipeline:
+    max_in_flight: 1
     processors:
         - switch:
             - check: 
@@ -197,6 +202,7 @@ async fn fiddler_switch_output_test() {
   json_generator: 
     count: 5
 pipeline:
+    max_in_flight: 1
     processors:
     - label: my_cool_mapping
       python: 
@@ -241,6 +247,7 @@ async fn fiddler_file_reader_test() {
     filename: tests{MAIN_SEPARATOR_STR}data{MAIN_SEPARATOR_STR}input.txt
     codec: Lines
 pipeline:
+  max_in_flight: 1
   processors:
     - label: my_cool_mapping
       noop: {{}}
@@ -271,6 +278,7 @@ async fn fiddler_file_reader_test_full() {
     filename: tests{MAIN_SEPARATOR_STR}data{MAIN_SEPARATOR_STR}input.txt
     codec: ToEnd
 pipeline:
+  max_in_flight: 1
   processors:
     - label: my_cool_mapping
       lines: {{}}

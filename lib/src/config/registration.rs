@@ -8,13 +8,14 @@ use tracing::{debug, error};
 /// ```
 /// # use fiddler::config::{ConfigSpec, ItemType, ExecutionType};
 /// # use fiddler::modules::processors::noop::NoOp;
+/// # use std::sync::Arc;
 /// use fiddler::config::register_plugin;
 ///
 /// let conf_str = r#"type: object"#;
 /// let conf_spec = ConfigSpec::from_schema(conf_str).unwrap();
 ///
 /// register_plugin("noop".into(), ItemType::Processor, conf_spec, |v| {
-///     Ok(ExecutionType::Processor(Box::new(NoOp{})))
+///     Ok(ExecutionType::Processor(Arc::new(Box::new(NoOp{}))))
 /// }).unwrap();
 /// ```
 pub fn register_plugin(

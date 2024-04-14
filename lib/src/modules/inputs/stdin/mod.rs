@@ -5,15 +5,16 @@ use crate::config::{ConfigSpec, ExecutionType};
 use crate::config::register_plugin;
 use crate::config::ItemType;
 use crate::Message;
-use crate::Callback;
+use crate::{CallbackChan, new_callback_chan};
 use serde_yaml::Value;
 use fiddler_macros::fiddler_registration_func;
+use std::sync::Arc;
 
 pub struct StdIn {}
 
 #[async_trait]
 impl Input for StdIn {
-    async fn read(&self) -> Result<(Message, Callback), Error> {
+    async fn read(&self) -> Result<(Message, CallbackChan), Error> {
         let mut buffer = String::new();
         let stdin = io::stdin();
         stdin.read_line(&mut buffer).await.map_err(|_| Error::EndOfInput)?;
@@ -23,14 +24,15 @@ impl Input for StdIn {
         if buffer == *"exit()" {
             return Err(Error::EndOfInput)
         };
+
+        let (tx, rx) = new_callback_chan();
+        tokio::spawn(rx);
+
         Ok((Message{
             bytes: buffer.into_bytes(),
-        }, handle_message))
+            ..Default::default()
+        }, tx))
     }
-}
-
-fn handle_message(_msg: Message) -> Result<(), Error> {
-    Ok(())
 }
 
 impl Closer for StdIn {
@@ -46,7 +48,7 @@ impl Connect for StdIn {
 }
 
 fn create_stdin(_conf: &Value) -> Result<ExecutionType, Error> {
-    Ok(ExecutionType::Input(Box::new(StdIn{})))
+    Ok(ExecutionType::Input(Arc::new(Box::new(StdIn{}))))
 }
 
 #[fiddler_registration_func]

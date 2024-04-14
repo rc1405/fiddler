@@ -7,6 +7,7 @@ use crate::MessageBatch;
 use serde_yaml::Value;
 use async_trait::async_trait;
 use fiddler_macros::fiddler_registration_func;
+use std::sync::Arc;
 
 #[derive(Clone)]
 pub struct Lines {}
@@ -15,7 +16,7 @@ pub struct Lines {}
 impl Processor for Lines {
     async fn process(&self, message: Message) -> Result<MessageBatch, Error> {
         let content = String::from_utf8(message.bytes).map_err(|e| Error::ProcessingError(format!("{}", e)))?;
-        let output: Vec<Message> = content.split('\n').map(|msg| Message{bytes: msg.as_bytes().into()}).collect();
+        let output: Vec<Message> = content.split('\n').map(|msg| Message{bytes: msg.as_bytes().into(), metadata: message.metadata.clone()}).collect();
         Ok(output)
     }
 }
@@ -27,7 +28,7 @@ impl Closer for Lines {
 }
 
 fn create_lines(_conf: &Value) -> Result<ExecutionType, Error> {
-    Ok(ExecutionType::Processor(Box::new(Lines{})))
+    Ok(ExecutionType::Processor(Arc::new(Box::new(Lines{}))))
 }
 
 #[fiddler_registration_func]

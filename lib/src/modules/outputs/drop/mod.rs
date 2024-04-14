@@ -9,39 +9,37 @@ use fiddler_macros::fiddler_registration_func;
 use std::sync::Arc;
 
 #[derive(Clone)]
-pub struct StdOut {}
+pub struct StdDrop {}
 
 #[async_trait]
-impl Output for StdOut {
-    async fn write(&self, message: Message) -> Result<(), Error> {
-        let msg = String::from_utf8(message.bytes).map_err(|_| Error::EndOfInput)?;
-        println!("{}", msg);
+impl Output for StdDrop {
+    async fn write(&self, _message: Message) -> Result<(), Error> {
         Ok(())
     }
 }
 
-impl Closer for StdOut {
+impl Closer for StdDrop {
     fn close(&self) -> Result<(), Error> {
         Ok(())
     }
 }
 
-impl Connect for StdOut {
+impl Connect for StdDrop {
     fn connect(&self) -> Result<(), Error> {
         Ok(())
     }
 }
 
-fn create_stdout(_conf: &Value) -> Result<ExecutionType, Error> {
-    Ok(ExecutionType::Output(Arc::new(Box::new(StdOut{}))))
+fn create_drop(_conf: &Value) -> Result<ExecutionType, Error> {
+    Ok(ExecutionType::Output(Arc::new(Box::new(StdDrop{}))))
 }
 
 #[fiddler_registration_func]
-pub fn register_stdout() -> Result<(), Error> {
+pub fn register_drop() -> Result<(), Error> {
     let config = "type: object";
     let conf_spec = ConfigSpec::from_schema(config)?;
 
-    register_plugin("stdout".into(), ItemType::Output, conf_spec, create_stdout)
+    register_plugin("drop".into(), ItemType::Output, conf_spec, create_drop)
 }
 
 #[cfg(test)]
@@ -50,6 +48,6 @@ mod test {
 
     #[test]
     fn register_plugin() {
-        register_stdout().unwrap()
+        register_drop().unwrap()
     }
 }

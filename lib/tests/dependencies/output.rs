@@ -1,5 +1,5 @@
 use std::cell::RefCell;
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
@@ -67,10 +67,10 @@ impl Connect for Validate {
 
 fn create_validator(conf: &Value) -> Result<ExecutionType, Error> {
     let g: ValidateSpec = serde_yaml::from_value(conf.clone())?;
-    return Ok(ExecutionType::Output(Box::new(Validate {
+    return Ok(ExecutionType::Output(Arc::new(Box::new(Validate {
         expected: g.expected.clone(),
         count: Mutex::new(RefCell::new(0)),
-    })));
+    }))));
 }
 
 #[fiddler_registration_func]

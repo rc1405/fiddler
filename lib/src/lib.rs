@@ -1,3 +1,7 @@
+use serde_json::Value;
+use std::collections::HashMap;
+use tokio::sync::oneshot;
+
 use thiserror::Error;
 pub mod config;
 mod env;
@@ -7,14 +11,25 @@ pub use env::Environment;
 
 mod macros;
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Default)]
 pub struct Message {
     pub bytes: Vec<u8>,
+    pub metadata: HashMap<String, Value>,
 }
 
 pub type MessageBatch = Vec<Message>;
 
-pub type Callback = fn(Message) -> Result<(), Error>;
+pub type CallbackChan = oneshot::Sender<Status>;
+
+pub fn new_callback_chan() -> (oneshot::Sender<Status>, oneshot::Receiver<Status>) {
+    oneshot::channel()
+}
+
+#[derive(Clone, Debug)]
+pub enum Status {
+    Processed,
+    Errored(Vec<String>),
+}
 
 pub trait Closer {
     fn close(&self) -> Result<(), Error>;
@@ -26,11 +41,11 @@ pub trait Connect {
 
 #[async_trait]
 pub trait Input: Connect + Closer {
-    async fn read(&self) -> Result<(Message, Callback), Error>;
+    async fn read(&self) -> Result<(Message, CallbackChan), Error>;
 }
 
 pub trait InputBatch: Connect + Closer {
-    fn read_batch(&self) -> Result<(MessageBatch, Callback), Error>;
+    fn read_batch(&self) -> Result<(MessageBatch, CallbackChan), Error>;
 }
 
 #[async_trait]
@@ -83,4 +98,6 @@ pub enum Error {
     InputError(String),
     #[error("OutputError: {0}")]
     OutputError(String),
+    #[error("NoInputToReturn")]
+    NoInputToReturn,
 }
