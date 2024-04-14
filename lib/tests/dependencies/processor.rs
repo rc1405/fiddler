@@ -6,6 +6,7 @@ use fiddler::Message;
 use fiddler::MessageBatch;
 use fiddler::{Closer, Error, Processor};
 use serde_yaml::Value;
+use std::sync::Arc;
 
 #[derive(Clone)]
 pub struct Echo {}
@@ -28,7 +29,7 @@ impl Closer for Echo {
 }
 
 fn create_echo(_conf: &Value) -> Result<ExecutionType, Error> {
-    return Ok(ExecutionType::Processor(Box::new(Echo {})));
+    return Ok(ExecutionType::Processor(Arc::new(Box::new(Echo {}))));
 }
 
 pub fn register_echo() -> Result<(), Error> {

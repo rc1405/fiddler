@@ -8,7 +8,7 @@ use fiddler::{Closer, Connect, Error, Input};
 use serde::{Deserialize, Serialize};
 use serde_yaml::Value;
 use std::cell::RefCell;
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 
 #[derive(Serialize, Deserialize)]
 pub struct Generator {
@@ -60,7 +60,7 @@ impl Connect for Generator {
 
 fn create_generator(conf: &Value) -> Result<ExecutionType, Error> {
     let g: Generator = serde_yaml::from_value(conf.clone())?;
-    return Ok(ExecutionType::Input(Box::new(g)));
+    return Ok(ExecutionType::Input(Arc::new(Box::new(g))));
 }
 
 pub fn register_generator() -> Result<(), Error> {

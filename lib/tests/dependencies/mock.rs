@@ -8,7 +8,7 @@ use fiddler::{Closer, Connect, Error, Input};
 use serde::{Deserialize, Serialize};
 use serde_yaml::Value;
 use std::cell::RefCell;
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 
 #[derive(Serialize, Deserialize)]
 pub struct MockInputConf {
@@ -63,9 +63,9 @@ fn create_mock_input(conf: &Value) -> Result<ExecutionType, Error> {
     let mut g: MockInputConf = serde_yaml::from_value(conf.clone())?;
     g.input = g.input.iter().rev().map(|i| i.clone()).collect();
 
-    return Ok(ExecutionType::Input(Box::new(MockInput {
+    return Ok(ExecutionType::Input(Arc::new(Box::new(MockInput {
         input: Mutex::new(RefCell::new(g.input)),
-    })));
+    }))));
 }
 
 pub fn register_mock_input() -> Result<(), Error> {

@@ -13,10 +13,7 @@ use std::io::{prelude::*, BufReader, Seek, SeekFrom};
 use std::cell::RefCell;
 use std::sync::Mutex;
 use std::sync::mpsc::{sync_channel, SyncSender, TryRecvError};
-// use std::thread::{self, sleep};
-// use std::time;
 use std::sync::Arc;
-use tokio::time::{sleep, Duration};
 
 #[derive(Deserialize, Default)]
 enum CodecType {
