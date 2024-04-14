@@ -1,5 +1,5 @@
-use std::collections::HashMap;
 use serde_json::Value;
+use std::collections::HashMap;
 use tokio::sync::oneshot;
 
 use thiserror::Error;
@@ -28,7 +28,7 @@ pub fn new_callback_chan() -> (oneshot::Sender<Status>, oneshot::Receiver<Status
 #[derive(Clone, Debug)]
 pub enum Status {
     Processed,
-    Errored(Vec<String>)
+    Errored(Vec<String>),
 }
 
 pub trait Closer {
@@ -99,5 +99,5 @@ pub enum Error {
     #[error("OutputError: {0}")]
     OutputError(String),
     #[error("NoInputToReturn")]
-    NoInputToReturn
+    NoInputToReturn,
 }

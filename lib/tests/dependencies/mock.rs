@@ -2,8 +2,8 @@ use async_trait::async_trait;
 use fiddler::config::register_plugin;
 use fiddler::config::ItemType;
 use fiddler::config::{ConfigSpec, ExecutionType};
-use fiddler::{CallbackChan, new_callback_chan};
 use fiddler::Message;
+use fiddler::{new_callback_chan, CallbackChan};
 use fiddler::{Closer, Connect, Error, Input};
 use serde::{Deserialize, Serialize};
 use serde_yaml::Value;
@@ -27,9 +27,7 @@ impl Input for MockInput {
                 let mut input = c.borrow_mut();
 
                 let (tx, rx) = new_callback_chan();
-                tokio::spawn(async move {
-                    rx.await
-                });
+                tokio::spawn(async move { rx.await });
 
                 match input.pop() {
                     Some(i) => Ok((

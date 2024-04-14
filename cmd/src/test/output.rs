@@ -1,6 +1,6 @@
 use std::cell::RefCell;
-use std::sync::Mutex;
 use std::sync::Arc;
+use std::sync::Mutex;
 
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};

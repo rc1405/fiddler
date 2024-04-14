@@ -1,16 +1,16 @@
 use crossbeam_channel::TryRecvError;
-use tokio::sync::oneshot;
-use tokio::task::JoinSet;
 use serde_yaml::Value;
+use tokio::sync::oneshot;
 use tokio::task::yield_now;
+use tokio::task::JoinSet;
 use tracing::{debug, error, info, trace};
 
-use tokio::time::{sleep, Duration};
+use std::cell::RefCell;
 use std::collections::HashMap;
+use std::mem;
 use std::sync::Once;
 use std::sync::{Arc, Mutex};
-use std::cell::RefCell;
-use std::mem;
+use tokio::time::{sleep, Duration};
 
 use super::CallbackChan;
 use super::Error;
@@ -39,7 +39,7 @@ struct InternalMessage {
     message: Message,
     closure: Arc<CallbackChan>,
     active_count: Arc<Mutex<RefCell<usize>>>,
-    errors: Arc<Mutex<RefCell<Vec<String>>>>
+    errors: Arc<Mutex<RefCell<Vec<String>>>>,
 }
 
 #[derive(Clone)]
@@ -212,33 +212,30 @@ impl Environment {
     /// ```
     pub async fn run(&self) -> Result<(), Error> {
         let (processor_tx, processor_rx) = bounded(1);
-        let input = input(self.config.input.clone(), processor_tx, self.config.pipeline.clone());        
+        let input = input(
+            self.config.input.clone(),
+            processor_tx,
+            self.config.pipeline.clone(),
+        );
 
         let mut handles = JoinSet::new();
 
         info!("pipeline started");
-        handles.spawn(async move {
-            input.await
-        });
-        
+        handles.spawn(async move { input.await });
+
         let output = output(self.config.output.clone(), processor_rx.clone());
-        handles.spawn(async move {
-            output.await
-        });
+        handles.spawn(async move { output.await });
 
         while let Some(res) = handles.join_next().await {
             res.map_err(|e| Error::ProcessingError(format!("{}", e)))??;
-        };
+        }
 
         info!("pipeline finished");
         Ok(())
     }
 }
 
-async fn yield_sender(
-    chan: &Sender<InternalMessage>,
-    msg: InternalMessage,
-) -> Result<(), Error> {
+async fn yield_sender(chan: &Sender<InternalMessage>, msg: InternalMessage) -> Result<(), Error> {
     while chan.is_full() {
         yield_now().await
     }
@@ -276,17 +273,17 @@ async fn input(
         match i.read().await {
             Ok((msg, closer)) => {
                 trace!("message received from input");
-                let internal_msg = InternalMessage{
+                let internal_msg = InternalMessage {
                     message: msg,
                     closure: Arc::new(closer),
                     active_count: Arc::new(Mutex::new(RefCell::new(1))),
-                    errors: Arc::new(Mutex::new(RefCell::new(Vec::new())))
+                    errors: Arc::new(Mutex::new(RefCell::new(Vec::new()))),
                 };
 
                 while Arc::strong_count(&task_count) >= max_tasks {
                     trace!("waiting for open thread");
                     sleep(Duration::from_millis(50)).await;
-                };
+                }
 
                 let p = pipeline(
                     parsed_pipeline.clone(),
@@ -299,29 +296,31 @@ async fn input(
                     let r = p.await;
                     r
                 });
-
-            },
+            }
             Err(e) => {
                 match e {
                     Error::EndOfInput => {
                         i.close()?;
                         debug!("input closed");
                         info!("shutting down input: end of input received");
-                        return Ok(())
-                    },
+                        return Ok(());
+                    }
                     Error::NoInputToReturn => {
                         sleep(Duration::from_millis(1500)).await;
                         // std::thread::sleep(std::time::Duration::from_millis(500));
-                        continue
-                    },
+                        continue;
+                    }
                     _ => {
                         i.close()?;
                         debug!("input closed");
                         error!(error = format!("{}", e), "read error from input");
-                        return Err(Error::ExecutionError(format!("Received error from read: {}", e)))
-                    },
+                        return Err(Error::ExecutionError(format!(
+                            "Received error from read: {}",
+                            e
+                        )));
+                    }
                 }
-            },
+            }
         }
     }
 }
@@ -346,28 +345,24 @@ async fn pipeline(
     debug!(num_processors = channels.len(), "starting processors");
 
     let mut pipelines = JoinSet::new();
-    
+
     for i in 0..pipeline.processors.len() {
         let ic = channels.get(&i).unwrap().clone();
         let p = pipeline.processors[i].clone();
 
-        pipelines.spawn(async move {
-            run_processor(rx, ic.tx, p).await
-        });
+        pipelines.spawn(async move { run_processor(rx, ic.tx, p).await });
 
         rx = ic.rx;
-    };
-    
-    pipelines.spawn( async move {
-        channel_forward(rx, output).await
-    });
-    
+    }
+
+    pipelines.spawn(async move { channel_forward(rx, output).await });
+
     // drop channels so processors will close once finished
     drop(channels);
 
     while let Some(res) = pipelines.join_next().await {
         res.map_err(|e| Error::ProcessingError(format!("{}", e)))??;
-    };
+    }
 
     debug!("shutting down pipeline");
 
@@ -491,7 +486,7 @@ async fn output(
                     debug!("output closed");
                     return Ok(());
                 }
-                TryRecvError::Empty => sleep(Duration::from_millis(250)).await
+                TryRecvError::Empty => sleep(Duration::from_millis(250)).await,
             },
         };
     }
@@ -523,7 +518,7 @@ async fn get_errors(message: &InternalMessage) -> Vec<String> {
         Ok(l) => {
             let err = l.borrow_mut();
             let errs: Vec<String> = err.iter().map(|e| format!("{}", e)).collect();
-            return errs
+            return errs;
         }
         Err(_) => return Vec::new(),
     };
@@ -535,7 +530,7 @@ async fn decrease_active_count(message: &mut InternalMessage) -> Result<usize, E
             let mut lock = l.borrow_mut();
             *lock -= 1;
             trace!("message has {} copies to process", lock);
-            return Ok(lock.clone())
+            return Ok(lock.clone());
         }
         Err(_) => return Err(Error::UnableToSecureLock),
     };
@@ -547,8 +542,8 @@ async fn add_error(message: &mut InternalMessage, error: String) -> Result<(), E
             let mut err = l.borrow_mut();
             err.push(error);
             Ok(())
-        },
-        Err(_) => Err(Error::UnableToSecureLock)
+        }
+        Err(_) => Err(Error::UnableToSecureLock),
     }
 }
 

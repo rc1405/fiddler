@@ -1,8 +1,8 @@
 use std::collections::HashMap;
 use std::env;
 use std::fmt;
-use std::sync::Mutex;
 use std::sync::Arc;
+use std::sync::Mutex;
 
 use handlebars::Handlebars;
 use jsonschema::{Draft, JSONSchema};
