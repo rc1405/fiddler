@@ -294,29 +294,27 @@ async fn input(
 
                 tokio::spawn(p);
             }
-            Err(e) => {
-                match e {
-                    Error::EndOfInput => {
-                        i.close()?;
-                        debug!("input closed");
-                        info!("shutting down input: end of input received");
-                        return Ok(());
-                    }
-                    Error::NoInputToReturn => {
-                        sleep(Duration::from_millis(1500)).await;
-                        continue;
-                    }
-                    _ => {
-                        i.close()?;
-                        debug!("input closed");
-                        error!(error = format!("{}", e), "read error from input");
-                        return Err(Error::ExecutionError(format!(
-                            "Received error from read: {}",
-                            e
-                        )));
-                    }
+            Err(e) => match e {
+                Error::EndOfInput => {
+                    i.close()?;
+                    debug!("input closed");
+                    info!("shutting down input: end of input received");
+                    return Ok(());
                 }
-            }
+                Error::NoInputToReturn => {
+                    sleep(Duration::from_millis(1500)).await;
+                    continue;
+                }
+                _ => {
+                    i.close()?;
+                    debug!("input closed");
+                    error!(error = format!("{}", e), "read error from input");
+                    return Err(Error::ExecutionError(format!(
+                        "Received error from read: {}",
+                        e
+                    )));
+                }
+            },
         }
     }
 }
