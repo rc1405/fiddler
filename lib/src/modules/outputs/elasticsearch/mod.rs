@@ -26,6 +26,13 @@ use elasticsearch::{
 
 use elasticsearch::cert::CertificateValidation;
 
+#[derive(Deserialize, Default, Clone)]
+pub enum CertValidation {
+    #[default]
+    Default,
+    None
+}
+
 #[derive(Deserialize, Default)]
 pub struct Elastic {
     url: Option<String>,
@@ -33,10 +40,16 @@ pub struct Elastic {
     password: Option<String>,
     cloud_id: Option<String>,
     index: String,
+    cert_validation: Option<CertValidation>,
 }
 
 impl Elastic {
     fn get_client(&self) -> Result<Elasticsearch, Error> {
+        let cert_validation = match self.cert_validation.clone().unwrap_or(CertValidation::Default) {
+            CertValidation::None => CertificateValidation::None,
+            _ => CertificateValidation::Default,
+        };
+
         if self.cloud_id.is_some() {
             let cloud_id = self.cloud_id.clone().unwrap();
             let username = self.username.clone().unwrap();
@@ -53,13 +66,18 @@ impl Elastic {
             let credentials = Credentials::Basic(username, password);
             let transport = TransportBuilder::new(connection_pool)
                 .auth(credentials)
-                .cert_validation(CertificateValidation::None)
+                .cert_validation(cert_validation)
                 .build()
                 .map_err(|e| Error::ConfigFailedValidation(format!("{}", e)))?;
             Ok(Elasticsearch::new(transport))
         } else if self.url.is_some() {
             let url = self.url.clone().unwrap();
-            let transport = Transport::single_node(&url).map_err(|e| Error::ConfigFailedValidation(format!("{}", e)))?;
+            let es_url = Url::parse(&url).map_err(|e| Error::ConfigFailedValidation(format!("{}", e)))?;
+            let connection_pool = SingleNodeConnectionPool::new(es_url);
+            let transport = TransportBuilder::new(connection_pool)
+                .cert_validation(cert_validation)
+                .build()
+                .map_err(|e| Error::ConfigFailedValidation(format!("{}", e)))?;
             Ok(Elasticsearch::new(transport))
         } else {
             Err(Error::ConfigFailedValidation("unable to determine connection type".into()))
@@ -154,6 +172,11 @@ properties:
     type: string
   index:
     type: string
+  cert_validation:
+    type: string
+    enum: 
+      - Default
+      - None
 required:
   - index";
     let conf_spec = ConfigSpec::from_schema(config)?;

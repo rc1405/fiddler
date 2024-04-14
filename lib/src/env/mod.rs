@@ -221,10 +221,10 @@ impl Environment {
         let mut handles = JoinSet::new();
 
         info!("pipeline started");
-        handles.spawn(async move { input.await });
+        handles.spawn(input);
 
         let output = output(self.config.output.clone(), processor_rx.clone());
-        handles.spawn(async move { output.await });
+        handles.spawn(output);
 
         while let Some(res) = handles.join_next().await {
             res.map_err(|e| Error::ProcessingError(format!("{}", e)))??;
@@ -259,7 +259,7 @@ async fn input(
     };
 
     let task_count = Arc::new(());
-    let mut max_tasks = parsed_pipeline.max_in_flight.clone();
+    let mut max_tasks = parsed_pipeline.max_in_flight;
     if max_tasks == 0 {
         max_tasks = num_cpus::get();
     };
@@ -292,10 +292,7 @@ async fn input(
                     task_count.clone(),
                 );
 
-                tokio::spawn(async move {
-                    let r = p.await;
-                    r
-                });
+                tokio::spawn(p);
             }
             Err(e) => {
                 match e {
@@ -307,7 +304,6 @@ async fn input(
                     }
                     Error::NoInputToReturn => {
                         sleep(Duration::from_millis(1500)).await;
-                        // std::thread::sleep(std::time::Duration::from_millis(500));
                         continue;
                     }
                     _ => {
@@ -517,11 +513,11 @@ async fn get_errors(message: &InternalMessage) -> Vec<String> {
     match message.errors.lock() {
         Ok(l) => {
             let err = l.borrow_mut();
-            let errs: Vec<String> = err.iter().map(|e| format!("{}", e)).collect();
-            return errs;
+            let errs: Vec<String> = err.iter().map(|e| e.to_string()).collect();
+            errs
         }
-        Err(_) => return Vec::new(),
-    };
+        Err(_) => Vec::new(),
+    }
 }
 
 async fn decrease_active_count(message: &mut InternalMessage) -> Result<usize, Error> {
@@ -530,10 +526,10 @@ async fn decrease_active_count(message: &mut InternalMessage) -> Result<usize, E
             let mut lock = l.borrow_mut();
             *lock -= 1;
             trace!("message has {} copies to process", lock);
-            return Ok(lock.clone());
+            Ok(lock.clone())
         }
-        Err(_) => return Err(Error::UnableToSecureLock),
-    };
+        Err(_) => Err(Error::UnableToSecureLock),
+    }
 }
 
 async fn add_error(message: &mut InternalMessage, error: String) -> Result<(), Error> {

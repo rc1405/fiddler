@@ -26,9 +26,7 @@ impl Input for StdIn {
         };
 
         let (tx, rx) = new_callback_chan();
-        tokio::spawn(async move {
-            rx.await
-        });
+        tokio::spawn(rx);
 
         Ok((Message{
             bytes: buffer.into_bytes(),

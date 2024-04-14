@@ -60,9 +60,7 @@ impl Input for FileReader {
                                         let _ = l.replace(lines);
 
                                         let (tx, rx) = new_callback_chan();
-                                        tokio::spawn(async move {
-                                            rx.await
-                                        });
+                                        tokio::spawn(rx);
 
                                         Ok((Message{
                                             bytes: msg.into_bytes(),
@@ -81,9 +79,7 @@ impl Input for FileReader {
                                 let _ = l.replace(Some(ReaderType::Eof));
 
                                 let (tx, rx) = new_callback_chan();
-                                tokio::spawn(async move {
-                                    rx.await
-                                });
+                                tokio::spawn(rx);
 
                                 Ok((Message{
                                     bytes: contents.into_bytes(),

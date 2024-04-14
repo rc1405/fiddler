@@ -27,7 +27,7 @@ impl Input for MockInput {
             Ok(c) => {
                 let mut input = c.borrow_mut();
                 let (tx, rx) = new_callback_chan();
-                tokio::spawn(async move { rx.await });
+                tokio::spawn(rx);
 
                 match input.pop() {
                     Some(i) => Ok((
