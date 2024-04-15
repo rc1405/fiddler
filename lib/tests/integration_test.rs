@@ -317,7 +317,7 @@ pipeline:
 output:
   validate:
     expected: 
-      - {{ TestingEnvVarReplacement }}";
+      - ReplacementSuccessful";
 
     REGISTER.call_once(|| {
         mock::register_mock_input().unwrap();

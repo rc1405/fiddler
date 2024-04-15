@@ -8,6 +8,7 @@ use tracing::{debug, error, info, trace};
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::mem;
+use std::str::FromStr;
 use std::sync::Once;
 use std::sync::{Arc, Mutex};
 use tokio::time::{sleep, Duration};
@@ -524,7 +525,7 @@ async fn decrease_active_count(message: &mut InternalMessage) -> Result<usize, E
             let mut lock = l.borrow_mut();
             *lock -= 1;
             trace!("message has {} copies to process", lock);
-            Ok(lock.clone())
+            Ok(*lock)
         }
         Err(_) => Err(Error::UnableToSecureLock),
     }

@@ -1,6 +1,7 @@
 use std::collections::HashMap;
 use std::env;
 use std::fmt;
+use std::str::FromStr;
 use std::sync::Arc;
 use std::sync::Mutex;
 
@@ -112,8 +113,9 @@ pub struct Config {
     pub output: Item,
 }
 
-impl Config {
-    pub fn from_str(conf: &str) -> Result<Self, Error> {
+impl FromStr for Config {
+    type Err = Error;
+    fn from_str(conf: &str) -> Result<Self, Self::Err> {
         let mut environment_variables: HashMap<String, String> = HashMap::new();
         for (key, value) in env::vars() {
             let _ = environment_variables.insert(key, value);
@@ -123,13 +125,15 @@ impl Config {
         handle_bars.set_strict_mode(true);
 
         let populated_config = handle_bars
-            .render_template(&conf, &environment_variables)
+            .render_template(conf, &environment_variables)
             .map_err(|e| Error::ConfigFailedValidation(format!("{}", e)))?;
 
         let config: Config = serde_yaml::from_str(&populated_config)?;
         Ok(config)
     }
+}
 
+impl Config {
     /// Validates the configuration object has valid and registered inputs, outputs, and processors.
     /// Note: Plugins must be registered with the environment prior to calling validate.  This is
     /// automatically done when using Environment
