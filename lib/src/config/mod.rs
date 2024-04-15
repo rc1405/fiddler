@@ -113,6 +113,23 @@ pub struct Config {
 }
 
 impl Config {
+    pub fn from_str(conf: &str) -> Result<Self, Error> {
+        let mut environment_variables: HashMap<String, String> = HashMap::new();
+        for (key, value) in env::vars() {
+            let _ = environment_variables.insert(key, value);
+        }
+
+        let mut handle_bars = Handlebars::new();
+        handle_bars.set_strict_mode(true);
+
+        let populated_config = handle_bars
+            .render_template(&conf, &environment_variables)
+            .map_err(|e| Error::ConfigFailedValidation(format!("{}", e)))?;
+
+        let config: Config = serde_yaml::from_str(&populated_config)?;
+        Ok(config)
+    }
+
     /// Validates the configuration object has valid and registered inputs, outputs, and processors.
     /// Note: Plugins must be registered with the environment prior to calling validate.  This is
     /// automatically done when using Environment
@@ -135,60 +152,47 @@ impl Config {
     /// config.validate().unwrap();
     /// ```
     pub fn validate(self) -> Result<ParsedConfig, Error> {
-        let mut environment_variables: HashMap<String, String> = HashMap::new();
-        for (key, value) in env::vars() {
-            let _ = environment_variables.insert(key, value);
-        }
-
-        let handle_bars = Handlebars::new();
-        let raw_config = serde_yaml::to_string(&self)?;
-        let populated_config = handle_bars
-            .render_template(&raw_config, &environment_variables)
-            .map_err(|e| Error::ConfigFailedValidation(format!("{}", e)))?;
-
-        let new_config: Config = serde_yaml::from_str(&populated_config)?;
-
-        if new_config.input.extra.len() > 1 {
+        if self.input.extra.len() > 1 {
             error!("input must only contain one entry");
             return Err(Error::Validation(
                 "input must only contain one entry".into(),
             ));
         };
 
-        if new_config.output.extra.len() > 1 {
+        if self.output.extra.len() > 1 {
             error!("output must only contain one entry");
             return Err(Error::Validation(
                 "output must only contain one entry".into(),
             ));
         };
 
-        if new_config.pipeline.processors.is_empty() {
+        if self.pipeline.processors.is_empty() {
             error!("pipeline must contain at least one processor");
             return Err(Error::Validation(
                 "pipeline must contain at least one processor".into(),
             ));
         };
 
-        let input = parse_configuration_item(ItemType::Input, &new_config.input.extra)?;
+        let input = parse_configuration_item(ItemType::Input, &self.input.extra)?;
 
-        let output = parse_configuration_item(ItemType::Output, &new_config.output.extra)?;
+        let output = parse_configuration_item(ItemType::Output, &self.output.extra)?;
 
         let mut processors = Vec::new();
 
-        for p in &new_config.pipeline.processors {
+        for p in &self.pipeline.processors {
             let proc = parse_configuration_item(ItemType::Processor, &p.extra)?;
             processors.push(proc);
         }
 
-        let max_in_flight = new_config.pipeline.max_in_flight.unwrap_or(0);
+        let max_in_flight = self.pipeline.max_in_flight.unwrap_or(0);
 
         let parsed_pipeline = ParsedPipeline {
-            label: new_config.pipeline.label.clone(),
+            label: self.pipeline.label.clone(),
             max_in_flight,
             processors,
         };
 
-        let label = new_config.label.clone();
+        let label = self.label.clone();
         debug!("configuration is valid");
 
         Ok(ParsedConfig {

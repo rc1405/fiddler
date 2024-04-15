@@ -72,7 +72,7 @@ impl Environment {
         });
         trace!("plugins registered");
 
-        let conf: Config = serde_yaml::from_str(config)?;
+        let conf: Config = Config::from_str(config)?;
         let parsed_conf = conf.validate()?;
 
         debug!("environment is ready");

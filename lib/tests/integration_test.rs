@@ -300,3 +300,35 @@ output:
     let env = Environment::from_config(&config).unwrap();
     env.run().await.unwrap();
 }
+
+#[cfg_attr(feature = "python", tokio::test)]
+async fn fiddler_env_replacement_test() {
+    let config = "input:
+  json_generator: 
+    count: 1
+pipeline:
+    max_in_flight: 1
+    processors:
+    - label: my_cool_mapping
+      python: 
+        string: true
+        code: |
+            root = '{{ TestingEnvVarReplacement }}'
+output:
+  validate:
+    expected: 
+      - {{ TestingEnvVarReplacement }}";
+
+    REGISTER.call_once(|| {
+        mock::register_mock_input().unwrap();
+        jsongenerator::register_json_generator().unwrap();
+        generator::register_generator().unwrap();
+        processor::register_echo().unwrap();
+        output::register_validate().unwrap();
+    });
+
+    std::env::set_var("TestingEnvVarReplacement", "ReplacementSuccessful");
+
+    let env = Environment::from_config(config).unwrap();
+    env.run().await.unwrap();
+}
