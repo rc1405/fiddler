@@ -1,6 +1,6 @@
 [package]
 name = "fiddler"
-version = "0.3.0"
+version = "0.3.1"
 edition = "2021"
 license-file = "../LICENSE"
 description = "Data Stream processor written in rust"
@@ -21,7 +21,7 @@ async-std = { version = "1.12.0", features = ["std"] }
 async-trait = "0.1.78"
 crossbeam-channel = "0.5.12"
 elasticsearch = { version = "8.5.0-alpha.1", features = ["rustls-tls"], optional = true }
-fiddler-macros = { version = "0.3.0", path = "../macros" }
+fiddler-macros = { version = "0.3.1", path = "../macros" }
 futures = "0.3.30"
 handlebars = { version = "5.1.2", features = ["no_logging"] }
 jmespath = "0.3.0"
