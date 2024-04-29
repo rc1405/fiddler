@@ -43,7 +43,7 @@ regex = "1.10.3"
 pkg-config = "0.3.30"
 
 [dev-dependencies]
-testcontainers = { version = "0.15.0", features = ["tokio"] }
+testcontainers = { version = "0.16.3", features = ["tokio"] }
 testcontainers-modules = { version = "0.3.7", features = ["elastic_search"]}
 tokio-test = "0.4.4"
 
