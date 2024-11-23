@@ -7,7 +7,7 @@ use std::fs;
 use std::process;
 use tracing_subscriber::filter::{EnvFilter, LevelFilter};
 
-use fiddler::Environment;
+use fiddler::Runtime;
 use fiddler::Error;
 
 mod test;
@@ -61,7 +61,7 @@ async fn main() -> Result<(), Error> {
                     }
                 };
 
-                if let Err(e) = Environment::from_config(&conf) {
+                if let Err(e) = Runtime::from_config(&conf) {
                     failures.push(format!("failed {}: {}", c, e));
                     continue;
                 };
@@ -86,7 +86,7 @@ async fn main() -> Result<(), Error> {
                 let conf = fs::read_to_string(&c).map_err(|e| {
                     Error::ConfigurationItemNotFound(format!("cannot read {}: {}", c, e))
                 })?;
-                let env = Environment::from_config(&conf)?;
+                let env = Runtime::from_config(&conf)?;
                 environments.push(env);
             }
 
@@ -122,7 +122,7 @@ fn setup_subscriber(arg_log_level: LogLevel) {
             .with_default_directive(LevelFilter::OFF.into())
             .from_env()
             .unwrap()
-            .add_directive(format!("fiddler::env={}", l).parse().unwrap());
+            .add_directive(format!("fiddler::runtime={}", l).parse().unwrap());
 
         tracing_subscriber::fmt()
             .with_env_filter(filter)

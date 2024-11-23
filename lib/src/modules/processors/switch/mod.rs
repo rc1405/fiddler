@@ -65,7 +65,7 @@ fn create_switch(conf: &Value) -> Result<ExecutionType, Error> {
     Ok(ExecutionType::Processor(Arc::new(Box::new(s))))
 }
 
-#[fiddler_registration_func]
+// #[fiddler_registration_func]
 pub fn register_switch() -> Result<(), Error> {
     let config = "type: array";
 

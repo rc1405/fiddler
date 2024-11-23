@@ -12,34 +12,34 @@ fn main() {
     let out_dir = env::var("OUT_DIR").unwrap();
     let module_path = Path::new(".").join("src").join("modules");
 
-    let input_directories = fs::read_dir(module_path.clone().join("inputs")).unwrap();
-    let processing_directories = fs::read_dir(module_path.clone().join("processors")).unwrap();
-    let output_directories = fs::read_dir(module_path.clone().join("outputs")).unwrap();
+    // let input_directories = fs::read_dir(module_path.clone().join("inputs")).unwrap();
+    // let processing_directories = fs::read_dir(module_path.clone().join("processors")).unwrap();
+    // let output_directories = fs::read_dir(module_path.clone().join("outputs")).unwrap();
 
     let opts = CopyOptions::new().overwrite(true);
     copy(module_path.clone(), out_dir.clone(), &opts).unwrap();
 
-    generate_mod_rs(
-        Path::new(&out_dir)
-            .join("modules")
-            .join("inputs")
-            .join("mod.rs"),
-        input_directories,
-    );
-    generate_mod_rs(
-        Path::new(&out_dir)
-            .join("modules")
-            .join("processors")
-            .join("mod.rs"),
-        processing_directories,
-    );
-    generate_mod_rs(
-        Path::new(&out_dir)
-            .join("modules")
-            .join("outputs")
-            .join("mod.rs"),
-        output_directories,
-    );
+    // generate_mod_rs(
+    //     Path::new(&out_dir)
+    //         .join("modules")
+    //         .join("inputs")
+    //         .join("mod.rs"),
+    //     input_directories,
+    // );
+    // generate_mod_rs(
+    //     Path::new(&out_dir)
+    //         .join("modules")
+    //         .join("processors")
+    //         .join("mod.rs"),
+    //     processing_directories,
+    // );
+    // generate_mod_rs(
+    //     Path::new(&out_dir)
+    //         .join("modules")
+    //         .join("outputs")
+    //         .join("mod.rs"),
+    //     output_directories,
+    // );
 
     let input_file = File::create(Path::new(&out_dir).join("modules").join("mod.rs")).unwrap();
     let mut input_file = LineWriter::new(input_file);

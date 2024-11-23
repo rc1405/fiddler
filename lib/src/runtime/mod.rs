@@ -1,17 +1,22 @@
-use crossbeam_channel::TryRecvError;
+// use crossbeam_channel::TryRecvError;
+use tokio::sync::mpsc::error::TryRecvError;
+use tokio::sync::mpsc::{Sender, Receiver, channel};
+use serde::Deserialize;
+use serde::Serialize;
 use serde_yaml::Value;
-use tokio::sync::oneshot;
 use tokio::task::yield_now;
 use tokio::task::JoinSet;
+use tokio::sync::oneshot;
+use std::mem;
 use tracing::{debug, error, info, trace};
 
-use std::cell::RefCell;
 use std::collections::HashMap;
-use std::mem;
 use std::str::FromStr;
 use std::sync::Once;
 use std::sync::{Arc, Mutex};
+use tokio::sync::Notify;
 use tokio::time::{sleep, Duration};
+use uuid::Uuid;
 
 use super::CallbackChan;
 use super::Error;
@@ -25,35 +30,59 @@ use crate::modules::outputs;
 use crate::modules::processors;
 use crate::Status;
 
-use crossbeam_channel::bounded;
-use crossbeam_channel::{Receiver, Sender};
-
 static REGISTER: Once = Once::new();
 
-/// Represents a single data pipeline configuration environment to run
-pub struct Environment {
+/// Represents a single data pipeline configuration Runtime to run
+pub struct Runtime {
     config: ParsedConfig,
 }
 
-#[derive(Clone)]
+#[derive(Clone, Serialize, Deserialize, Default)]
+enum MessageStatus {
+    #[default]
+    New,
+    Processed,
+    ProcessError(String),
+    Output,
+    OutputError(String),
+    Shutdown,
+}
+
+#[derive(Clone, Serialize, Deserialize, Default)]
+enum ProcessingState {
+    #[default]
+    InputComplete,
+    ProcessorSubscribe((usize, String)),
+    ProcessorComplete(usize),
+    PipelineComplete,
+    OutputSubscribe(String),
+    OutputComplete,
+}
+
+#[derive(Clone, Serialize, Deserialize)]
+struct InternalMessageState {
+    message_id: String,
+    status: MessageStatus,
+}
+
+#[derive(Clone, Serialize, Deserialize)]
 struct InternalMessage {
     message: Message,
-    closure: Arc<CallbackChan>,
-    active_count: Arc<Mutex<RefCell<usize>>>,
-    errors: Arc<Mutex<RefCell<Vec<String>>>>,
+    message_id: String,
+    status: MessageStatus,
 }
 
 #[derive(Clone)]
-struct InternalChannel {
-    tx: Sender<InternalMessage>,
-    rx: Receiver<InternalMessage>,
+struct MessageHandle {
+    message_id: String,
+    closure: Arc<CallbackChan>,
 }
 
-impl Environment {
+impl Runtime {
     /// The function takes the raw configuration of the data pipeline and registers built-in
-    /// plugins, validates the configuration and returns the Environment to run.
+    /// plugins, validates the configuration and returns the Runtime to run.
     /// ```
-    /// use fiddler::Environment;
+    /// use fiddler::Runtime;
     ///
     /// let conf_str = r#"input:
     ///  stdin: {}
@@ -63,7 +92,7 @@ impl Environment {
     ///      noop: {}
     ///output:
     ///  stdout: {}"#;
-    /// let env = Environment::from_config(conf_str).unwrap();
+    /// let env = Runtime::from_config(conf_str).unwrap();
     /// ```
     pub fn from_config(config: &str) -> Result<Self, Error> {
         REGISTER.call_once(|| {
@@ -76,15 +105,15 @@ impl Environment {
         let conf: Config = Config::from_str(config)?;
         let parsed_conf = conf.validate()?;
 
-        debug!("environment is ready");
-        Ok(Environment {
+        debug!("Runtime is ready");
+        Ok(Runtime {
             config: parsed_conf,
         })
     }
 
     /// The function sets the data pipeline with a label.
     /// ```
-    /// # use fiddler::Environment;
+    /// # use fiddler::Runtime;
     /// # let conf_str = r#"input:
     /// #   stdin: {}
     /// # pipeline:
@@ -93,12 +122,12 @@ impl Environment {
     /// #      noop: {}
     /// # output:
     /// #   stdout: {}"#;
-    /// # let mut env = Environment::from_config(conf_str).unwrap();
+    /// # let mut env = Runtime::from_config(conf_str).unwrap();
     /// env.set_label(Some("MyPipeline".into())).unwrap();
     /// ```
     /// or to remove a given label:
     /// ```
-    /// # use fiddler::Environment;
+    /// # use fiddler::Runtime;
     /// # let conf_str = r#"input:
     /// #  stdin: {}
     /// # pipeline:
@@ -107,7 +136,7 @@ impl Environment {
     /// #      noop: {}
     /// # output:
     /// #   stdout: {}"#;
-    /// # let mut env = Environment::from_config(conf_str).unwrap();
+    /// # let mut env = Runtime::from_config(conf_str).unwrap();
     /// env.set_label(None).unwrap();
     /// ```
     pub fn set_label(&mut self, label: Option<String>) -> Result<(), Error> {
@@ -117,7 +146,7 @@ impl Environment {
 
     /// The function returns the currect label assigned to the pipeline
     /// ```
-    /// # use fiddler::Environment;
+    /// # use fiddler::Runtime;
     /// # let conf_str = r#"input:
     /// #   stdin: {}
     /// # pipeline:
@@ -126,7 +155,7 @@ impl Environment {
     /// #      noop: {}
     /// # output:
     /// #   stdout: {}"#;
-    /// # let mut env = Environment::from_config(conf_str).unwrap();
+    /// # let mut env = Runtime::from_config(conf_str).unwrap();
     /// # env.set_label(Some("MyPipeline".into())).unwrap();
     /// assert_eq!(env.get_label().unwrap(), "MyPipeline".to_string());
     /// ```
@@ -139,7 +168,7 @@ impl Environment {
     /// # use fiddler::config::{ConfigSpec, ItemType, ExecutionType};
     /// # use fiddler::modules::inputs;
     /// # use std::collections::HashMap;
-    /// # use fiddler::Environment;
+    /// # use fiddler::Runtime;
     /// # let conf_str = r#"input:
     /// #   stdin: {}
     /// # pipeline:
@@ -148,7 +177,7 @@ impl Environment {
     /// #      noop: {}
     /// # output:
     /// #   stdout: {}"#;
-    /// # let mut env = Environment::from_config(conf_str).unwrap();
+    /// # let mut env = Runtime::from_config(conf_str).unwrap();
     ///
     /// use serde_yaml::Value;
     /// let conf_str = r#"file:
@@ -169,7 +198,7 @@ impl Environment {
     /// # use fiddler::config::{ConfigSpec, ItemType, ExecutionType};
     /// # use fiddler::modules::inputs;
     /// # use std::collections::HashMap;
-    /// # use fiddler::Environment;
+    /// # use fiddler::Runtime;
     /// # let conf_str = r#"input:
     /// #   stdin: {}
     /// # pipeline:
@@ -178,7 +207,7 @@ impl Environment {
     /// #      noop: {}
     /// # output:
     /// #   stdout: {}"#;
-    /// # let mut env = Environment::from_config(conf_str).unwrap();
+    /// # let mut env = Runtime::from_config(conf_str).unwrap();
     ///
     /// use serde_yaml::Value;
     /// let conf_str = r#"stdout: {}"#;
@@ -197,7 +226,7 @@ impl Environment {
     /// # use fiddler::config::{ConfigSpec, ItemType, ExecutionType};
     /// # use fiddler::modules::inputs;
     /// # use std::collections::HashMap;
-    /// # use fiddler::Environment;
+    /// # use fiddler::Runtime;
     /// # let conf_str = r#"input:
     /// #   stdin: {}
     /// # pipeline:
@@ -206,26 +235,50 @@ impl Environment {
     /// #      noop: {}
     /// # output:
     /// #   stdout: {}"#;
-    /// # let mut env = Environment::from_config(conf_str).unwrap();
+    /// # let mut env = Runtime::from_config(conf_str).unwrap();
     /// # tokio_test::block_on(async {
     /// env.run().await.unwrap();
     /// # })
     /// ```
     pub async fn run(&self) -> Result<(), Error> {
-        let (processor_tx, processor_rx) = bounded(1);
-        let input = input(
-            self.config.input.clone(),
-            processor_tx,
-            self.config.pipeline.clone(),
-        );
+        let bus = fiddler_bus::EventBus::new().await.unwrap();
+        bus.create_topic("input", Some(1)).await.unwrap();
+        bus.create_topic("message-state", Some(1)).await.unwrap();
+        bus.create_topic("processing-state", None).await.unwrap();
+        for n in 0..self.config.pipeline.processors.len() {
+            bus.create_topic(&format!("processor{}", n), Some(1)).await.unwrap()
+        }
+        bus.create_topic("output", Some(1)).await.unwrap();
+        let (state_sender, state_receiver) = channel(1);
+
+        let barrier = Arc::new(Notify::new());
 
         let mut handles = JoinSet::new();
 
+        let msg_state = message_handler(state_receiver, bus.clone());
+        handles.spawn(msg_state);
+
+        let state = state_handler(bus.clone(), self.config.pipeline.processors.len(), barrier.clone());
+        handles.spawn(state);
+       
+        let output = output(bus.clone(), self.config.output.clone());
+        handles.spawn(output);
+
+        let p = pipeline(
+            self.config.pipeline.clone(),
+            bus.clone(),
+        );
+        handles.spawn(p);
+
+        let input = input(
+            self.config.input.clone(),
+            bus.clone(),
+            state_sender,
+            barrier,
+        );
+
         info!("pipeline started");
         handles.spawn(input);
-
-        let output = output(self.config.output.clone(), processor_rx.clone());
-        handles.spawn(output);
 
         while let Some(res) = handles.join_next().await {
             res.map_err(|e| Error::ProcessingError(format!("{}", e)))??;
@@ -236,19 +289,243 @@ impl Environment {
     }
 }
 
-async fn yield_sender(chan: &Sender<InternalMessage>, msg: InternalMessage) -> Result<(), Error> {
-    while chan.is_full() {
-        yield_now().await
-    }
+struct State {
+    instance_count: i64,
+    processed_count: i64,
+    processed_error_count: i64,
+    output_count: i64,
+    output_error_count: i64,
+    closure: CallbackChan,
+    errors: Vec<String>,
+}
 
-    chan.send(msg)
-        .map_err(|e| Error::UnableToSendToChannel(format!("{}", e)))
+// processor subs not in place when input finishes.
+
+async fn state_handler(
+    bus: fiddler_bus::EventBus::<fiddler_bus::Connected>,
+    processor_count: usize,
+    barrier: Arc<Notify>,
+) -> Result<(), Error> {
+    let (proc_id, mut proc_topic) = bus.subscribe::<ProcessingState>("processing-state").await.unwrap();
+    let mut processor_subs: HashMap<usize, String> = HashMap::new();
+    let mut output_handle: Option<String> = None;
+    
+    
+
+    loop {
+        tokio::select! {
+            Some(msg) = proc_topic.recv() => {
+                println!("Received state message");
+                match msg {
+                    ProcessingState::InputComplete => {
+                        println!("Received input complete");
+                        // close processor 0 sub
+                        // wait for prox 0 size == 0
+                        let b = bus.clone();
+
+                        let i = processor_subs.get(&0);
+                        if let Some(id) = i {
+                            let rid = id.clone();
+                            tokio::spawn(async move {
+                                while b.count::<InternalMessage>("processor0").await.unwrap() > 0 {
+                                    sleep(Duration::from_secs(5)).await
+                                };
+        
+                                println!("closing proc sub");
+                                b.unsubscribe(&rid).await.unwrap();
+                            });
+                        } else {
+                            println!("no processor to unsubscribe");
+                        };
+
+                    },
+                    ProcessingState::ProcessorSubscribe((i, id)) => {
+                        println!("Received state proc subscribe: {} {}", i, id);
+                        processor_subs.insert(i, id);
+
+                        if processor_subs.len() == processor_count && output_handle.is_some() {
+                            println!("Waiting for barrier");
+                            barrier.notify_one();
+                            println!("barrier complete");
+                        };
+                        
+                    },
+                    ProcessingState::ProcessorComplete(i) => {
+                        println!("Received state proc complete");
+                        // close processor i + 1 sub if exists
+                        let index = i+1;
+                        let topic = format!("processor{}", index);
+                        let b = bus.clone();
+
+                        let p = processor_subs.get(&index);
+                        if let Some(id) = p {
+                            let rid = id.clone();
+                            tokio::spawn(async move {
+                                while b.count::<InternalMessage>(&topic).await.unwrap() > 0 {
+                                    println!("proc greater than 0");
+                                    sleep(Duration::from_secs(5)).await
+                                };
+                                println!("unsubscribing proc");
+                                b.unsubscribe(&rid).await.unwrap();
+                            });
+                        } else {
+                            println!("no processing subs");
+                        }
+                        
+                    },
+                    ProcessingState::PipelineComplete => {
+                        println!("Received state pipeline complete");
+                        // close output sub
+                        // wait for size to == 0
+                        // while bus.count::<InternalMessage>("output").await.unwrap() > 0 {
+                        //     sleep(Duration::from_secs(5)).await
+                        // };
+                        if let Some(ref id) = output_handle {
+                            let rid = id.clone();
+                            let b = bus.clone();
+                            tokio::spawn(async move {
+                                while b.count::<InternalMessage>("output").await.unwrap() > 0 {
+                                    println!("output greater than 0");
+                                    sleep(Duration::from_secs(5)).await
+                                };
+                                println!("unsubscribing output");
+                                b.unsubscribe(&rid).await.unwrap();
+                            });
+                        } else {
+                            println!("no output to unsub to");
+                        }
+                    },
+                    ProcessingState::OutputSubscribe(id) => {
+                        println!("Received state output sub");
+                        output_handle = Some(id);
+                        if processor_subs.len() == processor_count && output_handle.is_some() {
+                            println!("Waiting for barrier");
+                            barrier.notify_one();
+                            println!("barrier complete");
+                        };
+                    },
+                    ProcessingState::OutputComplete => {
+                        println!("Received state output complete");
+                        // idfk
+                        bus.unsubscribe(&proc_id).await.unwrap();
+                        return Ok(())
+                    },
+                }
+            },
+            else => break,
+        }
+    }
+    Ok(())
+}
+
+async fn message_handler(
+    mut input: Receiver<MessageHandle>,
+    bus: fiddler_bus::EventBus::<fiddler_bus::Connected>
+) -> Result<(), Error> {
+    let (sub_id, mut msg_topic) = bus.subscribe::<InternalMessageState>("message-state").await.unwrap();
+    let mut handles: HashMap<String, State> = HashMap::new();
+
+    loop {
+        tokio::select! {
+            Some(msg) = input.recv() => {
+                println!("Received new message: {}", msg.message_id);
+                let closure = Arc::into_inner(msg.closure).unwrap();
+                let i = handles.insert(msg.message_id.clone(), State { instance_count: 1, processed_count: 0, processed_error_count: 0, output_count: 0, output_error_count: 0, closure: closure, errors: Vec::new() });
+                if i.is_some() {
+                    return Err(Error::ExecutionError("Duplicate Message ID Error".into()))
+                };
+            },
+            Some(msg) = msg_topic.recv() => {
+                println!("Received state message: {}", msg.message_id);
+                match msg.status {
+                    MessageStatus::New => {
+                        let m = handles.get_mut(&msg.message_id);
+                        match m {
+                            None => return Err(Error::ExecutionError(format!("Message ID {} does not exist", msg.message_id))),
+                            Some(state) => {
+                                state.instance_count += 1;
+                            },
+                        }
+                    },
+                    MessageStatus::Processed => {
+                        let m = handles.get_mut(&msg.message_id);
+                        match m {
+                            None => return Err(Error::ExecutionError(format!("Message ID {} does not exist", msg.message_id))),
+                            Some(state) => {
+                                state.processed_count += 1;
+                            },
+                        }
+                    },
+                    MessageStatus::ProcessError(s) => {
+                        let m = handles.get_mut(&msg.message_id);
+                        match m {
+                            None => return Err(Error::ExecutionError(format!("Message ID {} does not exist", msg.message_id))),
+                            Some(state) => {
+                                state.processed_error_count += 1;
+                                state.errors.push(s);
+                            },
+                        }
+                    },
+                    MessageStatus::Output => {
+                        let m = handles.get_mut(&msg.message_id);
+                        let mut remove_entry = false;
+                        match m {
+                            None => return Err(Error::ExecutionError(format!("Message ID {} does not exist", msg.message_id))),
+                            Some(state) => {
+                                state.output_count += 1;
+
+                                if state.output_count == state.instance_count {
+                                    println!("send success");
+                                    remove_entry = true;
+                                    let (s, _) = oneshot::channel();
+                                    let chan = mem::replace(&mut state.closure, s);
+                                    let _ = chan.send(Status::Processed);
+                                    println!("send done");
+                                    
+                                } else if state.instance_count == (state.output_count + state.output_error_count + state.processed_error_count) {
+                                    println!("send error");
+                                    remove_entry = true;
+                                    let (s, _) = oneshot::channel();
+                                    let chan = mem::replace(&mut state.closure, s);
+                                    let e = Vec::new();
+                                    let err = mem::replace(&mut state.errors, e);
+                                    let _ = chan.send(Status::Errored(err));
+                                }
+                            },
+                        };
+
+                        if remove_entry {
+                            println!("Removing {}", msg.message_id);
+                            handles.remove(&msg.message_id);
+                        }
+                    },
+                    MessageStatus::OutputError(s) => {
+                        let m = handles.get_mut(&msg.message_id);
+                        match m {
+                            None => return Err(Error::ExecutionError("Message ID5 does not exist".into())),
+                            Some(state) => {
+                                state.output_error_count += 1;
+                                state.errors.push(s);
+                            },
+                        }
+                    },
+                    MessageStatus::Shutdown => {
+                        bus.unsubscribe(&sub_id).await.unwrap();
+                        return Ok(())
+                    },
+                }
+            },       
+            else => break,
+        }
+    }
+    Ok(())
 }
 
 async fn input(
     input: ParsedRegisteredItem,
-    output: Sender<InternalMessage>,
-    parsed_pipeline: ParsedPipeline,
+    bus: fiddler_bus::EventBus<fiddler_bus::Connected>,
+    state_handle: Sender<MessageHandle>,
+    barrier: Arc<Notify>,
 ) -> Result<(), Error> {
     trace!("started input");
     let i = match &input.execution_type {
@@ -259,47 +536,48 @@ async fn input(
         }
     };
 
-    let task_count = Arc::new(());
-    let mut max_tasks = parsed_pipeline.max_in_flight;
-    if max_tasks == 0 {
-        max_tasks = num_cpus::get();
-    };
-    max_tasks += 1;
-    debug!("max_in_flight count: {}", max_tasks);
-
     i.connect()?;
     debug!("input connected");
 
+    barrier.notified().await;
+
     loop {
         match i.read().await {
-            Ok((msg, closer)) => {
+            Ok((msg, closure)) => {
+                let message_id: String = Uuid::new_v4().into();
+
                 trace!("message received from input");
                 let internal_msg = InternalMessage {
                     message: msg,
-                    closure: Arc::new(closer),
-                    active_count: Arc::new(Mutex::new(RefCell::new(1))),
-                    errors: Arc::new(Mutex::new(RefCell::new(Vec::new()))),
+                    message_id: message_id.clone(),
+                    status: MessageStatus::New,
                 };
 
-                while Arc::strong_count(&task_count) >= max_tasks {
-                    trace!("waiting for open thread");
-                    sleep(Duration::from_millis(50)).await;
-                }
+                state_handle.send(MessageHandle{
+                    message_id,
+                    closure: Arc::new(closure),
+                }).await.unwrap();
 
-                let p = pipeline(
-                    parsed_pipeline.clone(),
-                    internal_msg,
-                    output.clone(),
-                    task_count.clone(),
-                );
+                // while Arc::strong_count(&task_count) >= max_tasks {
+                //     trace!("waiting for open thread");
+                //     sleep(Duration::from_millis(50)).await;
+                // }
 
-                tokio::spawn(p);
+                // let p = pipeline(
+                //     parsed_pipeline.clone(),
+                //     internal_msg,
+                //     output.clone(),
+                //     task_count.clone(),
+                // );
+
+                bus.publish::<InternalMessage>("input", internal_msg).await.unwrap();
             }
             Err(e) => match e {
                 Error::EndOfInput => {
                     i.close()?;
                     debug!("input closed");
                     info!("shutting down input: end of input received");
+                    bus.publish::<ProcessingState>("processing-state", ProcessingState::InputComplete).await.unwrap();
                     return Ok(());
                 }
                 Error::NoInputToReturn => {
@@ -322,54 +600,48 @@ async fn input(
 
 async fn pipeline(
     pipeline: ParsedPipeline,
-    input: InternalMessage,
-    output: Sender<InternalMessage>,
-    _task_count: Arc<()>,
+    bus: fiddler_bus::EventBus<fiddler_bus::Connected>,
 ) -> Result<(), Error> {
     trace!("starting pipeline");
-    let (tx, mut rx) = bounded(1);
-    yield_sender(&tx, input).await?;
-    drop(tx);
-
-    let mut channels: HashMap<usize, InternalChannel> = HashMap::new();
-    for n in 0..pipeline.processors.len() {
-        let (tx, rx) = bounded(pipeline.processors.len());
-        channels.insert(n, InternalChannel { tx, rx });
-    }
-
-    debug!(num_processors = channels.len(), "starting processors");
-
+    
     let mut pipelines = JoinSet::new();
 
     for i in 0..pipeline.processors.len() {
-        let ic = channels.get(&i).unwrap().clone();
         let p = pipeline.processors[i].clone();
+        let subscription = match i {
+            0 => "input".into(),
+            _ => format!("processor{}", i-1),
+        };
 
-        pipelines.spawn(async move { run_processor(rx, ic.tx, p).await });
+        let publisher = if (i+1) == pipeline.processors.len() {
+            "output".into()
+        } else {
+            format!("processor{}", i)
+        };
 
-        rx = ic.rx;
+        let b = bus.clone();
+        pipelines.spawn(async move { run_processor(b, subscription, publisher, p, i).await });
     }
 
-    pipelines.spawn(async move { channel_forward(rx, output).await });
-
-    // drop channels so processors will close once finished
-    drop(channels);
-
     while let Some(res) = pipelines.join_next().await {
+        println!("proc complete");
         res.map_err(|e| Error::ProcessingError(format!("{}", e)))??;
     }
 
     debug!("shutting down pipeline");
+    bus.publish::<ProcessingState>("processing-state", ProcessingState::PipelineComplete).await.unwrap();
 
     Ok(())
 }
 
 async fn run_processor(
-    input: Receiver<InternalMessage>,
-    output: Sender<InternalMessage>,
+    bus: fiddler_bus::EventBus<fiddler_bus::Connected>,
+    subscription: String,
+    publisher: String,
     processor: ParsedRegisteredItem,
+    id: usize,
 ) -> Result<(), Error> {
-    trace!("Started processor");
+    trace!(subscribed_to = subscription, publish_to = publisher, "Started processor");
     let p = match &processor.execution_type {
         ExecutionType::Processor(p) => p,
         _ => {
@@ -377,6 +649,9 @@ async fn run_processor(
             return Err(Error::Validation("invalid execution type".into()));
         }
     };
+
+    let (sub_id, mut input) = bus.subscribe::<InternalMessage>(&subscription).await.unwrap();
+    bus.publish::<ProcessingState>("processing-state", ProcessingState::ProcessorSubscribe((id, sub_id))).await.unwrap();
 
     loop {
         match input.try_recv() {
@@ -388,23 +663,23 @@ async fn run_processor(
                             let mut new_msg = msg.clone();
                             new_msg.message = m.clone();
                             if i > 0 {
-                                match new_msg.active_count.lock() {
-                                    Ok(l) => {
-                                        let mut lock = l.borrow_mut();
-                                        *lock += 1;
-                                    }
-                                    Err(_) => return Err(Error::UnableToSecureLock),
-                                };
+                                bus.publish::<InternalMessageState>("message-state", InternalMessageState{
+                                    message_id: msg.message_id.clone(),
+                                    status: MessageStatus::New,
+                                }).await.unwrap();
                             };
-
-                            yield_sender(&output, new_msg).await?;
+                            trace!("message processed");
+                            bus.publish::<InternalMessage>(&publisher, new_msg).await.unwrap();
                         }
                     }
                     Err(e) => match e {
                         Error::ConditionalCheckfailed => {
                             debug!("conditional check failed for processor");
 
-                            yield_sender(&output, msg).await?;
+                            bus.publish::<InternalMessageState>("message-state", InternalMessageState{
+                                message_id: msg.message_id,
+                                status: MessageStatus::ProcessError(format!("{}", e)),
+                            }).await.unwrap();
                         }
                         _ => {
                             error!(error = format!("{}", e), "read error from processor");
@@ -417,6 +692,7 @@ async fn run_processor(
                 TryRecvError::Disconnected => {
                     p.close()?;
                     debug!("processor closed");
+                    bus.publish::<ProcessingState>("processing-state", ProcessingState::ProcessorComplete(id)).await.unwrap();
                     return Ok(());
                 }
                 TryRecvError::Empty => sleep(Duration::from_millis(250)).await,
@@ -427,8 +703,8 @@ async fn run_processor(
 }
 
 async fn output(
+    bus: fiddler_bus::EventBus<fiddler_bus::Connected>,
     output: ParsedRegisteredItem,
-    input: Receiver<InternalMessage>,
 ) -> Result<(), Error> {
     trace!("started output");
     let o = match &output.execution_type {
@@ -442,35 +718,40 @@ async fn output(
     o.connect()?;
     debug!("output connected");
 
+    let (sub_id, mut input) = bus.subscribe::<InternalMessage>("output").await.unwrap();
+    bus.publish::<ProcessingState>("processing-state", ProcessingState::OutputSubscribe(sub_id)).await.unwrap();
+
     loop {
         match input.try_recv() {
             Ok(mut msg) => {
                 trace!("received output message");
                 match o.write(msg.message.clone()).await {
                     Ok(_) => {
-                        let active_count = decrease_active_count(&mut msg).await?;
-                        if active_count == 0 {
-                            let errs = get_errors(&msg).await;
-                            let status = match errs.len() {
-                                0 => Status::Processed,
-                                _ => Status::Errored(errs),
-                            };
-
-                            send_status(&mut msg, status).await?;
-                        };
+                        println!("output publishing state now");
+                        bus.publish::<InternalMessageState>("message-state", InternalMessageState{
+                            message_id: msg.message_id,
+                            status: MessageStatus::Output,
+                        }).await.unwrap();
+                        println!("done output msg");
                     }
                     Err(e) => match e {
                         Error::ConditionalCheckfailed => {
                             debug!("conditional check failed for output");
                         }
                         _ => {
-                            add_error(&mut msg, format!("{}", e)).await?;
-                            let active_count = decrease_active_count(&mut msg).await?;
-                            if active_count == 0 {
-                                let errs = get_errors(&msg).await;
-                                send_status(&mut msg, Status::Errored(errs)).await?;
-                            };
-                            error!(error = format!("{}", e), "write error from output");
+                            println!("publishing error");
+                            bus.publish::<InternalMessageState>("message-state", InternalMessageState{
+                                message_id: msg.message_id,
+                                status: MessageStatus::OutputError(format!("{}", e)),
+                            }).await.unwrap();
+                            println!("error published");
+                            // add_error(&mut msg, format!("{}", e)).await?;
+                            // let active_count = decrease_active_count(&mut msg).await?;
+                            // if active_count == 0 {
+                            //     let errs = get_errors(&msg).await;
+                            //     send_status(&mut msg, Status::Errored(errs)).await?;
+                            // };
+                            // error!(error = format!("{}", e), "write error from output");
                         }
                     },
                 }
@@ -479,73 +760,15 @@ async fn output(
                 TryRecvError::Disconnected => {
                     o.close()?;
                     debug!("output closed");
+                    bus.publish::<ProcessingState>("processing-state", ProcessingState::OutputComplete).await.unwrap();
+                    bus.publish::<InternalMessageState>("message-state", InternalMessageState{
+                        message_id: "end of the line".into(),
+                        status: MessageStatus::Shutdown,
+                    }).await.unwrap();
                     return Ok(());
                 }
                 TryRecvError::Empty => sleep(Duration::from_millis(250)).await,
             },
         };
     }
-}
-
-async fn channel_forward(
-    input: Receiver<InternalMessage>,
-    output: Sender<InternalMessage>,
-) -> Result<(), Error> {
-    loop {
-        match input.try_recv() {
-            Ok(msg) => {
-                yield_sender(&output, msg).await?;
-            }
-            Err(e) => match e {
-                TryRecvError::Disconnected => {
-                    trace!("shutting down output forwarder");
-                    return Ok(());
-                }
-                TryRecvError::Empty => {}
-            },
-        };
-        yield_now().await;
-    }
-}
-
-async fn get_errors(message: &InternalMessage) -> Vec<String> {
-    match message.errors.lock() {
-        Ok(l) => {
-            let err = l.borrow_mut();
-            let errs: Vec<String> = err.iter().map(|e| e.to_string()).collect();
-            errs
-        }
-        Err(_) => Vec::new(),
-    }
-}
-
-async fn decrease_active_count(message: &mut InternalMessage) -> Result<usize, Error> {
-    match message.active_count.lock() {
-        Ok(l) => {
-            let mut lock = l.borrow_mut();
-            *lock -= 1;
-            trace!("message has {} copies to process", lock);
-            Ok(*lock)
-        }
-        Err(_) => Err(Error::UnableToSecureLock),
-    }
-}
-
-async fn add_error(message: &mut InternalMessage, error: String) -> Result<(), Error> {
-    match message.errors.lock() {
-        Ok(l) => {
-            let mut err = l.borrow_mut();
-            err.push(error);
-            Ok(())
-        }
-        Err(_) => Err(Error::UnableToSecureLock),
-    }
-}
-
-async fn send_status(message: &mut InternalMessage, status: Status) -> Result<(), Error> {
-    let (s, _) = oneshot::channel();
-    let chan = mem::replace(&mut message.closure, Arc::new(s));
-    let c = Arc::into_inner(chan).unwrap();
-    let _ = c.send(status);
-    Ok(())
 }

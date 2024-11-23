@@ -158,7 +158,7 @@ fn create_elasticsearch(conf: &Value) -> Result<ExecutionType, Error> {
     Ok(ExecutionType::Output(Arc::new(Box::new(elastic))))
 }
 
-#[cfg_attr(feature = "elasticsearch", fiddler_registration_func)]
+// #[cfg_attr(feature = "elasticsearch", fiddler_registration_func)]
 pub fn register_elasticsearch() -> Result<(), Error> {
     let config = "type: object
 properties:

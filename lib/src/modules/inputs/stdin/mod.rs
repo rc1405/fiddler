@@ -51,7 +51,7 @@ fn create_stdin(_conf: &Value) -> Result<ExecutionType, Error> {
     Ok(ExecutionType::Input(Arc::new(Box::new(StdIn{}))))
 }
 
-#[fiddler_registration_func]
+// #[fiddler_registration_func]
 pub fn register_stdin() -> Result<(), Error> {
     let config = "type: object";
     let conf_spec = ConfigSpec::from_schema(config)?;

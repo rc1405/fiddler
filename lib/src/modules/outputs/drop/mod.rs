@@ -34,7 +34,7 @@ fn create_drop(_conf: &Value) -> Result<ExecutionType, Error> {
     Ok(ExecutionType::Output(Arc::new(Box::new(StdDrop{}))))
 }
 
-#[fiddler_registration_func]
+// #[fiddler_registration_func]
 pub fn register_drop() -> Result<(), Error> {
     let config = "type: object";
     let conf_spec = ConfigSpec::from_schema(config)?;

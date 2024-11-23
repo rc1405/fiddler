@@ -11,7 +11,7 @@ use std::fs;
 use std::path::PathBuf;
 
 use fiddler::config::Config;
-use fiddler::Environment;
+use fiddler::Runtime;
 use fiddler::Error;
 
 mod input;
@@ -45,7 +45,7 @@ pub async fn handle_tests(configs: Vec<String>) -> Result<(), Error> {
         let conf = fs::read_to_string(&c)
             .map_err(|e| Error::ConfigurationItemNotFound(format!("cannot read {}: {}", c, e)))?;
         let config: Config = serde_yaml::from_str(&conf)?;
-        let _ = Environment::from_config(&conf)?;
+        let _ = Runtime::from_config(&conf)?;
         let _ = config.validate()?;
 
         let path = PathBuf::from(&c);
@@ -68,7 +68,7 @@ pub async fn handle_tests(configs: Vec<String>) -> Result<(), Error> {
 
         let tests: Vec<Test> = serde_yaml::from_str(&test_file)?;
         for test in tests {
-            let mut env = Environment::from_config(&conf)?;
+            let mut env = Runtime::from_config(&conf)?;
 
             let i = Input {
                 input: test.inputs.clone(),

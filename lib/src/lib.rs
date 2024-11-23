@@ -1,17 +1,18 @@
+use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::collections::HashMap;
 use tokio::sync::oneshot;
 
 use thiserror::Error;
 pub mod config;
-mod env;
+mod runtime;
 pub mod modules;
 use async_trait::async_trait;
-pub use env::Environment;
+pub use runtime::Runtime;
 
 mod macros;
 
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
 pub struct Message {
     pub bytes: Vec<u8>,
     pub metadata: HashMap<String, Value>,

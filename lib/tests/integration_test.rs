@@ -1,12 +1,56 @@
 #![allow(dead_code)]
-use fiddler::Environment;
+use fiddler::Runtime;
 
 mod dependencies;
 use dependencies::{generator, jsongenerator, mock, output, processor};
 use std::path::MAIN_SEPARATOR_STR;
 use std::sync::Once;
 
+use tracing_subscriber::filter::{EnvFilter, LevelFilter};
+
 static REGISTER: Once = Once::new();
+
+#[tokio::test]
+async fn fiddler_single_event() {
+  let config = "input:
+  generator: 
+    count: 1
+pipeline:
+  processors:
+    - label: my_cool_mapping
+      noop: {}
+output:
+  validate:
+    expected: 
+      - 'Hello World 0'";
+
+  REGISTER.call_once(|| {
+      mock::register_mock_input().unwrap();
+      jsongenerator::register_json_generator().unwrap();
+      generator::register_generator().unwrap();
+      processor::register_echo().unwrap();
+      output::register_validate().unwrap();
+  });
+
+  std::env::set_var("TestingEnvVarReplacement", "ReplacementSuccessful");
+
+
+  // let filter = EnvFilter::builder()
+  //   .with_default_directive(LevelFilter::OFF.into())
+  //   .from_env()
+  //   .unwrap()
+  //   .add_directive(format!("fiddler::runtime={}", LevelFilter::TRACE).parse().unwrap())
+  //   .add_directive(format!("fiddler_bus={}", LevelFilter::TRACE).parse().unwrap());
+
+  // tracing_subscriber::fmt()
+  //     .with_env_filter(filter)
+  //     .compact()
+  //     .json()
+  //     .init();
+
+  let env = Runtime::from_config(config).unwrap();
+  env.run().await.unwrap();
+}
 
 #[tokio::test]
 async fn end_to_end() {
@@ -35,7 +79,7 @@ output:
         output::register_validate().unwrap();
     });
 
-    let env = Environment::from_config(config).unwrap();
+    let env = Runtime::from_config(config).unwrap();
     env.run().await.unwrap();
 }
 
@@ -71,7 +115,7 @@ output:
         output::register_validate().unwrap();
     });
 
-    let env = Environment::from_config(config).unwrap();
+    let env = Runtime::from_config(config).unwrap();
     env.run().await.unwrap();
 }
 
@@ -109,7 +153,7 @@ output:
         output::register_validate().unwrap();
     });
 
-    let env = Environment::from_config(config).unwrap();
+    let env = Runtime::from_config(config).unwrap();
     env.run().await.unwrap();
 }
 
@@ -150,7 +194,7 @@ output:
         output::register_validate().unwrap();
     });
 
-    let env = Environment::from_config(config).unwrap();
+    let env = Runtime::from_config(config).unwrap();
     env.run().await.unwrap();
 }
 
@@ -192,7 +236,7 @@ output:
         output::register_validate().unwrap();
     });
 
-    let env = Environment::from_config(config).unwrap();
+    let env = Runtime::from_config(config).unwrap();
     env.run().await.unwrap();
 }
 
@@ -235,7 +279,7 @@ output:
         output::register_validate().unwrap();
     });
 
-    let env = Environment::from_config(config).unwrap();
+    let env = Runtime::from_config(config).unwrap();
     env.run().await.unwrap();
 }
 
@@ -266,7 +310,7 @@ output:
         output::register_validate().unwrap();
     });
 
-    let env = Environment::from_config(&config).unwrap();
+    let env = Runtime::from_config(&config).unwrap();
     env.run().await.unwrap();
 }
 
@@ -297,7 +341,7 @@ output:
         output::register_validate().unwrap();
     });
 
-    let env = Environment::from_config(&config).unwrap();
+    let env = Runtime::from_config(&config).unwrap();
     env.run().await.unwrap();
 }
 
@@ -307,7 +351,6 @@ async fn fiddler_env_replacement_test() {
   json_generator: 
     count: 1
 pipeline:
-    max_in_flight: 1
     processors:
     - label: my_cool_mapping
       python: 
@@ -329,6 +372,6 @@ output:
 
     std::env::set_var("TestingEnvVarReplacement", "ReplacementSuccessful");
 
-    let env = Environment::from_config(config).unwrap();
+    let env = Runtime::from_config(config).unwrap();
     env.run().await.unwrap();
 }

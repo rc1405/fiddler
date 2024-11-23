@@ -29,7 +29,7 @@ fn create_noop(_conf: &Value) -> Result<ExecutionType, Error> {
     Ok(ExecutionType::Processor(Arc::new(Box::new(NoOp{}))))
 }
 
-#[fiddler_registration_func]
+// #[fiddler_registration_func]
 pub fn register_noop() -> Result<(), Error> {
     let config = "type: object";
     let conf_spec = ConfigSpec::from_schema(config)?;

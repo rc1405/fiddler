@@ -36,7 +36,7 @@ fn create_stdout(_conf: &Value) -> Result<ExecutionType, Error> {
     Ok(ExecutionType::Output(Arc::new(Box::new(StdOut{}))))
 }
 
-#[fiddler_registration_func]
+// #[fiddler_registration_func]
 pub fn register_stdout() -> Result<(), Error> {
     let config = "type: object";
     let conf_spec = ConfigSpec::from_schema(config)?;

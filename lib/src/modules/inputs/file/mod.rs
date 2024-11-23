@@ -246,7 +246,7 @@ fn create_file(conf: &Value) -> Result<ExecutionType, Error> {
     }))))
 }
 
-#[fiddler_registration_func]
+// #[fiddler_registration_func]
 pub fn register_file() -> Result<(), Error> {
     let config = "type: object
 properties:

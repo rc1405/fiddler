@@ -7,7 +7,7 @@ use testcontainers_modules::{
 use elasticsearch::{http::transport::Transport, Elasticsearch, SearchParts};
 
 #[allow(unused_imports)]
-use fiddler::Environment;
+use fiddler::Runtime;
 #[allow(unused_imports)]
 use serde_json::{json, Value};
 #[allow(unused_imports)]
@@ -40,7 +40,7 @@ output:
     url: http://127.0.0.1:{host_port}"
     );
 
-    let env = Environment::from_config(&config).unwrap();
+    let env = Runtime::from_config(&config).unwrap();
     env.run().await.unwrap();
 
     let sleep_time = std::time::Duration::from_secs(1);
