@@ -7,7 +7,11 @@ use serde_yaml::Value;
 use async_trait::async_trait;
 use serde::Deserialize;
 use fiddler_macros::fiddler_registration_func;
+use std::cell::RefCell;
+use tokio::sync::Mutex;
 use std::sync::Arc;
+use std::pin::Pin;
+use tokio::sync::mpsc::{Sender, Receiver, channel};
 
 use elasticsearch::{
     auth::Credentials, 
@@ -41,6 +45,13 @@ pub struct Elastic {
     cloud_id: Option<String>,
     index: String,
     cert_validation: Option<CertValidation>,
+    #[serde(skip)]
+    sender: Mutex<RefCell<Option<Sender<Request>>>>,
+}
+
+struct Request {
+    message: Message,
+    output: Sender<Result<(), Error>>,
 }
 
 impl Elastic {
@@ -85,27 +96,34 @@ impl Elastic {
     }
 }
 
-#[async_trait]
-impl Output for Elastic {
-    async fn write(&self, message: Message) -> Result<(), Error> {
-        let es_client = self.get_client()?;
-
-        let v: serde_json::Value = serde_json::from_slice(&message.bytes)?;
+async fn elasticsearch_handler(es_client: Elasticsearch, index: String, mut requests: Receiver<Request>) -> Result<(), Error> {
+    while let Some(req) = requests.recv().await {
+        let v: serde_json::Value = serde_json::from_slice(&req.message.bytes)?;
 
         let body: Vec<BulkOperation<_>> = vec![
             BulkOperation::index(v).into()
         ];
 
-        let response = es_client
-            .bulk(BulkParts::Index(&self.index))
+        let response = match es_client
+            .bulk(BulkParts::Index(&index))
             .body(body)
             .send()
-            .await
-            .map_err(|e| Error::OutputError(format!("{}", e)))?;
+            .await {
+                Ok(i) => i,
+                Err(e) => {
+                    let _ = req.output.send(Err(Error::OutputError(format!("{}", e)))).await;
+                    continue
+                },
+            };
 
-        let json: serde_json::Value = response.json()
-            .await
-            .map_err(|e| Error::OutputError(format!("{}", e)))?;
+        let json: serde_json::Value = match response.json()
+            .await {
+                Ok(i) => i,
+                Err(e) => {
+                    let _ = req.output.send(Err(Error::OutputError(format!("{}", e)))).await;
+                    continue
+                }
+            };
 
         match json["errors"].as_bool() {
             Some(_e) => {
@@ -117,15 +135,50 @@ impl Output for Elastic {
                             .collect();
 
                         if failed.len() > 0 {
-                            return Err(Error::OutputError(format!("failed to insert record: {}", failed.join(","))))
+                            let _ = req.output.send(Err(Error::OutputError(format!("failed to insert record: {}", failed.join(","))))).await;
+                            continue
                         }
                     },
-                    None => return Err(Error::OutputError("unable to deteremine result".into())),
+                    None => {
+                        let _ = req.output.send(Err(Error::OutputError("unable to deteremine result".into()))).await;
+                        continue
+                    },
                 }
             },
-            None => return Err(Error::OutputError("unable to deteremine result".into())),
-        }
+            None => {
+                let _ = {
+                    req.output.send(Err(Error::OutputError("unable to deteremine result".into()))).await;
+                    continue
+                };
+            },
+        };
 
+        req.output.send(Ok(())).await;
+    }
+    println!("exiting");
+
+    Ok(())
+}
+
+#[async_trait]
+impl Output for Elastic {
+    async fn write(&self, message: Message) -> Result<(), Error> {
+        let s = self.sender.lock().await;
+        let mut sender = s.replace(None);
+
+        match sender {
+            Some(ref mut r) => {
+                let (tx, mut rx) = channel(1);
+                r.send(Request {
+                    message,
+                    output: tx,
+                }).await.unwrap();
+                
+                rx.recv().await.unwrap()?;
+
+            },
+            None => {},
+        }
         Ok(())
     }
 }
@@ -136,9 +189,18 @@ impl Closer for Elastic {
     }
 }
 
+#[async_trait]
 impl Connect for Elastic {
-    fn connect(&self) -> Result<(), Error> {
-        let _ = self.get_client()?;
+    async fn connect(&self) -> Result<(), Error> {
+        let c = self.get_client()?;
+        let (sender, receiver) = channel(1);
+        tokio::spawn(elasticsearch_handler(c, self.index.clone(), receiver));
+
+        let i = self.sender.lock().await;
+        let mut s = i.borrow_mut();
+        
+        *s = Some(sender);
+        
         Ok(())
     }
 }
@@ -155,7 +217,7 @@ fn create_elasticsearch(conf: &Value) -> Result<ExecutionType, Error> {
         return Err(Error::ConfigFailedValidation("cloud_id or url is required".into()))
     }
 
-    Ok(ExecutionType::Output(Arc::new(Box::new(elastic))))
+    Ok(ExecutionType::Output(Arc::new(elastic)))
 }
 
 // #[cfg_attr(feature = "elasticsearch", fiddler_registration_func)]

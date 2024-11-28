@@ -5,11 +5,10 @@ use surrealdb::engine::local::{Db, Mem};
 use surrealdb::method::Stream;
 use surrealdb::{Action, Surreal};
 use thiserror::Error;
-use tracing::{debug, error, info, trace};
 use tokio::sync::mpsc;
 use tokio::sync::mpsc::error::TrySendError;
-use tokio::task::yield_now;
 use tokio::time::{sleep, Duration};
+use tracing::{debug, error, info, trace};
 use uuid::Uuid;
 
 pub type Subscription<T> = mpsc::Receiver<T>;
@@ -45,12 +44,20 @@ pub enum Error {
     TopicDeleteError,
     #[error("TopicCreateError")]
     TopicCreateError,
-    #[error("Full")]
-    Full,
     #[error("SubscriptionIdNotFound")]
     SubscriptionDoesNotExist,
     #[error("UnsubscribeError")]
     UnsubscribeError,
+}
+
+#[derive(Debug, Error)]
+pub enum TryPublishError<T> {
+    #[error("Full")]
+    Full(T),
+    #[error("TopicDoesNotExist")]
+    TopicDoesNotExist,
+    #[error("InternalLookupError")]
+    InternalLookupError,
 }
 
 #[derive(Clone)]
@@ -67,14 +74,26 @@ pub struct EventBus<State = Disconnnected> {
 
 impl EventBus<Disconnnected> {
     pub async fn new() -> Result<EventBus<Connected>, Error> {
-        let db = Surreal::new::<Mem>(())
-            .await
-            .map_err(|_e| Error::UnableToInitializeEventBus)?;
+        let db = Surreal::new::<Mem>(()).await.map_err(|e| {
+            error!(
+                err = "UnableToInitializeEventBus",
+                "unable to initialize event bus"
+            );
+            trace!(err = format!("{}", e), "unable to initialize event bus");
+            Error::UnableToInitializeEventBus
+        })?;
 
         db.use_ns("eventbus")
             .use_db("eventbus")
             .await
-            .map_err(|_e| Error::UnableToInitializeEventBus)?;
+            .map_err(|e| {
+                error!(
+                    err = "UnableToInitializeEventBus",
+                    "unable to initialize event bus"
+                );
+                trace!(err = format!("{}", e), "unable to initialize event bus");
+                Error::UnableToInitializeEventBus
+            })?;
 
         Ok(EventBus {
             db,
@@ -94,40 +113,66 @@ impl EventBus<Connected> {
             })
             .await
             .map_err(|e| {
-                
                 if let surrealdb::Error::Db(e) = e {
                     match e {
                         surrealdb::error::Db::RecordExists { thing: _ } => {
-                            error!( err = "TopicExists", topic = topic, "topic exists");
+                            error!(err = "TopicExists", topic = topic, "topic exists");
                             Error::TopicExists(topic.into())
                         }
                         _ => {
-                            error!( err = format!("{}", e), topic = topic,  "failed to create topic");
+                            error!(
+                                err = "TopicCreateError",
+                                topic = topic,
+                                "failed to create topic"
+                            );
+                            trace!(
+                                err = format!("{}", e),
+                                topic = topic,
+                                "failed to create topic"
+                            );
                             Error::TopicCreateError
-                        },
+                        }
                     }
                 } else {
-                    error!( err = format!("{}", e), topic = topic,  "failed to create topic");
+                    error!(
+                        err = "TopicCreateError",
+                        topic = topic,
+                        "failed to create topic"
+                    );
+                    trace!(
+                        err = format!("{}", e),
+                        topic = topic,
+                        "failed to create topic"
+                    );
                     Error::TopicCreateError
                 }
             })?;
-        
+
         info!(topic = topic, "topic created");
         Ok(())
     }
 
     pub async fn delete_topic(&self, topic: &str) -> Result<(), Error> {
-        let t: Option<Topic> = self
-            .db
-            .delete(("topics", topic))
-            .await
-            .map_err(|e| {
-                error!( err = format!("{}", e), topic = topic,  "failed to delete topic");
-                Error::InternalLookupError
-            })?;
+        let t: Option<Topic> = self.db.delete(("topics", topic)).await.map_err(|e| {
+            error!(
+                err = "InternalLookupError",
+                topic = topic,
+                "failed to delete topic"
+            );
+            trace!(
+                err = format!("{}", e),
+                topic = topic,
+                "failed to delete topic"
+            );
+            Error::InternalLookupError
+        })?;
 
         if t.is_none() {
-            error!( err = "TopicDoesNotExist", topic = topic,  "failed to delete topic");
+            error!(
+                err = "TopicDoesNotExist",
+                topic = topic,
+                "failed to delete topic"
+            );
             return Err(Error::TopicDoesNotExist(topic.into()));
         }
 
@@ -136,7 +181,16 @@ impl EventBus<Connected> {
             .query(format!("DELETE type::table('{}');", topic))
             .await
             .map_err(|e| {
-                error!( err = format!("{}", e), topic = topic,  "failed to delete topic");
+                error!(
+                    err = "TopicDeleteError",
+                    topic = topic,
+                    "failed to delete topic"
+                );
+                trace!(
+                    err = format!("{}", e),
+                    topic = topic,
+                    "failed to delete topic"
+                );
                 Error::TopicDeleteError
             })?;
 
@@ -145,39 +199,85 @@ impl EventBus<Connected> {
     }
 
     pub async fn unsubscribe(&self, id: &str) -> Result<(), Error> {
-        debug!(subscription_id = id, "unsubscribe success");
-        let t: Option<Sub> = self
-            .db
-            .delete(("subscriptions", id))
-            .await
-            .map_err(|e| {
-                if let surrealdb::Error::Db(e) = e {
-                    match e {
-                        surrealdb::error::Db::NoRecordFound => {
-                            error!( err = "SubscriptionDoesNotExist", subscription_id = id, "failed to unsubscribe");
-                            Error::SubscriptionDoesNotExist
-                        }
-                        _ => {
-                            error!( err = format!("{}", e), subscription_id = id,  "failed to unsubscribe");
-                            Error::UnsubscribeError
-                        },
+        let _t: Option<Sub> = self.db.delete(("subscriptions", id)).await.map_err(|e| {
+            if let surrealdb::Error::Db(e) = e {
+                match e {
+                    surrealdb::error::Db::NoRecordFound => {
+                        error!(
+                            err = "SubscriptionDoesNotExist",
+                            subscription_id = id,
+                            "failed to unsubscribe"
+                        );
+                        Error::SubscriptionDoesNotExist
                     }
-                } else {
-                    error!( err = format!("{}", e), subscription_id = id,  "failed to unsubscribe");
-                    Error::UnsubscribeError
+                    _ => {
+                        error!(subscription_id = id, "failed to unsubscribe");
+                        trace!(
+                            err = format!("{}", e),
+                            subscription_id = id,
+                            "failed to unsubscribe"
+                        );
+                        Error::UnsubscribeError
+                    }
                 }
+            } else {
+                error!(
+                    err = "UnsubscribeError",
+                    subscription_id = id,
+                    "failed to unsubscribe"
+                );
+                trace!(
+                    err = format!("{}", e),
+                    subscription_id = id,
+                    "failed to unsubscribe"
+                );
+                Error::UnsubscribeError
+            }
         })?;
 
-        
+        debug!(subscription_id = id, "unsubscribe success");
         Ok(())
     }
 
-    pub async fn count<T: Serialize + DeserializeOwned + 'static>(&self, topic: &str) -> Result<usize, Error> {
-        let items: Vec<Item<T>> = self
-            .db
-            .select(topic)
-            .await
-            .map_err(|_e| Error::InternalLookupError)?;
+    pub async fn count<T: Serialize + DeserializeOwned + 'static>(
+        &self,
+        topic: &str,
+    ) -> Result<usize, Error> {
+        let items: Vec<Item<T>> = self.db.select(topic).await.map_err(|e| {
+            if let surrealdb::Error::Db(e) = e {
+                match e {
+                    surrealdb::error::Db::NoRecordFound => {
+                        error!(
+                            err = "TopicDoesNotExist",
+                            topic = topic,
+                            "failed to provide count"
+                        );
+                        Error::TopicDoesNotExist(topic.into())
+                    }
+                    _ => {
+                        error!(topic = topic, "failed to provide count");
+                        trace!(
+                            err = format!("{}", e),
+                            topic = topic,
+                            "failed to provide count"
+                        );
+                        Error::InternalLookupError
+                    }
+                }
+            } else {
+                error!(
+                    err = "InternalLookupError",
+                    topic = topic,
+                    "failed to provide count"
+                );
+                trace!(
+                    err = format!("{}", e),
+                    topic = topic,
+                    "failed to provide count"
+                );
+                Error::InternalLookupError
+            }
+        })?;
 
         trace!(topic = topic, count = items.len(), "topic event count");
         Ok(items.len())
@@ -189,66 +289,50 @@ impl EventBus<Connected> {
         item: T,
     ) -> Result<(), Error> {
         debug!(topic = topic, "publishing message");
-        let ct: Option<Topic> = self
-            .db
-            .select(("topics", topic))
-            .await
-            .map_err(|_e| Error::InternalLookupError)?;
 
-        let t = match ct {
-            Some(t) => t,
-            None => return Err(Error::TopicDoesNotExist(topic.into())),
-        };
+        let mut i = item;
 
-        if let Some(cap) = t.capacity {
-            let mut r: Vec<Item<T>> = self.db.select(topic).await.map_err(|_e| Error::InternalLookupError)?;
-            while r.len() >= cap {
-                // println!("Waiting to publish to {}", topic);
-                yield_now().await;
-                sleep(Duration::from_millis(500)).await;
-                r = self.db.select(topic).await.map_err(|_e| Error::InternalLookupError)?;
+        loop {
+            match self.try_publish(topic, i).await {
+                Ok(_) => return Ok(()),
+                Err(e) => match e {
+                    TryPublishError::Full(event) => {
+                        i = event;
+                        sleep(Duration::from_millis(50)).await;
+                    }
+                    TryPublishError::InternalLookupError => return Err(Error::InternalLookupError),
+                    TryPublishError::TopicDoesNotExist => {
+                        return Err(Error::TopicDoesNotExist(topic.into()))
+                    }
+                },
             }
         }
-
-
-        let id: String = Uuid::new_v4().into();
-
-        let i = Item {
-            item_id: id.clone(),
-            item,
-        };
-
-        let _: Option<Item<T>> = self
-            .db
-            .create((topic, id))
-            .content(i)
-            .await
-            .map_err(|_e| Error::InternalLookupError)?;
-
-        Ok(())
     }
 
     pub async fn try_publish<T: Serialize + DeserializeOwned + 'static>(
         &self,
         topic: &str,
         item: T,
-    ) -> Result<(), Error> {
-        debug!(topic = topic, "publishing message");
+    ) -> Result<(), TryPublishError<T>> {
+        trace!(topic = topic, "publishing message");
         let ct: Option<Topic> = self
             .db
             .select(("topics", topic))
             .await
-            .map_err(|_e| Error::InternalLookupError)?;
+            .map_err(|_e| TryPublishError::InternalLookupError)?;
 
         let t = match ct {
             Some(t) => t,
-            None => return Err(Error::TopicDoesNotExist(topic.into())),
+            None => return Err(TryPublishError::TopicDoesNotExist),
         };
 
         if let Some(cap) = t.capacity {
-            let r: Vec<Item<T>> = self.db.select(topic).await.map_err(|_e| Error::InternalLookupError)?;
+            let r: Vec<Item<T>> = match self.db.select(topic).await {
+                Err(_e) => return Err(TryPublishError::InternalLookupError),
+                Ok(i) => i,
+            };
             if r.len() >= cap {
-                return Err(Error::Full)
+                return Err(TryPublishError::Full(item));
             }
         }
 
@@ -264,7 +348,7 @@ impl EventBus<Connected> {
             .create((topic, id))
             .content(i)
             .await
-            .map_err(|_e| Error::InternalLookupError)?;
+            .map_err(|_e| TryPublishError::InternalLookupError)?;
 
         Ok(())
     }
@@ -287,25 +371,37 @@ impl EventBus<Connected> {
         };
 
         let subscriber_id: String = Uuid::new_v4().into();
-        debug!(topic = topic, subscription_id = subscriber_id, "subscription created");
+        debug!(
+            topic = topic,
+            subscription_id = subscriber_id,
+            "subscription created"
+        );
 
-        let _: Option<Sub> = self.db.create(("subscriptions", &subscriber_id))
-            .content(Sub{
+        let _: Option<Sub> = self
+            .db
+            .create(("subscriptions", &subscriber_id))
+            .content(Sub {
                 topic: topic.to_string(),
             })
             .await
             .map_err(|_e| Error::InternalLookupError)?;
-        
-        let relate = self.db.query(format!("RELATE subscriptions:`{0}`->subscribe->topics:`{1}`;", subscriber_id, topic))
+
+        let _relate = self
+            .db
+            .query(format!(
+                "RELATE subscriptions:`{0}`->subscribe->topics:`{1}`;",
+                subscriber_id, topic
+            ))
             .await
             .unwrap();
 
-        let current_events: Vec<Item<T>> = self.db
-            .select(topic)
-            .await
-            .unwrap();
+        let current_events: Vec<Item<T>> = self.db.select(topic).await.unwrap();
 
-        trace!("Received {} existing events from {}", current_events.len(), topic);
+        trace!(
+            "Received {} existing events from {}",
+            current_events.len(),
+            topic
+        );
 
         let mut stream = self
             .db
@@ -313,7 +409,7 @@ impl EventBus<Connected> {
             .live()
             .await
             .map_err(|_e| Error::InternalLookupError)?;
-                    
+
         let mut monitor: Stream<Option<Sub>> = self
             .db
             .select(("subscriptions", &subscriber_id))
@@ -323,18 +419,18 @@ impl EventBus<Connected> {
 
         let sub_id = subscriber_id.clone();
 
-        // let s = stream.next().await.unwrap().unwrap();
-        // s.action
         let (sender, receiver) = mpsc::channel(1);
         let db = self.db.clone();
         let t = topic.to_string();
 
-        // launch thread to watch for live changes, aka publishes for this topic
-        // self.runtime.spawn(async move {
         tokio::spawn(async move {
             trace!("in subscription handle");
             let terminating_closure = async {
-                trace!(subscription_id = subscriber_id, topic = t, "starting terminating handle");
+                trace!(
+                    subscription_id = subscriber_id,
+                    topic = t,
+                    "starting terminating handle"
+                );
                 db
                     // remove from subscribers
                     .query(format!("DELETE subscriptions:`{}`;", subscriber_id))
@@ -348,25 +444,30 @@ impl EventBus<Connected> {
             };
 
             for i in current_events {
-                trace!(subscription_id = subscriber_id, topic = t, "sending existing");
+                trace!(
+                    subscription_id = subscriber_id,
+                    topic = t,
+                    "sending existing"
+                );
                 let mut data = i.item;
                 while let Err(e) = sender.try_send(data) {
                     match e {
                         TrySendError::Full(d) => {
                             data = d;
                             sleep(Duration::from_millis(50)).await;
-                        },
+                        }
                         TrySendError::Closed(_) => {
                             terminating_closure.await;
-                            return
+                            return;
                         }
                     }
-                }                               
+                }
 
-                acknowledge_message_id(&db, &t, &subscriber_id, &i.item_id).await.unwrap();
+                acknowledge_message_id(&db, &t, &subscriber_id, &i.item_id)
+                    .await
+                    .unwrap();
+            }
 
-            };
-            
             loop {
                 tokio::select! {
                     _ = sender.closed() => {
@@ -383,9 +484,9 @@ impl EventBus<Connected> {
                         trace!(subscription_id = subscriber_id, topic = t, "received message from stream");
                         if let Some(Ok(item)) = s {
                             if item.action == Action::Create {
-                                let i: Item<T> = item.data;                
+                                let i: Item<T> = item.data;
                                 let mut data = i.item;
-        
+
                                 while let Err(e) = sender.try_send(data) {
                                     trace!(subscription_id = subscriber_id, topic = t, message_id = i.item_id, "sending message to channel");
                                     match e {
@@ -400,11 +501,11 @@ impl EventBus<Connected> {
                                             return
                                         }
                                     }
-                                }                               
-    
+                                }
+
                                 acknowledge_message_id(&db, &t, &subscriber_id, &i.item_id).await.unwrap();
                             };
-                            
+
                         } else {
                             error!(subscription_id = subscriber_id, topic = t, "i don't know what happens here");
                             terminating_closure.await;
@@ -419,19 +520,36 @@ impl EventBus<Connected> {
     }
 }
 
-async fn acknowledge_message_id(db: &Surreal<Db>, topic: &str, subscriber_id: &str, message_id: &str) -> Result<(), Error> {
-    trace!(subscription_id = subscriber_id, topic = topic, message_id = message_id, "acknowledging message");
+async fn acknowledge_message_id(
+    db: &Surreal<Db>,
+    topic: &str,
+    subscriber_id: &str,
+    message_id: &str,
+) -> Result<(), Error> {
+    trace!(
+        subscription_id = subscriber_id,
+        topic = topic,
+        message_id = message_id,
+        "acknowledging message"
+    );
     match db
         // acknowledge message received by subscriber
-        .query(format!("LET $table = type::thing('{1}', '{2}'); RELATE subscriptions:`{0}`->received->$table;", subscriber_id, topic, message_id))
+        .query(format!(
+            "LET $table = type::thing('{1}', '{2}'); RELATE subscriptions:`{0}`->received->$table;",
+            subscriber_id, topic, message_id
+        ))
         // delete message if received by all subscribers when published
-        .query(format!("LET $table = type::thing('{0}', '{1}');
+        .query(format!(
+            "LET $table = type::thing('{0}', '{1}');
 LET $recv = (SELECT <-received.in AS t FROM $table);
 LET $subs = (SELECT <-subscribe.in AS t FROM topics:`{0}`);
-IF array::is_empty(array::difference($subs.t, $recv.t)) THEN DELETE $table END;", topic, message_id))
-        .await {
-            Ok(_i) => Ok(()),
-            Err(e) => Err(Error::InternalLookupError),
+IF array::is_empty(array::difference($subs.t, $recv.t)) THEN DELETE $table END;",
+            topic, message_id
+        ))
+        .await
+    {
+        Ok(_i) => Ok(()),
+        Err(_e) => Err(Error::InternalLookupError),
     }
 }
 
@@ -520,22 +638,22 @@ mod tests {
                 name: "blah".into(),
             },
         )
-            .await
-            .unwrap();
+        .await
+        .unwrap();
 
-        match bus.try_publish::<Testing>(
-            &name,
-            Testing {
-                name: "blah".into(),
-            },
-        )
-        .await {
+        match bus
+            .try_publish::<Testing>(
+                &name,
+                Testing {
+                    name: "blah".into(),
+                },
+            )
+            .await
+        {
             Ok(_) => panic!("Expected Full error received None"),
-            Err(e) => {
-                match e {
-                    Error::Full => {},
-                    _ => panic!("Expected Full error received {:?}", e),
-                }
+            Err(e) => match e {
+                TryPublishError::Full(_) => {}
+                _ => panic!("Expected Full error received {:?}", e),
             },
         };
     }
@@ -552,31 +670,30 @@ mod tests {
                 name: "blah".into(),
             },
         )
+        .await
+        .unwrap();
+
+        match bus
+            .try_publish::<Testing>(
+                &name,
+                Testing {
+                    name: "blah".into(),
+                },
+            )
             .await
-            .unwrap();
-        
-        match bus.try_publish::<Testing>(
-            &name,
-            Testing {
-                name: "blah".into(),
-            },
-        )
-        .await {
+        {
             Ok(_) => panic!("Expected Full error received None"),
-            Err(e) => {
-                match e {
-                    Error::Full => {},
-                    _ => panic!("Expected Full error received {:?}", e),
-                }
+            Err(e) => match e {
+                TryPublishError::Full(_) => {}
+                _ => panic!("Expected Full error received {:?}", e),
             },
         };
 
         let mut topic = bus.subscribe::<Testing>(&name).await.unwrap().1;
         let _item1 = topic.recv().await.unwrap();
-        
+
         drop(topic);
     }
-
 
     #[tokio::test]
     async fn publish_item_topic_does_not_exist() {
@@ -659,8 +776,8 @@ mod tests {
                 name: "blah1".into(),
             },
         )
-            .await
-            .unwrap();
+        .await
+        .unwrap();
 
         bus.publish::<Testing>(
             &name,
@@ -668,8 +785,8 @@ mod tests {
                 name: "blah2".into(),
             },
         )
-            .await
-            .unwrap();
+        .await
+        .unwrap();
 
         bus.publish::<Testing>(
             &name,
@@ -677,8 +794,8 @@ mod tests {
                 name: "blah3".into(),
             },
         )
-            .await
-            .unwrap();
+        .await
+        .unwrap();
 
         // receive item 1
         let item1a = subscriber1.recv().await.unwrap();
@@ -721,7 +838,7 @@ mod tests {
         let name = String::from("testing");
         let bus = EventBus::new().await.unwrap();
         bus.create_topic(&name, None).await.unwrap();
-        
+
         bus.publish::<Testing>(
             &name,
             Testing {
@@ -737,14 +854,12 @@ mod tests {
         let (sub_id, mut topic) = bus.subscribe::<Testing>(&name).await.unwrap();
         let r: Vec<Relationship> = bus.db.select("subscribe").await.unwrap();
         assert_eq!(r.len(), 1);
-        
 
         let _item = topic.try_recv().unwrap();
 
         // event received from all parties, should not longer be in table.
         let exists: Vec<Item<Testing>> = bus.db.select(&name).await.unwrap();
         assert_eq!(exists.len(), 0);
-
     }
 
     #[tokio::test]

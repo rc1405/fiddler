@@ -21,7 +21,7 @@ struct CheckConfig {
 pub struct Check {
     _label: Option<String>,
     condition: String,
-    processors: Vec<Arc<Box<dyn Processor + Send + Sync>>>,
+    processors: Vec<Arc<dyn Processor + Send + Sync>>,
 }
 
 fn perform_check(condition: &str, json_str: String) -> Result<(), Error> {
@@ -87,7 +87,7 @@ fn create_check(conf: &Value) -> Result<ExecutionType, Error> {
         processors: steps,
     };
 
-    Ok(ExecutionType::Processor(Arc::new(Box::new(s))))
+    Ok(ExecutionType::Processor(Arc::new(s)))
 }
 
 pub fn register_check() -> Result<(), Error> {

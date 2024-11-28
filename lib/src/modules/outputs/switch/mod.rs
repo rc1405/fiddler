@@ -11,7 +11,7 @@ use std::sync::Arc;
 mod check;
 
 pub struct Switch {
-    steps: Vec<Arc<Box<dyn Output + Send + Sync>>>,
+    steps: Vec<Arc<dyn Output + Send + Sync>>,
 }
 
 #[async_trait]
@@ -47,8 +47,9 @@ impl Closer for Switch {
     }
 }
 
+#[async_trait]
 impl Connect for Switch {
-    fn connect(&self) -> Result<(), Error> {
+    async fn connect(&self) -> Result<(), Error> {
         Ok(())
     }
 }
@@ -67,7 +68,7 @@ fn create_switch(conf: &Value) -> Result<ExecutionType, Error> {
         steps,
     };
 
-    Ok(ExecutionType::Output(Arc::new(Box::new(s))))
+    Ok(ExecutionType::Output(Arc::new(s)))
 }
 
 // #[fiddler_registration_func]

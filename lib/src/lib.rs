@@ -36,8 +36,9 @@ pub trait Closer {
     fn close(&self) -> Result<(), Error>;
 }
 
+#[async_trait]
 pub trait Connect {
-    fn connect(&self) -> Result<(), Error>;
+    async fn connect(&self) -> Result<(), Error>;
 }
 
 #[async_trait]

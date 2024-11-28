@@ -41,14 +41,15 @@ impl Closer for StdIn {
     }
 }
 
+#[async_trait]
 impl Connect for StdIn {
-    fn connect(&self) -> Result<(), Error> {
+    async fn connect(&self) -> Result<(), Error> {
         Ok(())
     }
 }
 
 fn create_stdin(_conf: &Value) -> Result<ExecutionType, Error> {
-    Ok(ExecutionType::Input(Arc::new(Box::new(StdIn{}))))
+    Ok(ExecutionType::Input(Arc::new(StdIn{})))
 }
 
 // #[fiddler_registration_func]

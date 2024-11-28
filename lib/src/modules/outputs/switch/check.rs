@@ -19,7 +19,7 @@ struct CheckConfig {
 pub struct Check {
     _label: Option<String>,
     condition: String,
-    output: Arc<Box<dyn Output + Send + Sync>>,
+    output: Arc<dyn Output + Send + Sync>,
 }
 
 fn perform_check(condition: &str, json_str: String) -> Result<(), Error> {
@@ -53,8 +53,9 @@ impl Closer for Check {
     }
 }
 
+#[async_trait]
 impl Connect for Check {
-    fn connect(&self) -> Result<(), Error> {
+    async fn connect(&self) -> Result<(), Error> {
         self.output.close()
     }
 }
@@ -77,7 +78,7 @@ fn create_check(conf: &Value) -> Result<ExecutionType, Error> {
         output: out,
     };
 
-    Ok(ExecutionType::Output(Arc::new(Box::new(s))))
+    Ok(ExecutionType::Output(Arc::new(s)))
 }
 
 pub fn register_check() -> Result<(), Error> {

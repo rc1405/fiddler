@@ -50,15 +50,16 @@ impl Closer for JsonGenerator {
     }
 }
 
+#[async_trait]
 impl Connect for JsonGenerator {
-    fn connect(self: &Self) -> Result<(), Error> {
+    async fn connect(self: &Self) -> Result<(), Error> {
         Ok(())
     }
 }
 
 fn create_json_generator(conf: &Value) -> Result<ExecutionType, Error> {
     let g: JsonGenerator = serde_yaml::from_value(conf.clone())?;
-    return Ok(ExecutionType::Input(Arc::new(Box::new(g))));
+    return Ok(ExecutionType::Input(Arc::new(g)));
 }
 
 pub fn register_json_generator() -> Result<(), Error> {

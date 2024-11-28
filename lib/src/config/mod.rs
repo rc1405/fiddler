@@ -48,11 +48,11 @@ impl fmt::Display for ItemType {
 /// Enum for holding the implementation of the plugin trait to be called during processing
 #[derive(Clone)]
 pub enum ExecutionType {
-    Input(Arc<Box<dyn Input + Send + Sync>>),
-    InputBatch(Arc<Box<dyn InputBatch + Send + Sync>>),
-    Output(Arc<Box<dyn Output + Send + Sync>>),
-    OutputBatch(Arc<Box<dyn OutputBatch + Send + Sync>>),
-    Processor(Arc<Box<dyn Processor + Send + Sync>>),
+    Input(Arc<dyn Input + Send + Sync>),
+    InputBatch(Arc<dyn InputBatch + Send + Sync>),
+    Output(Arc<dyn Output + Send + Sync>),
+    OutputBatch(Arc<dyn OutputBatch + Send + Sync>),
+    Processor(Arc<dyn Processor + Send + Sync>),
 }
 
 static ENV: Lazy<Mutex<HashMap<ItemType, HashMap<String, RegisteredItem>>>> = Lazy::new(|| {

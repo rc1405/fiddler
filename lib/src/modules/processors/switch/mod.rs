@@ -12,7 +12,7 @@ use std::sync::Arc;
 mod check;
 
 pub struct Switch {
-    steps: Vec<Arc<Box<dyn Processor + Send + Sync>>>,
+    steps: Vec<Arc<dyn Processor + Send + Sync>>,
 }
 
 #[async_trait]
@@ -62,7 +62,7 @@ fn create_switch(conf: &Value) -> Result<ExecutionType, Error> {
         steps,
     };
 
-    Ok(ExecutionType::Processor(Arc::new(Box::new(s))))
+    Ok(ExecutionType::Processor(Arc::new(s)))
 }
 
 // #[fiddler_registration_func]

@@ -1,4 +1,3 @@
-// use crossbeam_channel::TryRecvError;
 use tokio::sync::mpsc::error::TryRecvError;
 use tokio::sync::mpsc::{Sender, Receiver, channel};
 use serde::Deserialize;
@@ -13,7 +12,7 @@ use tracing::{debug, error, info, trace};
 use std::collections::HashMap;
 use std::str::FromStr;
 use std::sync::Once;
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 use tokio::sync::Notify;
 use tokio::time::{sleep, Duration};
 use uuid::Uuid;
@@ -319,8 +318,6 @@ async fn state_handler(
                 match msg {
                     ProcessingState::InputComplete => {
                         println!("Received input complete");
-                        // close processor 0 sub
-                        // wait for prox 0 size == 0
                         let b = bus.clone();
 
                         let i = processor_subs.get(&0);
@@ -352,7 +349,6 @@ async fn state_handler(
                     },
                     ProcessingState::ProcessorComplete(i) => {
                         println!("Received state proc complete");
-                        // close processor i + 1 sub if exists
                         let index = i+1;
                         let topic = format!("processor{}", index);
                         let b = bus.clone();
@@ -375,11 +371,6 @@ async fn state_handler(
                     },
                     ProcessingState::PipelineComplete => {
                         println!("Received state pipeline complete");
-                        // close output sub
-                        // wait for size to == 0
-                        // while bus.count::<InternalMessage>("output").await.unwrap() > 0 {
-                        //     sleep(Duration::from_secs(5)).await
-                        // };
                         if let Some(ref id) = output_handle {
                             let rid = id.clone();
                             let b = bus.clone();
@@ -536,7 +527,7 @@ async fn input(
         }
     };
 
-    i.connect()?;
+    i.connect().await?;
     debug!("input connected");
 
     barrier.notified().await;
@@ -557,18 +548,6 @@ async fn input(
                     message_id,
                     closure: Arc::new(closure),
                 }).await.unwrap();
-
-                // while Arc::strong_count(&task_count) >= max_tasks {
-                //     trace!("waiting for open thread");
-                //     sleep(Duration::from_millis(50)).await;
-                // }
-
-                // let p = pipeline(
-                //     parsed_pipeline.clone(),
-                //     internal_msg,
-                //     output.clone(),
-                //     task_count.clone(),
-                // );
 
                 bus.publish::<InternalMessage>("input", internal_msg).await.unwrap();
             }
@@ -715,7 +694,7 @@ async fn output(
         }
     };
 
-    o.connect()?;
+    o.connect().await?;
     debug!("output connected");
 
     let (sub_id, mut input) = bus.subscribe::<InternalMessage>("output").await.unwrap();
@@ -745,13 +724,7 @@ async fn output(
                                 status: MessageStatus::OutputError(format!("{}", e)),
                             }).await.unwrap();
                             println!("error published");
-                            // add_error(&mut msg, format!("{}", e)).await?;
-                            // let active_count = decrease_active_count(&mut msg).await?;
-                            // if active_count == 0 {
-                            //     let errs = get_errors(&msg).await;
-                            //     send_status(&mut msg, Status::Errored(errs)).await?;
-                            // };
-                            // error!(error = format!("{}", e), "write error from output");
+
                         }
                     },
                 }

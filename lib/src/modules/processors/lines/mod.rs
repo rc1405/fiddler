@@ -28,7 +28,7 @@ impl Closer for Lines {
 }
 
 fn create_lines(_conf: &Value) -> Result<ExecutionType, Error> {
-    Ok(ExecutionType::Processor(Arc::new(Box::new(Lines{}))))
+    Ok(ExecutionType::Processor(Arc::new(Lines{})))
 }
 
 // #[fiddler_registration_func]

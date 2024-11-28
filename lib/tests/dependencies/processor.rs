@@ -29,7 +29,7 @@ impl Closer for Echo {
 }
 
 fn create_echo(_conf: &Value) -> Result<ExecutionType, Error> {
-    return Ok(ExecutionType::Processor(Arc::new(Box::new(Echo {}))));
+    return Ok(ExecutionType::Processor(Arc::new(Echo {})));
 }
 
 pub fn register_echo() -> Result<(), Error> {

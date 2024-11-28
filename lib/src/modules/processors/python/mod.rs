@@ -88,7 +88,7 @@ fn create_python(conf: &Value) -> Result<ExecutionType, Error> {
         p.use_string = b;
     };
 
-    Ok(ExecutionType::Processor(Arc::new(Box::new(p))))
+    Ok(ExecutionType::Processor(Arc::new(p)))
 }
 
 // #[cfg_attr(feature = "python", fiddler_registration_func)]

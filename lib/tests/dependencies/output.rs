@@ -59,18 +59,19 @@ impl Closer for Validate {
     }
 }
 
+#[async_trait]
 impl Connect for Validate {
-    fn connect(self: &Self) -> Result<(), Error> {
+    async fn connect(self: &Self) -> Result<(), Error> {
         Ok(())
     }
 }
 
 fn create_validator(conf: &Value) -> Result<ExecutionType, Error> {
     let g: ValidateSpec = serde_yaml::from_value(conf.clone())?;
-    return Ok(ExecutionType::Output(Arc::new(Box::new(Validate {
+    return Ok(ExecutionType::Output(Arc::new(Validate {
         expected: g.expected.clone(),
         count: Mutex::new(RefCell::new(0)),
-    }))));
+    })));
 }
 
 #[fiddler_registration_func]

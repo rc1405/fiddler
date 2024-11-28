@@ -24,14 +24,15 @@ impl Closer for StdDrop {
     }
 }
 
+#[async_trait]
 impl Connect for StdDrop {
-    fn connect(&self) -> Result<(), Error> {
+    async fn connect(&self) -> Result<(), Error> {
         Ok(())
     }
 }
 
 fn create_drop(_conf: &Value) -> Result<ExecutionType, Error> {
-    Ok(ExecutionType::Output(Arc::new(Box::new(StdDrop{}))))
+    Ok(ExecutionType::Output(Arc::new(StdDrop{})))
 }
 
 // #[fiddler_registration_func]

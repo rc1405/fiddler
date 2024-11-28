@@ -26,14 +26,15 @@ impl Closer for StdOut {
     }
 }
 
+#[async_trait]
 impl Connect for StdOut {
-    fn connect(&self) -> Result<(), Error> {
+    async fn connect(&self) -> Result<(), Error> {
         Ok(())
     }
 }
 
 fn create_stdout(_conf: &Value) -> Result<ExecutionType, Error> {
-    Ok(ExecutionType::Output(Arc::new(Box::new(StdOut{}))))
+    Ok(ExecutionType::Output(Arc::new(StdOut{})))
 }
 
 // #[fiddler_registration_func]

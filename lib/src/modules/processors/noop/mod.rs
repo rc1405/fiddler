@@ -26,7 +26,7 @@ impl Closer for NoOp {
 }
 
 fn create_noop(_conf: &Value) -> Result<ExecutionType, Error> {
-    Ok(ExecutionType::Processor(Arc::new(Box::new(NoOp{}))))
+    Ok(ExecutionType::Processor(Arc::new(NoOp{})))
 }
 
 // #[fiddler_registration_func]

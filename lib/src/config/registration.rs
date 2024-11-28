@@ -15,7 +15,7 @@ use tracing::{debug, error};
 /// let conf_spec = ConfigSpec::from_schema(conf_str).unwrap();
 ///
 /// register_plugin("noop".into(), ItemType::Processor, conf_spec, |v| {
-///     Ok(ExecutionType::Processor(Arc::new(Box::new(NoOp{}))))
+///     Ok(ExecutionType::Processor(Arc::new(NoOp{})))
 /// }).unwrap();
 /// ```
 pub fn register_plugin(

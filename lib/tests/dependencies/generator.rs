@@ -50,15 +50,16 @@ impl Closer for Generator {
     }
 }
 
+#[async_trait]
 impl Connect for Generator {
-    fn connect(self: &Self) -> Result<(), Error> {
+    async fn connect(self: &Self) -> Result<(), Error> {
         Ok(())
     }
 }
 
 fn create_generator(conf: &Value) -> Result<ExecutionType, Error> {
     let g: Generator = serde_yaml::from_value(conf.clone())?;
-    return Ok(ExecutionType::Input(Arc::new(Box::new(g))));
+    return Ok(ExecutionType::Input(Arc::new(g)));
 }
 
 pub fn register_generator() -> Result<(), Error> {
