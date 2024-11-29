@@ -6,8 +6,6 @@ use dependencies::{generator, jsongenerator, mock, output, processor};
 use std::path::MAIN_SEPARATOR_STR;
 use std::sync::Once;
 
-use tracing_subscriber::filter::{EnvFilter, LevelFilter};
-
 static REGISTER: Once = Once::new();
 
 #[tokio::test]
@@ -33,20 +31,6 @@ output:
   });
 
   std::env::set_var("TestingEnvVarReplacement", "ReplacementSuccessful");
-
-
-  // let filter = EnvFilter::builder()
-  //   .with_default_directive(LevelFilter::OFF.into())
-  //   .from_env()
-  //   .unwrap()
-  //   .add_directive(format!("fiddler::runtime={}", LevelFilter::TRACE).parse().unwrap())
-  //   .add_directive(format!("fiddler_bus={}", LevelFilter::TRACE).parse().unwrap());
-
-  // tracing_subscriber::fmt()
-  //     .with_env_filter(filter)
-  //     .compact()
-  //     .json()
-  //     .init();
 
   let env = Runtime::from_config(config).unwrap();
   env.run().await.unwrap();

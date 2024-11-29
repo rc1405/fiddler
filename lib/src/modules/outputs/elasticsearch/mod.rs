@@ -153,6 +153,7 @@ async fn elasticsearch_handler(es_client: Elasticsearch, index: String, mut requ
             },
         };
 
+        // use req.output.is_closed();
         req.output.send(Ok(())).await;
     }
     println!("exiting");

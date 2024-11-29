@@ -82,19 +82,20 @@ impl Closer for Assert {
     }
 }
 
+#[async_trait]
 impl Connect for Assert {
-    fn connect(&self) -> Result<(), Error> {
+    async fn connect(&self) -> Result<(), Error> {
         Ok(())
     }
 }
 
 fn create_assert(conf: &Value) -> Result<ExecutionType, Error> {
     let g: AssertSpec = serde_yaml::from_value(conf.clone())?;
-    Ok(ExecutionType::Output(Arc::new(Box::new(Assert {
+    Ok(ExecutionType::Output(Arc::new(Assert {
         expected: g.expected.clone(),
         count: Mutex::new(RefCell::new(0)),
         errors: Mutex::new(RefCell::new(Vec::new())),
-    }))))
+    })))
 }
 
 pub fn register_assert() -> Result<(), Error> {

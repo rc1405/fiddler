@@ -19,13 +19,11 @@ pub struct Switch {
 impl Processor for Switch {
     async fn process(&self, message: Message) -> Result<MessageBatch, Error> {
         'steps: for p in &self.steps {
-            println!("Starting new step");
             match p.process(message.clone()).await {
                 Ok(m) => return Ok(m),
                 Err(e) => {
                     match e {
                         Error::ConditionalCheckfailed => {
-                            println!("Errored: {}", e);
                             continue 'steps
                         },
                         _ => {

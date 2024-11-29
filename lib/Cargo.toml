@@ -48,6 +48,3 @@ pkg-config = "0.3.30"
 testcontainers = { version = "0.15.0", features = ["tokio"] }
 testcontainers-modules = { version = "0.3.7", features = ["elastic_search"]}
 tokio-test = "0.4.4"
-tracing = "0.1.40"
-tracing-subscriber = { version = "0.3.18", features = ["env-filter", "json"] }
-

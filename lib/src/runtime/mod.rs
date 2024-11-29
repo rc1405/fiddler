@@ -7,6 +7,7 @@ use tokio::task::yield_now;
 use tokio::task::JoinSet;
 use tokio::sync::oneshot;
 use std::mem;
+use std::fmt;
 use tracing::{debug, error, info, trace};
 
 use std::collections::HashMap;
@@ -45,6 +46,19 @@ enum MessageStatus {
     Output,
     OutputError(String),
     Shutdown,
+}
+
+impl fmt::Display for MessageStatus {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match *self {
+            MessageStatus::New => write!(f, "New"),
+            MessageStatus::Processed => write!(f, "Processed"),
+            MessageStatus::ProcessError(_) => write!(f, "ProcessError"),
+            MessageStatus::Output => write!(f, "Output"),
+            MessageStatus::OutputError(_) => write!(f, "OutputError"),
+            MessageStatus::Shutdown => write!(f, "Shutdown"),
+        }
+    }
 }
 
 #[derive(Clone, Serialize, Deserialize, Default)]
@@ -314,10 +328,9 @@ async fn state_handler(
     loop {
         tokio::select! {
             Some(msg) = proc_topic.recv() => {
-                println!("Received state message");
                 match msg {
                     ProcessingState::InputComplete => {
-                        println!("Received input complete");
+                        trace!("Received input complete state");
                         let b = bus.clone();
 
                         let i = processor_subs.get(&0);
@@ -328,27 +341,26 @@ async fn state_handler(
                                     sleep(Duration::from_secs(5)).await
                                 };
         
-                                println!("closing proc sub");
+                                trace!(topic = "processor0", "closing subscription");
                                 b.unsubscribe(&rid).await.unwrap();
                             });
                         } else {
-                            println!("no processor to unsubscribe");
+                            error!("no processor to unsubscribe");
                         };
 
                     },
                     ProcessingState::ProcessorSubscribe((i, id)) => {
-                        println!("Received state proc subscribe: {} {}", i, id);
+                        trace!(index = i, subscription_id = id, "Received processor subscribe state");
                         processor_subs.insert(i, id);
 
                         if processor_subs.len() == processor_count && output_handle.is_some() {
-                            println!("Waiting for barrier");
+                            trace!("notifying input to start");
                             barrier.notify_one();
-                            println!("barrier complete");
                         };
                         
                     },
                     ProcessingState::ProcessorComplete(i) => {
-                        println!("Received state proc complete");
+                        trace!(index = i, "Received processor complete state");
                         let index = i+1;
                         let topic = format!("processor{}", index);
                         let b = bus.clone();
@@ -358,46 +370,42 @@ async fn state_handler(
                             let rid = id.clone();
                             tokio::spawn(async move {
                                 while b.count::<InternalMessage>(&topic).await.unwrap() > 0 {
-                                    println!("proc greater than 0");
                                     sleep(Duration::from_secs(5)).await
                                 };
-                                println!("unsubscribing proc");
+                                trace!(topic = topic, "closing subscription");
                                 b.unsubscribe(&rid).await.unwrap();
                             });
                         } else {
-                            println!("no processing subs");
+                            error!("no processor to unsubscribe");
                         }
                         
                     },
                     ProcessingState::PipelineComplete => {
-                        println!("Received state pipeline complete");
+                        trace!("Received pipeline complete state");
                         if let Some(ref id) = output_handle {
                             let rid = id.clone();
                             let b = bus.clone();
                             tokio::spawn(async move {
                                 while b.count::<InternalMessage>("output").await.unwrap() > 0 {
-                                    println!("output greater than 0");
                                     sleep(Duration::from_secs(5)).await
                                 };
-                                println!("unsubscribing output");
+                                trace!(topic = "output", "closing subscription");
                                 b.unsubscribe(&rid).await.unwrap();
                             });
                         } else {
-                            println!("no output to unsub to");
+                            error!("no output to unsubscribe");
                         }
                     },
                     ProcessingState::OutputSubscribe(id) => {
-                        println!("Received state output sub");
+                        trace!(subscription_id = id, "Received output subscribe state");
                         output_handle = Some(id);
                         if processor_subs.len() == processor_count && output_handle.is_some() {
-                            println!("Waiting for barrier");
+                            trace!("notifying input to start");
                             barrier.notify_one();
-                            println!("barrier complete");
                         };
                     },
                     ProcessingState::OutputComplete => {
-                        println!("Received state output complete");
-                        // idfk
+                        trace!("Received output complete state");
                         bus.unsubscribe(&proc_id).await.unwrap();
                         return Ok(())
                     },
@@ -419,15 +427,16 @@ async fn message_handler(
     loop {
         tokio::select! {
             Some(msg) = input.recv() => {
-                println!("Received new message: {}", msg.message_id);
+                trace!(message_id = msg.message_id, "Received new message");
                 let closure = Arc::into_inner(msg.closure).unwrap();
                 let i = handles.insert(msg.message_id.clone(), State { instance_count: 1, processed_count: 0, processed_error_count: 0, output_count: 0, output_error_count: 0, closure: closure, errors: Vec::new() });
                 if i.is_some() {
+                    error!(message_id = msg.message_id, "Received duplicate message");
                     return Err(Error::ExecutionError("Duplicate Message ID Error".into()))
                 };
             },
             Some(msg) = msg_topic.recv() => {
-                println!("Received state message: {}", msg.message_id);
+                debug!(state = msg.status.to_string(), message_id = msg.message_id, "Received message state");
                 match msg.status {
                     MessageStatus::New => {
                         let m = handles.get_mut(&msg.message_id);
@@ -465,16 +474,15 @@ async fn message_handler(
                             Some(state) => {
                                 state.output_count += 1;
 
+                                debug!(message_id = msg.message_id, errors = state.processed_error_count, "message fully processed");
+
                                 if state.output_count == state.instance_count {
-                                    println!("send success");
                                     remove_entry = true;
                                     let (s, _) = oneshot::channel();
                                     let chan = mem::replace(&mut state.closure, s);
                                     let _ = chan.send(Status::Processed);
-                                    println!("send done");
                                     
-                                } else if state.instance_count == (state.output_count + state.output_error_count + state.processed_error_count) {
-                                    println!("send error");
+                                } else if state.instance_count == (state.output_count + state.output_error_count + state.processed_error_count) {                                    
                                     remove_entry = true;
                                     let (s, _) = oneshot::channel();
                                     let chan = mem::replace(&mut state.closure, s);
@@ -486,7 +494,7 @@ async fn message_handler(
                         };
 
                         if remove_entry {
-                            println!("Removing {}", msg.message_id);
+                            trace!(message_id = msg.message_id, "Removing message from state");
                             handles.remove(&msg.message_id);
                         }
                     },
@@ -555,7 +563,6 @@ async fn input(
                 Error::EndOfInput => {
                     i.close()?;
                     debug!("input closed");
-                    info!("shutting down input: end of input received");
                     bus.publish::<ProcessingState>("processing-state", ProcessingState::InputComplete).await.unwrap();
                     return Ok(());
                 }
@@ -603,7 +610,6 @@ async fn pipeline(
     }
 
     while let Some(res) = pipelines.join_next().await {
-        println!("proc complete");
         res.map_err(|e| Error::ProcessingError(format!("{}", e)))??;
     }
 
@@ -702,29 +708,24 @@ async fn output(
 
     loop {
         match input.try_recv() {
-            Ok(mut msg) => {
+            Ok(msg) => {
                 trace!("received output message");
                 match o.write(msg.message.clone()).await {
                     Ok(_) => {
-                        println!("output publishing state now");
                         bus.publish::<InternalMessageState>("message-state", InternalMessageState{
                             message_id: msg.message_id,
                             status: MessageStatus::Output,
                         }).await.unwrap();
-                        println!("done output msg");
                     }
                     Err(e) => match e {
                         Error::ConditionalCheckfailed => {
                             debug!("conditional check failed for output");
                         }
                         _ => {
-                            println!("publishing error");
                             bus.publish::<InternalMessageState>("message-state", InternalMessageState{
                                 message_id: msg.message_id,
                                 status: MessageStatus::OutputError(format!("{}", e)),
                             }).await.unwrap();
-                            println!("error published");
-
                         }
                     },
                 }

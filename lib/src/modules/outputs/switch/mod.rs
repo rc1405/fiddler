@@ -18,13 +18,11 @@ pub struct Switch {
 impl Output for Switch {
     async fn write(&self, message: Message) -> Result<(), Error> {
         'steps: for p in &self.steps {
-            println!("Starting new step");
             match p.write(message.clone()).await {
                 Ok(_) => return Ok(()),
                 Err(e) => {
                     match e {
                         Error::ConditionalCheckfailed => {
-                            println!("Errored: {}", e);
                             continue 'steps
                         },
                         _ => {

@@ -53,7 +53,6 @@ impl Processor for Check {
                 let m = p.process(m.clone()).await?;
                 new_messages.extend(m);
             };
-            println!("new messages: {:?}", new_messages);
             let _ = mem::replace(&mut messages, new_messages);
         };
         Ok(messages)

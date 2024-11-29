@@ -51,8 +51,9 @@ impl Closer for MockInput {
     }
 }
 
+#[async_trait]
 impl Connect for MockInput {
-    fn connect(&self) -> Result<(), Error> {
+    async fn connect(&self) -> Result<(), Error> {
         Ok(())
     }
 }
@@ -61,9 +62,9 @@ fn create_mock_input(conf: &Value) -> Result<ExecutionType, Error> {
     let mut g: MockInputConf = serde_yaml::from_value(conf.clone())?;
     g.input = g.input.iter().rev().cloned().collect();
 
-    Ok(ExecutionType::Input(Arc::new(Box::new(MockInput {
+    Ok(ExecutionType::Input(Arc::new(MockInput {
         input: Mutex::new(RefCell::new(g.input)),
-    }))))
+    })))
 }
 
 pub fn register_mock_input() -> Result<(), Error> {
