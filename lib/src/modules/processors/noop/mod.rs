@@ -1,11 +1,11 @@
-use crate::{Error, Processor, Closer};
-use crate::config::{ConfigSpec, ExecutionType};
 use crate::config::register_plugin;
 use crate::config::ItemType;
+use crate::config::{ConfigSpec, ExecutionType};
 use crate::Message;
 use crate::MessageBatch;
-use serde_yaml::Value;
+use crate::{Closer, Error, Processor};
 use async_trait::async_trait;
+use serde_yaml::Value;
 
 #[derive(Clone)]
 pub struct NoOp {}
@@ -20,7 +20,7 @@ impl Processor for NoOp {
 impl Closer for NoOp {}
 
 fn create_noop(_conf: &Value) -> Result<ExecutionType, Error> {
-    Ok(ExecutionType::Processor(Box::new(NoOp{})))
+    Ok(ExecutionType::Processor(Box::new(NoOp {})))
 }
 
 pub fn register_noop() -> Result<(), Error> {

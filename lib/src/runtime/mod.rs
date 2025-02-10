@@ -1,17 +1,17 @@
-use async_channel::{Sender, Receiver, bounded};
+use async_channel::{bounded, Receiver, Sender};
 use serde::Deserialize;
 use serde::Serialize;
 use serde_yaml::Value;
-use tokio::task::JoinSet;
-use tokio::sync::oneshot;
-use std::mem;
 use std::fmt;
+use std::mem;
+use tokio::sync::oneshot;
+use tokio::task::JoinSet;
 use tracing::{debug, error, info, trace};
 
 use std::collections::HashMap;
 use std::str::FromStr;
-use std::sync::Once;
 use std::sync::Arc;
+use std::sync::Once;
 use tokio::time::{sleep, Duration};
 use uuid::Uuid;
 
@@ -258,7 +258,6 @@ impl Runtime {
     pub async fn run(&self) -> Result<(), Error> {
         let mut handles = JoinSet::new();
 
-        
         let (msg_tx, msg_rx) = bounded(10000);
         let msg_state = message_handler(msg_rx, self.state_rx.clone());
         handles.spawn_blocking(move || {
@@ -273,19 +272,14 @@ impl Runtime {
         });
 
         println!("Starting output in run");
-        let output = self.output(self.config.output.clone(), &mut handles).await?;
+        let output = self
+            .output(self.config.output.clone(), &mut handles)
+            .await?;
         println!("Started output");
-               
-        let processors = self.pipeline(
-            output,
-            &mut handles,
-        ).await?;
 
-        let input = input(
-            self.config.input.clone(),
-            processors,
-            msg_tx,
-        );
+        let processors = self.pipeline(output, &mut handles).await?;
+
+        let input = input(self.config.input.clone(), processors, msg_tx);
 
         handles.spawn_blocking(move || {
             let runtime = tokio::runtime::Builder::new_multi_thread()
@@ -317,17 +311,22 @@ impl Runtime {
 
         let mut processors = self.config.processors.clone();
         processors.reverse();
-    
+
         let mut next_tx = input;
-    
+
         for i in 0..processors.len() {
             let p = processors[i].clone();
-    
+
             let (tx, rx) = bounded(100);
-    
+
             for n in 0..self.config.num_threads {
                 // tokio::spawn(processors::run_processor(p.clone(), next_tx.clone(), rx.clone(), self.state_tx.clone()));
-                let proc = processors::run_processor(p.clone(), next_tx.clone(), rx.clone(), self.state_tx.clone());
+                let proc = processors::run_processor(
+                    p.clone(),
+                    next_tx.clone(),
+                    rx.clone(),
+                    self.state_tx.clone(),
+                );
                 handles.spawn_blocking(move || {
                     let runtime = tokio::runtime::Builder::new_multi_thread()
                         .enable_all()
@@ -338,26 +337,26 @@ impl Runtime {
                         .expect("Creating tokio runtime");
                     runtime.block_on(proc)
                 });
-            };
-    
+            }
+
             next_tx = tx;
-        };
-        
+        }
+
         Ok(next_tx)
     }
-    
+
     async fn output(
         &self,
         output: ParsedRegisteredItem,
         handles: &mut JoinSet<Result<(), Error>>,
     ) -> Result<Sender<InternalMessage>, Error> {
         trace!("started output");
-    
+
         let (tx, rx) = bounded(100);
-    
+
         for i in 0..self.config.num_threads {
             println!("Starting output thread {}", i);
-            let item = (output.creator)(&output.config)?; 
+            let item = (output.creator)(&output.config)?;
             match item {
                 ExecutionType::Output(o) => {
                     // handles.spawn(outputs::run_output(rx.clone(), self.state_tx.clone(), o));
@@ -373,7 +372,7 @@ impl Runtime {
                             .expect("Creating tokio runtime");
                         runtime.block_on(outputs::run_output(new_rx, state_tx, o))
                     });
-                },
+                }
                 ExecutionType::OutputBatch(o) => {
                     // handles.spawn(outputs::run_output_batch(rx.clone(), self.state_tx.clone(), o))
                     let state_tx = self.state_tx.clone();
@@ -388,14 +387,14 @@ impl Runtime {
                             .expect("Creating tokio runtime");
                         runtime.block_on(outputs::run_output_batch(new_rx, state_tx, o))
                     });
-                },
+                }
                 _ => {
                     error!("invalid execution type for output");
-                    return Err(Error::Validation("invalid execution type".into()))
-                },
+                    return Err(Error::Validation("invalid execution type".into()));
+                }
             };
         }
-        
+
         Ok(tx)
     }
 }
@@ -409,7 +408,6 @@ struct State {
     closure: CallbackChan,
     errors: Vec<String>,
 }
-
 
 async fn message_handler(
     mut new_msg: Receiver<MessageHandle>,
@@ -474,8 +472,8 @@ async fn message_handler(
                                     let (s, _) = oneshot::channel();
                                     let chan = mem::replace(&mut state.closure, s);
                                     let _ = chan.send(Status::Processed);
-                                    
-                                } else if state.instance_count == (state.output_count + state.output_error_count + state.processed_error_count) {                                    
+
+                                } else if state.instance_count == (state.output_count + state.output_error_count + state.processed_error_count) {
                                     remove_entry = true;
                                     let (s, _) = oneshot::channel();
                                     let chan = mem::replace(&mut state.closure, s);
@@ -505,7 +503,7 @@ async fn message_handler(
                         return Ok(())
                     },
                 }
-            },       
+            },
             else => break,
         }
     }
@@ -552,14 +550,17 @@ async fn input(
                     status: MessageStatus::New,
                 };
 
-                state_handle.send(MessageHandle{
-                    message_id,
-                    closure: Arc::new(closure),
-                }).await.unwrap();
+                state_handle
+                    .send(MessageHandle {
+                        message_id,
+                        closure: Arc::new(closure),
+                    })
+                    .await
+                    .unwrap();
 
                 match output.send(internal_msg).await {
-                    Ok(_) => {},
-                    Err(e) => return Err(Error::UnableToSendToChannel(format!("{}", e)))
+                    Ok(_) => {}
+                    Err(e) => return Err(Error::UnableToSendToChannel(format!("{}", e))),
                 }
                 // count += 1;
             }
@@ -586,5 +587,3 @@ async fn input(
         }
     }
 }
-
-

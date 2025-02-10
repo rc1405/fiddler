@@ -1,28 +1,22 @@
-use crate::{Error, OutputBatch, Closer};
-use crate::config::{ConfigSpec, ExecutionType};
 use crate::config::register_plugin;
 use crate::config::ItemType;
+use crate::config::{ConfigSpec, ExecutionType};
 use crate::MessageBatch;
-use serde_yaml::Value;
+use crate::{Closer, Error, OutputBatch};
+use async_channel::{bounded, Receiver, Sender};
 use async_trait::async_trait;
 use serde::Deserialize;
+use serde_yaml::Value;
 use std::time::Duration;
-use async_channel::{Sender, Receiver, bounded};
 use tracing::debug;
 
 use elasticsearch::{
-    auth::Credentials, 
-    Elasticsearch, 
-    BulkOperation,
-    BulkParts,
+    auth::Credentials,
     http::{
-        transport::{
-            SingleNodeConnectionPool, 
-            Transport, 
-            TransportBuilder,
-        },
+        transport::{SingleNodeConnectionPool, Transport, TransportBuilder},
         Url,
-    }
+    },
+    BulkOperation, BulkParts, Elasticsearch,
 };
 
 use elasticsearch::cert::CertificateValidation;
@@ -31,7 +25,7 @@ use elasticsearch::cert::CertificateValidation;
 pub enum CertValidation {
     #[default]
     Default,
-    None
+    None,
 }
 
 #[derive(Deserialize, Default)]
@@ -55,7 +49,11 @@ struct Request {
 
 impl ElasticConfig {
     fn get_client(&self) -> Result<Elasticsearch, Error> {
-        let cert_validation = match self.cert_validation.clone().unwrap_or(CertValidation::Default) {
+        let cert_validation = match self
+            .cert_validation
+            .clone()
+            .unwrap_or(CertValidation::Default)
+        {
             CertValidation::None => CertificateValidation::None,
             _ => CertificateValidation::Default,
         };
@@ -65,11 +63,13 @@ impl ElasticConfig {
             let username = self.username.clone().unwrap();
             let password = self.password.clone().unwrap();
             let credentials = Credentials::Basic(username, password);
-            let transport = Transport::cloud(&cloud_id, credentials).map_err(|e| Error::ConfigFailedValidation(format!("{}", e)))?;
+            let transport = Transport::cloud(&cloud_id, credentials)
+                .map_err(|e| Error::ConfigFailedValidation(format!("{}", e)))?;
             Ok(Elasticsearch::new(transport))
         } else if self.username.is_some() {
             let url = self.url.clone().unwrap();
-            let es_url = Url::parse(&url).map_err(|e| Error::ConfigFailedValidation(format!("{}", e)))?;
+            let es_url =
+                Url::parse(&url).map_err(|e| Error::ConfigFailedValidation(format!("{}", e)))?;
             let connection_pool = SingleNodeConnectionPool::new(es_url);
             let username = self.username.clone().unwrap();
             let password = self.password.clone().unwrap();
@@ -82,7 +82,8 @@ impl ElasticConfig {
             Ok(Elasticsearch::new(transport))
         } else if self.url.is_some() {
             let url = self.url.clone().unwrap();
-            let es_url = Url::parse(&url).map_err(|e| Error::ConfigFailedValidation(format!("{}", e)))?;
+            let es_url =
+                Url::parse(&url).map_err(|e| Error::ConfigFailedValidation(format!("{}", e)))?;
             let connection_pool = SingleNodeConnectionPool::new(es_url);
             let transport = TransportBuilder::new(connection_pool)
                 .cert_validation(cert_validation)
@@ -90,71 +91,101 @@ impl ElasticConfig {
                 .map_err(|e| Error::ConfigFailedValidation(format!("{}", e)))?;
             Ok(Elasticsearch::new(transport))
         } else {
-            Err(Error::ConfigFailedValidation("unable to determine connection type".into()))
+            Err(Error::ConfigFailedValidation(
+                "unable to determine connection type".into(),
+            ))
         }
     }
 }
 
-async fn elasticsearch_handler(es_client: Elasticsearch, index: String, requests: Receiver<Request>) -> Result<(), Error> {
+async fn elasticsearch_handler(
+    es_client: Elasticsearch,
+    index: String,
+    requests: Receiver<Request>,
+) -> Result<(), Error> {
     while let Ok(req) = requests.recv().await {
         let mut body: Vec<BulkOperation<_>> = Vec::new();
-        
+
         for msg in req.message {
             let v: serde_json::Value = match serde_json::from_slice(&msg.bytes) {
                 Ok(i) => i,
-                Err(e) => {
-                    continue
-                }
+                Err(e) => continue,
             };
 
             body.push(BulkOperation::index(v).into());
-        };
+        }
 
         let response = match es_client
             .bulk(BulkParts::Index(&index))
             .body(body)
             .send()
-            .await {
-                Ok(i) => i,
-                Err(e) => {
-                    let _ = req.output.send(Err(Error::OutputError(format!("{}", e)))).await.unwrap();
-                    continue
-                },
-            };
+            .await
+        {
+            Ok(i) => i,
+            Err(e) => {
+                let _ = req
+                    .output
+                    .send(Err(Error::OutputError(format!("{}", e))))
+                    .await
+                    .unwrap();
+                continue;
+            }
+        };
 
-        let json: serde_json::Value = match response.json()
-            .await {
-                Ok(i) => i,
-                Err(e) => {
-                    let _ = req.output.send(Err(Error::OutputError(format!("{}", e)))).await.unwrap();
-                    continue
-                }
-            };
+        let json: serde_json::Value = match response.json().await {
+            Ok(i) => i,
+            Err(e) => {
+                let _ = req
+                    .output
+                    .send(Err(Error::OutputError(format!("{}", e))))
+                    .await
+                    .unwrap();
+                continue;
+            }
+        };
 
         match json["errors"].as_bool() {
-            Some(_e) => {
-                match json["items"].as_array() {
-                    Some(arr) => {
-                        let failed: Vec<String> = arr.iter()
-                            .filter(|v| !v["error"].is_null())
-                            .map(|v| format!("{}", v["error"]))
-                            .collect();
+            Some(_e) => match json["items"].as_array() {
+                Some(arr) => {
+                    let failed: Vec<String> = arr
+                        .iter()
+                        .filter(|v| !v["error"].is_null())
+                        .map(|v| format!("{}", v["error"]))
+                        .collect();
 
-                        if failed.len() > 0 {
-                            let _ = req.output.send(Err(Error::OutputError(format!("failed to insert record: {}", failed.join(","))))).await.unwrap();
-                            continue
-                        }
-                    },
-                    None => {
-                        let _ = req.output.send(Err(Error::OutputError("unable to deteremine result".into()))).await.unwrap();
-                        continue
-                    },
+                    if failed.len() > 0 {
+                        let _ = req
+                            .output
+                            .send(Err(Error::OutputError(format!(
+                                "failed to insert record: {}",
+                                failed.join(",")
+                            ))))
+                            .await
+                            .unwrap();
+                        continue;
+                    }
+                }
+                None => {
+                    let _ = req
+                        .output
+                        .send(Err(Error::OutputError(
+                            "unable to deteremine result".into(),
+                        )))
+                        .await
+                        .unwrap();
+                    continue;
                 }
             },
             None => {
-                let _ = req.output.send(Err(Error::OutputError("unable to deteremine result".into()))).await.unwrap();
-                continue
-            },
+                let _ = req
+                    .output
+                    .send(Err(Error::OutputError(
+                        "unable to deteremine result".into(),
+                    )))
+                    .await
+                    .unwrap();
+                continue;
+            }
         };
 
         // use req.output.is_closed();
@@ -168,10 +199,13 @@ impl OutputBatch for Elastic {
     async fn write_batch(&mut self, message: MessageBatch) -> Result<(), Error> {
         debug!("Received batch, sending");
         let (tx, rx) = bounded(1);
-        self.sender.send(Request {
-            message: message,
-            output: tx,
-        }).await.unwrap();
+        self.sender
+            .send(Request {
+                message: message,
+                output: tx,
+            })
+            .await
+            .unwrap();
         debug!("Waiting for results");
         rx.recv().await.unwrap()?;
         debug!("Done sending details");
@@ -194,22 +228,29 @@ fn create_elasticsearch(conf: &Value) -> Result<ExecutionType, Error> {
     let elastic: ElasticConfig = serde_yaml::from_value(conf.clone())?;
 
     if elastic.username.is_none() && elastic.password.is_some() {
-        return Err(Error::ConfigFailedValidation("password is set but username is not".into()))
-
+        return Err(Error::ConfigFailedValidation(
+            "password is set but username is not".into(),
+        ));
     } else if elastic.username.is_some() && elastic.password.is_none() {
-        return Err(Error::ConfigFailedValidation("username is set but password is not".into()))
-
-    } else if elastic.cloud_id.is_some() && (elastic.username.is_none() || elastic.password.is_none()) {
-        return Err(Error::ConfigFailedValidation("cloud_id is set but username and/or password are not".into()))
-
+        return Err(Error::ConfigFailedValidation(
+            "username is set but password is not".into(),
+        ));
+    } else if elastic.cloud_id.is_some()
+        && (elastic.username.is_none() || elastic.password.is_none())
+    {
+        return Err(Error::ConfigFailedValidation(
+            "cloud_id is set but username and/or password are not".into(),
+        ));
     } else if elastic.cloud_id.is_none() && elastic.url.is_none() {
-        return Err(Error::ConfigFailedValidation("cloud_id or url is required".into()))
+        return Err(Error::ConfigFailedValidation(
+            "cloud_id or url is required".into(),
+        ));
     }
 
     let c = elastic.get_client()?;
     let (sender, receiver) = bounded(1);
     tokio::spawn(elasticsearch_handler(c, elastic.index.clone(), receiver));
-    Ok(ExecutionType::OutputBatch(Box::new(Elastic{ sender })))
+    Ok(ExecutionType::OutputBatch(Box::new(Elastic { sender })))
 }
 
 // #[cfg_attr(feature = "elasticsearch", fiddler_registration_func)]
@@ -235,7 +276,12 @@ required:
   - index";
     let conf_spec = ConfigSpec::from_schema(config)?;
 
-    register_plugin("elasticsearch".into(), ItemType::OutputBatch, conf_spec, create_elasticsearch)
+    register_plugin(
+        "elasticsearch".into(),
+        ItemType::OutputBatch,
+        conf_spec,
+        create_elasticsearch,
+    )
 }
 
 #[cfg(test)]

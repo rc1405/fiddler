@@ -10,7 +10,7 @@ static REGISTER: Once = Once::new();
 
 #[tokio::test]
 async fn fiddler_single_event() {
-  let config = "input:
+    let config = "input:
   generator: 
     count: 1
 num_threads: 1
@@ -22,18 +22,18 @@ output:
     expected: 
       - 'Hello World 0'";
 
-  REGISTER.call_once(|| {
-      mock::register_mock_input().unwrap();
-      jsongenerator::register_json_generator().unwrap();
-      generator::register_generator().unwrap();
-      processor::register_echo().unwrap();
-      output::register_validate().unwrap();
-  });
+    REGISTER.call_once(|| {
+        mock::register_mock_input().unwrap();
+        jsongenerator::register_json_generator().unwrap();
+        generator::register_generator().unwrap();
+        processor::register_echo().unwrap();
+        output::register_validate().unwrap();
+    });
 
-  std::env::set_var("TestingEnvVarReplacement", "ReplacementSuccessful");
+    std::env::set_var("TestingEnvVarReplacement", "ReplacementSuccessful");
 
-  let env = Runtime::from_config(config).unwrap();
-  env.run().await.unwrap();
+    let env = Runtime::from_config(config).unwrap();
+    env.run().await.unwrap();
 }
 
 #[tokio::test]
@@ -337,7 +337,7 @@ output:
   validate:
     expected: 
       - |
-        {EXPECTED_OUTPUT}", 
+        {EXPECTED_OUTPUT}",
     );
 
     REGISTER.call_once(|| {

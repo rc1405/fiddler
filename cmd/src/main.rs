@@ -7,8 +7,8 @@ use std::fs;
 use std::process;
 use tracing_subscriber::filter::{EnvFilter, LevelFilter};
 
-use fiddler::Runtime;
 use fiddler::Error;
+use fiddler::Runtime;
 
 mod test;
 

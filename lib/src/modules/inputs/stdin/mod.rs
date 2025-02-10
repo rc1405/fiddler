@@ -1,11 +1,11 @@
-use async_std::io;
-use async_trait::async_trait;
-use crate::{Error, Input, Closer};
-use crate::config::{ConfigSpec, ExecutionType};
 use crate::config::register_plugin;
 use crate::config::ItemType;
+use crate::config::{ConfigSpec, ExecutionType};
 use crate::Message;
-use crate::{CallbackChan, new_callback_chan};
+use crate::{new_callback_chan, CallbackChan};
+use crate::{Closer, Error, Input};
+use async_std::io;
+use async_trait::async_trait;
 use serde_yaml::Value;
 
 pub struct StdIn {}
@@ -15,28 +15,34 @@ impl Input for StdIn {
     async fn read(&mut self) -> Result<(Message, CallbackChan), Error> {
         let mut buffer = String::new();
         let stdin = io::stdin();
-        stdin.read_line(&mut buffer).await.map_err(|_| Error::EndOfInput)?;
+        stdin
+            .read_line(&mut buffer)
+            .await
+            .map_err(|_| Error::EndOfInput)?;
         // remove new line character
         buffer.pop();
 
         if buffer == *"exit()" {
-            return Err(Error::EndOfInput)
+            return Err(Error::EndOfInput);
         };
 
         let (tx, rx) = new_callback_chan();
         tokio::spawn(rx);
 
-        Ok((Message{
-            bytes: buffer.into_bytes(),
-            ..Default::default()
-        }, tx))
+        Ok((
+            Message {
+                bytes: buffer.into_bytes(),
+                ..Default::default()
+            },
+            tx,
+        ))
     }
 }
 
 impl Closer for StdIn {}
 
 fn create_stdin(_conf: &Value) -> Result<ExecutionType, Error> {
-    Ok(ExecutionType::Input(Box::new(StdIn{})))
+    Ok(ExecutionType::Input(Box::new(StdIn {})))
 }
 
 // #[fiddler_registration_func]

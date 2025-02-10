@@ -18,9 +18,8 @@ pub struct Generator {
 #[async_trait]
 impl Input for Generator {
     async fn read(&mut self) -> Result<(Message, CallbackChan), Error> {
-
         if self.count <= 0 {
-            return Err(Error::EndOfInput)
+            return Err(Error::EndOfInput);
         }
 
         self.count -= 1;

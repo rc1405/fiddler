@@ -25,7 +25,8 @@ impl Output for Assert {
         let msg_str = String::from_utf8(message.bytes).unwrap();
 
         if self.count > self.expected.len() - 1 {
-            self.errors.push(format!("Received unexpected message: {}", msg_str));
+            self.errors
+                .push(format!("Received unexpected message: {}", msg_str));
             self.count += 1;
             return Ok(());
         };

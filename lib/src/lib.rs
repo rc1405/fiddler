@@ -6,8 +6,8 @@ use tokio::time::Duration;
 
 use thiserror::Error;
 pub mod config;
-mod runtime;
 pub mod modules;
+mod runtime;
 use async_trait::async_trait;
 pub use runtime::Runtime;
 
@@ -104,4 +104,3 @@ pub enum Error {
     #[error("NoInputToReturn")]
     NoInputToReturn,
 }
-

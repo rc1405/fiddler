@@ -18,9 +18,8 @@ pub struct JsonGenerator {
 #[async_trait]
 impl Input for JsonGenerator {
     async fn read(&mut self) -> Result<(Message, CallbackChan), Error> {
-
         if self.count <= 0 {
-            return Err(Error::EndOfInput)
+            return Err(Error::EndOfInput);
         };
 
         self.count -= 1;
@@ -30,7 +29,9 @@ impl Input for JsonGenerator {
 
         Ok((
             Message {
-                bytes: format!("{{\"Hello World\": {}}}", self.count).as_bytes().into(),
+                bytes: format!("{{\"Hello World\": {}}}", self.count)
+                    .as_bytes()
+                    .into(),
                 ..Default::default()
             },
             tx,

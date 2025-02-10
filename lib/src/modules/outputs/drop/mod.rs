@@ -1,10 +1,10 @@
-use crate::{Error, Output, Closer};
-use crate::config::{ConfigSpec, ExecutionType};
 use crate::config::register_plugin;
 use crate::config::ItemType;
+use crate::config::{ConfigSpec, ExecutionType};
 use crate::Message;
-use serde_yaml::Value;
+use crate::{Closer, Error, Output};
 use async_trait::async_trait;
+use serde_yaml::Value;
 
 #[derive(Clone)]
 pub struct StdDrop {}
@@ -19,7 +19,7 @@ impl Output for StdDrop {
 }
 
 fn create_drop(_conf: &Value) -> Result<ExecutionType, Error> {
-    Ok(ExecutionType::Output(Box::new(StdDrop{})))
+    Ok(ExecutionType::Output(Box::new(StdDrop {})))
 }
 
 // #[fiddler_registration_func]

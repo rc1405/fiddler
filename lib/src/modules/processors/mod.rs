@@ -5,12 +5,12 @@ pub mod noop;
 pub mod python;
 pub mod switch;
 
-use crate::config::{ParsedRegisteredItem, ExecutionType};
-use crate::runtime::{InternalMessage, ProcessingState, MessageStatus, InternalMessageState};
-use tracing::{debug, error, info, trace};
+use crate::config::{ExecutionType, ParsedRegisteredItem};
+use crate::runtime::{InternalMessage, InternalMessageState, MessageStatus, ProcessingState};
 use async_channel::{Receiver, Sender, TryRecvError};
-use tokio::time::{sleep, Duration};
 use tokio::task::yield_now;
+use tokio::time::{sleep, Duration};
+use tracing::{debug, error, info, trace};
 
 pub fn register_plugins() -> Result<(), Error> {
     lines::register_lines()?;
@@ -47,15 +47,20 @@ pub(crate) async fn run_processor(
                             let mut new_msg = msg.clone();
                             new_msg.message = m.clone();
                             if i > 0 {
-                                state_tx.send(InternalMessageState{
-                                    message_id: msg.message_id.clone(),
-                                    status: MessageStatus::New,
-                                }).await.unwrap();
+                                state_tx
+                                    .send(InternalMessageState {
+                                        message_id: msg.message_id.clone(),
+                                        status: MessageStatus::New,
+                                    })
+                                    .await
+                                    .unwrap();
                             };
                             trace!("message processed");
                             match output.send(new_msg).await {
-                                Ok(_) => {},
-                                Err(e) => return Err(Error::UnableToSendToChannel(format!("{}", e)))
+                                Ok(_) => {}
+                                Err(e) => {
+                                    return Err(Error::UnableToSendToChannel(format!("{}", e)))
+                                }
                             }
                         }
                     }
@@ -63,10 +68,13 @@ pub(crate) async fn run_processor(
                         Error::ConditionalCheckfailed => {
                             debug!("conditional check failed for processor");
 
-                            state_tx.send(InternalMessageState{
-                                message_id: msg.message_id,
-                                status: MessageStatus::ProcessError(format!("{}", e)),
-                            }).await.unwrap();
+                            state_tx
+                                .send(InternalMessageState {
+                                    message_id: msg.message_id,
+                                    status: MessageStatus::ProcessError(format!("{}", e)),
+                                })
+                                .await
+                                .unwrap();
                         }
                         _ => {
                             error!(error = format!("{}", e), "read error from processor");

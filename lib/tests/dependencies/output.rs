@@ -43,7 +43,11 @@ impl Output for Validate {
 impl Closer for Validate {
     async fn close(&mut self) -> Result<(), Error> {
         if self.count != self.expected.len() {
-            panic!("received {} calls: expected {}", self.count, self.expected.len());
+            panic!(
+                "received {} calls: expected {}",
+                self.count,
+                self.expected.len()
+            );
         };
         Ok(())
     }

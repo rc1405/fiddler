@@ -241,3 +241,4 @@ Apache License, Version 2.0, without any additional terms or conditions.
 OutputBatch provided as Output doesn't elevate the error
 CLI Test should only use one thread
 Add thread limit on output
+Update doc tests

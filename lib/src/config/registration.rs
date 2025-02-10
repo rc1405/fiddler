@@ -34,7 +34,11 @@ pub fn register_plugin(
                         error!(name = name.clone(), "plugin is already registered");
                         return Err(Error::DuplicateRegisteredName(name));
                     };
-                    debug!(name = name.clone(), plugin_type = format!("{}", itype), "plugin registered");
+                    debug!(
+                        name = name.clone(),
+                        plugin_type = format!("{}", itype),
+                        "plugin registered"
+                    );
                 }
                 None => {
                     error!(kind = "unable to borrow mut", "InternalServerError");

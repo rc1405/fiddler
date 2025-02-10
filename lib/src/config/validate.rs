@@ -1,8 +1,8 @@
 use super::{ExecutionType, ItemType, ParsedRegisteredItem, RegisteredItem, ENV};
 use crate::Error;
 use serde_yaml::Value;
-use tracing::{error, trace};
 use std::collections::HashMap;
+use tracing::{error, trace};
 
 /// The function takes the raw hashmap configuration item and looks up the registered
 /// plugin and returns the ParsedRegisteredItem with the execution logic for used during
@@ -76,10 +76,10 @@ pub fn parse_configuration_item(
                     error!("type validation failed");
                     return Err(Error::ConfigFailedValidation(
                         "invalid type returned for output".into(),
-                    ))
+                    ));
                 }
             };
-        },
+        }
         ItemType::Processor => {
             let creator = (item.creator)(content)?;
             match &creator {
@@ -94,7 +94,7 @@ pub fn parse_configuration_item(
     }
 
     trace!("Item {} parsed", first_key);
-    Ok(ParsedRegisteredItem{
+    Ok(ParsedRegisteredItem {
         creator: item.creator.clone(),
         config: content.clone(),
     })

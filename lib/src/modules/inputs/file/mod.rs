@@ -1,17 +1,17 @@
 use async_trait::async_trait;
-use tokio::sync::mpsc::{Sender, Receiver, channel};
+use tokio::sync::mpsc::{channel, Receiver, Sender};
 
-use crate::{Error, Input, Closer};
-use crate::config::{ConfigSpec, ExecutionType};
 use crate::config::register_plugin;
 use crate::config::ItemType;
+use crate::config::{ConfigSpec, ExecutionType};
 use crate::Message;
-use crate::{CallbackChan, new_callback_chan, Status};
-use serde_yaml::Value;
+use crate::{new_callback_chan, CallbackChan, Status};
+use crate::{Closer, Error, Input};
 use serde::Deserialize;
-use std::fs::{self, File, read_to_string};
-use std::sync::mpsc::{sync_channel, SyncSender, TryRecvError};
+use serde_yaml::Value;
+use std::fs::{self, read_to_string, File};
 use std::io::{prelude::*, BufReader, Seek, SeekFrom};
+use std::sync::mpsc::{sync_channel, SyncSender, TryRecvError};
 
 #[derive(Deserialize, Default)]
 enum CodecType {
@@ -28,7 +28,7 @@ enum ReaderType {
 }
 
 #[derive(Deserialize, Default)]
-struct FileReaderConfig{
+struct FileReaderConfig {
     filename: String,
     codec: CodecType,
     position_filename: Option<String>,
@@ -41,8 +41,10 @@ pub struct FileReader {
     receiver: Receiver<Result<(Message, CallbackChan), Error>>,
 }
 
-async fn read_file(reader: ReaderType, sender: Sender<Result<(Message, CallbackChan), Error>>) -> Result<(), Error> {
-    
+async fn read_file(
+    reader: ReaderType,
+    sender: Sender<Result<(Message, CallbackChan), Error>>,
+) -> Result<(), Error> {
     match reader {
         ReaderType::Lines(mut li) => {
             for line in li {
@@ -52,69 +54,86 @@ async fn read_file(reader: ReaderType, sender: Sender<Result<(Message, CallbackC
                         let (tx, rx) = new_callback_chan();
                         tokio::spawn(rx);
 
-                        sender.send(Ok((Message{
-                            bytes: line.into_bytes(),
-                            ..Default::default()
-                        }, tx))).await;
-                    },
+                        sender
+                            .send(Ok((
+                                Message {
+                                    bytes: line.into_bytes(),
+                                    ..Default::default()
+                                },
+                                tx,
+                            )))
+                            .await;
+                    }
                     Err(e) => {
                         sender.send(Err(Error::InputError(format!("{}", e)))).await;
-                        return Ok(())
+                        return Ok(());
                     }
                 }
-            };
+            }
 
             sender.send(Err(Error::EndOfInput)).await;
-            return Ok(())
-        },
+            return Ok(());
+        }
         ReaderType::ToEnd(mut f) => {
             let mut contents = String::new();
             match f.read_to_string(&mut contents) {
-                Ok(_) => {},
+                Ok(_) => {}
                 Err(e) => {
                     sender.send(Err(Error::InputError(format!("{}", e)))).await;
-                    return Ok(())
-                },
+                    return Ok(());
+                }
             };
-            
+
             let (tx, rx) = new_callback_chan();
             tokio::spawn(rx);
 
-            sender.send(Ok((Message{
-                bytes: contents.into_bytes(),
-                ..Default::default()
-            }, tx))).await;
+            sender
+                .send(Ok((
+                    Message {
+                        bytes: contents.into_bytes(),
+                        ..Default::default()
+                    },
+                    tx,
+                )))
+                .await;
 
             sender.send(Err(Error::EndOfInput)).await;
 
             return Ok(());
-        },
+        }
         ReaderType::Tail(filename, pos, sync) => {
-            let mut file = File::open(&filename).map_err(|e| Error::InputError(format!("{}: {}", filename, e)))?;
+            let mut file = File::open(&filename)
+                .map_err(|e| Error::InputError(format!("{}: {}", filename, e)))?;
             let mut current_pos = pos;
 
-            let metadata = file.metadata().map_err(|e| Error::InputError(format!("{}: {}", filename, e)))?;
+            let metadata = file
+                .metadata()
+                .map_err(|e| Error::InputError(format!("{}: {}", filename, e)))?;
             if metadata.len() < pos {
                 current_pos = 0;
                 sync.send(current_pos).unwrap();
             };
 
-            let _ = file.seek(SeekFrom::Start(current_pos.clone())).map_err(|e| Error::InputError(format!("{}: {}", filename, e)))?;
+            let _ = file
+                .seek(SeekFrom::Start(current_pos.clone()))
+                .map_err(|e| Error::InputError(format!("{}: {}", filename, e)))?;
             let mut reader = BufReader::new(file);
-            
+
             loop {
                 let mut line = String::new();
-                let len = reader.read_line(&mut line).map_err(|e| Error::InputError(format!("{}: {}", filename.clone(), e)))?;
-                
+                let len = reader
+                    .read_line(&mut line)
+                    .map_err(|e| Error::InputError(format!("{}: {}", filename.clone(), e)))?;
+
                 current_pos += len as u64;
-    
+
                 let s = sync.clone();
-    
+
                 if len == 0 {
                     sender.send(Err(Error::NoInputToReturn)).await;
-                    continue
+                    continue;
                 };
-    
+
                 // remove new line character
                 if line.ends_with('\n') {
                     line.pop();
@@ -122,7 +141,7 @@ async fn read_file(reader: ReaderType, sender: Sender<Result<(Message, CallbackC
                         line.pop();
                     }
                 };
-    
+
                 let (tx, rx) = new_callback_chan();
                 tokio::spawn(async move {
                     match rx.await {
@@ -130,24 +149,25 @@ async fn read_file(reader: ReaderType, sender: Sender<Result<(Message, CallbackC
                             if let Status::Processed = status {
                                 s.send(current_pos).unwrap();
                             };
-                        },
-                        Err(_) => {},
+                        }
+                        Err(_) => {}
                     };
                 });
-    
-                sender.send(Ok((Message{
-                    bytes: line.into_bytes(),
-                    ..Default::default()
-                },tx))).await;
-            }
-            
 
-            return Ok(())
+                sender
+                    .send(Ok((
+                        Message {
+                            bytes: line.into_bytes(),
+                            ..Default::default()
+                        },
+                        tx,
+                    )))
+                    .await;
+            }
+
+            return Ok(());
         }
     }
-
-
-
 }
 
 impl Closer for FileReader {}
@@ -158,7 +178,7 @@ impl Input for FileReader {
         // println!("reading input");
         match self.receiver.recv().await {
             Some(i) => i,
-            None => Err(Error::EndOfInput),        
+            None => Err(Error::EndOfInput),
         }
     }
 }
@@ -167,66 +187,87 @@ fn create_file(conf: &Value) -> Result<ExecutionType, Error> {
     let c: FileReaderConfig = serde_yaml::from_value(conf.clone())?;
     if let CodecType::Tail = c.codec {
         if c.position_filename.is_none() {
-            return Err(Error::ConfigFailedValidation("position_file must be included with tail type".into()))
+            return Err(Error::ConfigFailedValidation(
+                "position_file must be included with tail type".into(),
+            ));
         }
     }
 
-    let mut file = File::open(c.filename.clone()).map_err(|e| Error::InputError(format!("{}: {}", c.filename.clone(), e)))?;
+    let mut file = File::open(c.filename.clone())
+        .map_err(|e| Error::InputError(format!("{}: {}", c.filename.clone(), e)))?;
 
     let inner = match c.codec {
-        CodecType::Lines =>  {
+        CodecType::Lines => {
             let reader = BufReader::new(file);
             ReaderType::Lines(reader.lines())
-        },
+        }
         CodecType::ToEnd => ReaderType::ToEnd(file),
         CodecType::Tail => {
             let (sync_sender, receiver) = sync_channel(1);
-            let position_file_name = c.position_filename.clone().ok_or(Error::InputError("position file must be included".into()))?;
+            let position_file_name = c
+                .position_filename
+                .clone()
+                .ok_or(Error::InputError("position file must be included".into()))?;
             let position = read_to_string(position_file_name.clone()).unwrap_or("0".into());
             let mut current_position = position.parse::<u64>().unwrap_or(0);
 
-            let metadata = file.metadata().map_err(|e| Error::InputError(format!("{}: {}", c.filename.clone(), e)))?;
+            let metadata = file
+                .metadata()
+                .map_err(|e| Error::InputError(format!("{}: {}", c.filename.clone(), e)))?;
             if metadata.len() < current_position {
                 current_position = 0;
-                fs::write(position_file_name.clone(), format!("{current_position}")).map_err(|e| Error::InputError(format!("{}: {}", c.filename, e))).unwrap();
+                fs::write(position_file_name.clone(), format!("{current_position}"))
+                    .map_err(|e| Error::InputError(format!("{}: {}", c.filename, e)))
+                    .unwrap();
             };
 
-            let _ = file.seek(SeekFrom::Start(current_position)).map_err(|e| Error::InputError(format!("{}: {}", c.filename.clone(), e)))?;
+            let _ = file
+                .seek(SeekFrom::Start(current_position))
+                .map_err(|e| Error::InputError(format!("{}: {}", c.filename.clone(), e)))?;
 
             let passed_position_reader = current_position.clone();
             let filename = c.filename.clone();
 
             tokio::spawn(async move {
-                
                 loop {
                     match receiver.try_recv() {
                         Ok(msg) => {
                             if msg == 0 {
                                 current_position = 0;
-                                fs::write(position_file_name.clone(), format!("{current_position}")).map_err(|e| Error::InputError(format!("{}: {}", filename, e))); //.unwrap();
+                                fs::write(
+                                    position_file_name.clone(),
+                                    format!("{current_position}"),
+                                )
+                                .map_err(|e| Error::InputError(format!("{}: {}", filename, e)));
+                                //.unwrap();
                             };
 
                             if &msg > &current_position {
                                 current_position = msg;
-                                fs::write(position_file_name.clone(), format!("{current_position}")).map_err(|e| Error::InputError(format!("{}: {}", filename, e))); //.unwrap();
+                                fs::write(
+                                    position_file_name.clone(),
+                                    format!("{current_position}"),
+                                )
+                                .map_err(|e| Error::InputError(format!("{}: {}", filename, e)));
+                                //.unwrap();
                             };
-                        },
+                        }
                         Err(e) => {
                             if let TryRecvError::Empty = e {
                                 std::thread::sleep(std::time::Duration::from_millis(10));
-                                continue
+                                continue;
                             } else {
-                                return
+                                return;
                             }
-                        },
+                        }
                     }
-                };
+                }
             });
 
             ReaderType::Tail(c.filename.clone(), passed_position_reader, sync_sender)
         }
     };
-    
+
     let (sender, receiver) = channel(1000);
 
     tokio::task::spawn_blocking(move || {
@@ -239,8 +280,8 @@ fn create_file(conf: &Value) -> Result<ExecutionType, Error> {
             .expect("Creating tokio runtime");
         runtime.block_on(read_file(inner, sender))
     });
-    
-    Ok(ExecutionType::Input(Box::new(FileReader{
+
+    Ok(ExecutionType::Input(Box::new(FileReader {
         filename: c.filename,
         position_filename: c.position_filename,
         codec: c.codec,

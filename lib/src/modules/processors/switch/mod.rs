@@ -1,11 +1,11 @@
-use crate::{Error, Processor, Closer};
-use crate::config::{ConfigSpec, ExecutionType};
 use crate::config::register_plugin;
-use crate::config::{Item, ItemType, parse_configuration_item};
+use crate::config::{parse_configuration_item, Item, ItemType};
+use crate::config::{ConfigSpec, ExecutionType};
 use crate::Message;
 use crate::MessageBatch;
-use serde_yaml::Value;
+use crate::{Closer, Error, Processor};
 use async_trait::async_trait;
+use serde_yaml::Value;
 mod check;
 
 pub struct Switch {
@@ -18,18 +18,12 @@ impl Processor for Switch {
         'steps: for p in &self.steps {
             match p.process(message.clone()).await {
                 Ok(m) => return Ok(m),
-                Err(e) => {
-                    match e {
-                        Error::ConditionalCheckfailed => {
-                            continue 'steps
-                        },
-                        _ => {
-                            return Err(e)
-                        },
-                    }
-                }
+                Err(e) => match e {
+                    Error::ConditionalCheckfailed => continue 'steps,
+                    _ => return Err(e),
+                },
             };
-        };
+        }
         Ok(vec![message])
     }
 }
@@ -39,7 +33,7 @@ impl Closer for Switch {
     async fn close(&mut self) -> Result<(), Error> {
         for p in &mut self.steps {
             p.close().await?;
-        };
+        }
         Ok(())
     }
 }
@@ -52,12 +46,10 @@ fn create_switch(conf: &Value) -> Result<ExecutionType, Error> {
         let proc = ((ri.creator)(&ri.config))?;
         if let ExecutionType::Processor(rp) = proc {
             steps.push(rp);
-        };        
-    };
+        };
+    }
 
-    let s = Switch{
-        steps,
-    };
+    let s = Switch { steps };
 
     Ok(ExecutionType::Processor(Box::new(s)))
 }
@@ -67,7 +59,12 @@ pub fn register_switch() -> Result<(), Error> {
 
     let conf_spec = ConfigSpec::from_schema(config)?;
 
-    register_plugin("switch".into(), ItemType::Processor, conf_spec, create_switch)?;
+    register_plugin(
+        "switch".into(),
+        ItemType::Processor,
+        conf_spec,
+        create_switch,
+    )?;
     check::register_check()
 }
 

@@ -159,13 +159,15 @@ impl Config {
         let output = match parse_configuration_item(ItemType::Output, &self.output.extra) {
             Ok(i) => i,
             Err(e) => match e {
-                Error::ConfigurationItemNotFound(_) => parse_configuration_item(ItemType::OutputBatch, &self.output.extra)?,
+                Error::ConfigurationItemNotFound(_) => {
+                    parse_configuration_item(ItemType::OutputBatch, &self.output.extra)?
+                }
                 _ => return Err(e),
             },
         };
 
-        let mut processors= Vec::new();
- 
+        let mut processors = Vec::new();
+
         for p in &self.processors {
             let proc = parse_configuration_item(ItemType::Processor, &p.extra)?;
             processors.push(proc);

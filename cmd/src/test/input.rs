@@ -43,9 +43,7 @@ fn create_mock_input(conf: &Value) -> Result<ExecutionType, Error> {
     let mut g: MockInputConf = serde_yaml::from_value(conf.clone())?;
     g.input = g.input.iter().rev().cloned().collect();
 
-    Ok(ExecutionType::Input(Box::new(MockInput {
-        input: g.input,
-    })))
+    Ok(ExecutionType::Input(Box::new(MockInput { input: g.input })))
 }
 
 pub fn register_mock_input() -> Result<(), Error> {

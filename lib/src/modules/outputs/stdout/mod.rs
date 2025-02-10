@@ -1,10 +1,10 @@
-use crate::{Error, Output, Closer};
-use crate::config::{ConfigSpec, ExecutionType};
 use crate::config::register_plugin;
 use crate::config::ItemType;
+use crate::config::{ConfigSpec, ExecutionType};
 use crate::Message;
-use serde_yaml::Value;
+use crate::{Closer, Error, Output};
 use async_trait::async_trait;
+use serde_yaml::Value;
 
 #[derive(Clone)]
 pub struct StdOut {}
@@ -20,7 +20,7 @@ impl Output for StdOut {
 impl Closer for StdOut {}
 
 fn create_stdout(_conf: &Value) -> Result<ExecutionType, Error> {
-    Ok(ExecutionType::Output(Box::new(StdOut{})))
+    Ok(ExecutionType::Output(Box::new(StdOut {})))
 }
 
 pub fn register_stdout() -> Result<(), Error> {

@@ -1,12 +1,12 @@
-use std::convert::Into;
-use crate::{Error, Output, Closer};
-use crate::config::{ConfigSpec, ExecutionType};
 use crate::config::register_plugin;
-use crate::config::{Item, ItemType, parse_configuration_item};
+use crate::config::{parse_configuration_item, Item, ItemType};
+use crate::config::{ConfigSpec, ExecutionType};
 use crate::Message;
-use serde_yaml::Value;
+use crate::{Closer, Error, Output};
 use async_trait::async_trait;
-use serde::{Serialize, Deserialize};
+use serde::{Deserialize, Serialize};
+use serde_yaml::Value;
+use std::convert::Into;
 
 #[derive(Deserialize, Serialize)]
 struct CheckConfig {
@@ -24,12 +24,17 @@ pub struct Check {
 fn perform_check(condition: &str, json_str: String) -> Result<(), Error> {
     let mut runtime = jmespath::Runtime::new();
     runtime.register_builtin_functions();
-    let expr = runtime.compile(condition).map_err(|e| Error::ProcessingError(e.to_string()))?;
-    let data = jmespath::Variable::from_json(&json_str).map_err(|e| Error::ProcessingError(e.to_string()))?;
+    let expr = runtime
+        .compile(condition)
+        .map_err(|e| Error::ProcessingError(e.to_string()))?;
+    let data = jmespath::Variable::from_json(&json_str)
+        .map_err(|e| Error::ProcessingError(e.to_string()))?;
 
-    let result = expr.search(data).map_err(|e| Error::ProcessingError(format!("{}", e)))?;
+    let result = expr
+        .search(data)
+        .map_err(|e| Error::ProcessingError(format!("{}", e)))?;
     if !result.as_boolean().unwrap_or(false) {
-        return Err(Error::ConditionalCheckfailed)
+        return Err(Error::ConditionalCheckfailed);
     };
     Ok(())
 }
@@ -37,7 +42,8 @@ fn perform_check(condition: &str, json_str: String) -> Result<(), Error> {
 #[async_trait]
 impl Output for Check {
     async fn write(&mut self, message: Message) -> Result<(), Error> {
-        let json_str = String::from_utf8(message.bytes.clone()).map_err(|e| Error::ProcessingError(e.to_string()))?;
+        let json_str = String::from_utf8(message.bytes.clone())
+            .map_err(|e| Error::ProcessingError(e.to_string()))?;
 
         perform_check(&self.condition, json_str)?;
 
@@ -55,17 +61,22 @@ impl Closer for Check {
 
 fn create_check(conf: &Value) -> Result<ExecutionType, Error> {
     let c: CheckConfig = serde_yaml::from_value(conf.clone())?;
-    let _ = jmespath::compile(&c.condition).map_err(|e| Error::ConfigFailedValidation(format!("{}", e)))?;
+    let _ = jmespath::compile(&c.condition)
+        .map_err(|e| Error::ConfigFailedValidation(format!("{}", e)))?;
 
     let ri = parse_configuration_item(ItemType::Output, &c.output.extra)?;
 
     let step = ((ri.creator)(&ri.config))?;
     let out = match step {
         ExecutionType::Output(o) => o,
-        _ => return Err(Error::ConfigFailedValidation("output must be a valid output".into())),
+        _ => {
+            return Err(Error::ConfigFailedValidation(
+                "output must be a valid output".into(),
+            ))
+        }
     };
-    
-    let s = Check{
+
+    let s = Check {
         _label: c.label,
         condition: c.condition,
         output: out,

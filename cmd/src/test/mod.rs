@@ -11,8 +11,8 @@ use std::fs;
 use std::path::PathBuf;
 
 use fiddler::config::Config;
-use fiddler::Runtime;
 use fiddler::Error;
+use fiddler::Runtime;
 
 mod input;
 mod output;

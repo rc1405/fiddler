@@ -41,14 +41,11 @@ impl Input for MockInput {
 #[async_trait]
 impl Closer for MockInput {}
 
-
 fn create_mock_input(conf: &Value) -> Result<ExecutionType, Error> {
     let mut g: MockInputConf = serde_yaml::from_value(conf.clone())?;
     g.input = g.input.iter().rev().map(|i| i.clone()).collect();
 
-    return Ok(ExecutionType::Input(Box::new(MockInput {
-        input: g.input,
-    })));
+    return Ok(ExecutionType::Input(Box::new(MockInput { input: g.input })));
 }
 
 pub fn register_mock_input() -> Result<(), Error> {

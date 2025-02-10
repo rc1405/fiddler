@@ -1,10 +1,10 @@
-use crate::{Error, Output, Closer};
-use crate::config::{ConfigSpec, ExecutionType};
 use crate::config::register_plugin;
-use crate::config::{Item, ItemType, parse_configuration_item};
+use crate::config::{parse_configuration_item, Item, ItemType};
+use crate::config::{ConfigSpec, ExecutionType};
 use crate::Message;
-use serde_yaml::Value;
+use crate::{Closer, Error, Output};
 use async_trait::async_trait;
+use serde_yaml::Value;
 mod check;
 
 pub struct Switch {
@@ -17,18 +17,12 @@ impl Output for Switch {
         'steps: for p in &mut self.steps {
             match p.write(message.clone()).await {
                 Ok(_) => return Ok(()),
-                Err(e) => {
-                    match e {
-                        Error::ConditionalCheckfailed => {
-                            continue 'steps
-                        },
-                        _ => {
-                            return Err(e)
-                        },
-                    }
-                }
+                Err(e) => match e {
+                    Error::ConditionalCheckfailed => continue 'steps,
+                    _ => return Err(e),
+                },
             };
-        };
+        }
         Ok(())
     }
 }
@@ -38,7 +32,7 @@ impl Closer for Switch {
     async fn close(&mut self) -> Result<(), Error> {
         for p in &mut self.steps {
             p.close().await?;
-        };
+        }
         Ok(())
     }
 }
@@ -51,12 +45,10 @@ fn create_switch(conf: &Value) -> Result<ExecutionType, Error> {
         let step = ((ri.creator)(&ri.config))?;
         if let ExecutionType::Output(rp) = step {
             steps.push(rp);
-        };        
-    };
+        };
+    }
 
-    let s = Switch{
-        steps,
-    };
+    let s = Switch { steps };
 
     Ok(ExecutionType::Output(Box::new(s)))
 }
