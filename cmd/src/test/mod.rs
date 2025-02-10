@@ -94,7 +94,7 @@ pub async fn handle_tests(configs: Vec<String>) -> Result<(), Error> {
             env.set_label(Some(label))?;
 
             env.set_threads(1)?;
-            
+
             environments.push(env);
         }
     }
