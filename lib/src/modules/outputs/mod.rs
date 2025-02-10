@@ -21,7 +21,7 @@ pub fn register_plugins() -> Result<(), Error> {
 }
 
 pub(crate) async fn run_output(
-    mut input: Receiver<InternalMessage>,
+    input: Receiver<InternalMessage>,
     state: Sender<InternalMessageState>,
     mut o: Box<dyn Output + Send + Sync>,
 ) -> Result<(), Error> {
@@ -76,11 +76,10 @@ pub(crate) async fn run_output(
             },
         };
     }
-    println!("Output exiting");
 }
 
 pub(crate) async fn run_output_batch(
-    mut input: Receiver<InternalMessage>,
+    input: Receiver<InternalMessage>,
     state: Sender<InternalMessageState>,
     mut o: Box<dyn OutputBatch + Send + Sync>,
 ) -> Result<(), Error> {

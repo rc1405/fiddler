@@ -130,9 +130,8 @@ impl Config {
     /// # processors::register_plugins().unwrap();
     /// let conf_str = r#"input:
     ///   stdin: {}
-    /// pipeline:
-    ///   processors:
-    ///     - noop: {}
+    /// processors:
+    ///   - noop: {}
     /// output:
     ///   stdout: {}"#;
     ///

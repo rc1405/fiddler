@@ -6,11 +6,11 @@ pub mod python;
 pub mod switch;
 
 use crate::config::{ExecutionType, ParsedRegisteredItem};
-use crate::runtime::{InternalMessage, InternalMessageState, MessageStatus, ProcessingState};
+use crate::runtime::{InternalMessage, InternalMessageState, MessageStatus};
 use async_channel::{Receiver, Sender, TryRecvError};
 use tokio::task::yield_now;
 use tokio::time::{sleep, Duration};
-use tracing::{debug, error, info, trace};
+use tracing::{debug, error, trace};
 
 pub fn register_plugins() -> Result<(), Error> {
     lines::register_lines()?;

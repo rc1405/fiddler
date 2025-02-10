@@ -9,7 +9,6 @@ use serde::{Deserialize, Serialize};
 use serde_yaml::Value;
 use std::convert::Into;
 use std::mem;
-use std::sync::Arc;
 
 #[derive(Deserialize, Serialize)]
 struct CheckConfig {

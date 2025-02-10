@@ -13,6 +13,7 @@ pub struct StdOut {}
 impl Output for StdOut {
     async fn write(&mut self, message: Message) -> Result<(), Error> {
         let msg = String::from_utf8(message.bytes).map_err(|_| Error::EndOfInput)?;
+        println!("{}", msg);
         Ok(())
     }
 }

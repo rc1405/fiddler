@@ -20,7 +20,9 @@ use tracing::{error, trace};
 ///    codec: ToEnd"#;
 /// let parsed_config: HashMap<String, Value> = serde_yaml::from_str(conf_str).unwrap();
 ///
+/// # tokio_test::block_on(async {
 /// parse_configuration_item(ItemType::Input, &parsed_config).unwrap();
+/// # })
 /// ```
 pub fn parse_configuration_item(
     itype: ItemType,

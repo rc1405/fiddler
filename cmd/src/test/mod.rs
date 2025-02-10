@@ -92,6 +92,9 @@ pub async fn handle_tests(configs: Vec<String>) -> Result<(), Error> {
             let _ = proc_maps.insert(environments.len(), label.clone());
 
             env.set_label(Some(label))?;
+
+            env.set_threads(1)?;
+            
             environments.push(env);
         }
     }

@@ -20,7 +20,7 @@ use super::Error;
 use super::Message;
 use crate::config::parse_configuration_item;
 use crate::config::ExecutionType;
-use crate::config::{Config, ItemType, ParsedConfig, ParsedRegisteredItem, RegisteredItem};
+use crate::config::{Config, ItemType, ParsedConfig, ParsedRegisteredItem};
 
 use crate::modules::inputs;
 use crate::modules::outputs;
@@ -98,10 +98,9 @@ impl Runtime {
     ///
     /// let conf_str = r#"input:
     ///  stdin: {}
-    ///pipeline:
-    ///  processors:
-    ///    - label: my_cool_mapping
-    ///      noop: {}
+    ///processors:
+    ///  - label: my_cool_mapping
+    ///    noop: {}
     ///output:
     ///  stdout: {}"#;
     /// let env = Runtime::from_config(conf_str).unwrap();
@@ -132,10 +131,9 @@ impl Runtime {
     /// # use fiddler::Runtime;
     /// # let conf_str = r#"input:
     /// #   stdin: {}
-    /// # pipeline:
-    /// #   processors:
-    /// #    - label: my_cool_mapping
-    /// #      noop: {}
+    /// # processors:
+    /// #  - label: my_cool_mapping
+    /// #    noop: {}
     /// # output:
     /// #   stdout: {}"#;
     /// # let mut env = Runtime::from_config(conf_str).unwrap();
@@ -146,10 +144,9 @@ impl Runtime {
     /// # use fiddler::Runtime;
     /// # let conf_str = r#"input:
     /// #  stdin: {}
-    /// # pipeline:
-    /// #   processors:
-    /// #    - label: my_cool_mapping
-    /// #      noop: {}
+    /// # processors:
+    /// #  - label: my_cool_mapping
+    /// #    noop: {}
     /// # output:
     /// #   stdout: {}"#;
     /// # let mut env = Runtime::from_config(conf_str).unwrap();
@@ -165,10 +162,9 @@ impl Runtime {
     /// # use fiddler::Runtime;
     /// # let conf_str = r#"input:
     /// #   stdin: {}
-    /// # pipeline:
-    /// #   processors:
-    /// #    - label: my_cool_mapping
-    /// #      noop: {}
+    /// # processors:
+    /// #  - label: my_cool_mapping
+    /// #    noop: {}
     /// # output:
     /// #   stdout: {}"#;
     /// # let mut env = Runtime::from_config(conf_str).unwrap();
@@ -187,13 +183,13 @@ impl Runtime {
     /// # use fiddler::Runtime;
     /// # let conf_str = r#"input:
     /// #   stdin: {}
-    /// # pipeline:
-    /// #   processors:
-    /// #    - label: my_cool_mapping
-    /// #      noop: {}
+    /// # processors:
+    /// #  - label: my_cool_mapping
+    /// #    noop: {}
     /// # output:
     /// #   stdout: {}"#;
     /// # let mut env = Runtime::from_config(conf_str).unwrap();
+    /// # tokio_test::block_on(async {
     ///
     /// use serde_yaml::Value;
     /// let conf_str = r#"file:
@@ -202,6 +198,7 @@ impl Runtime {
     /// let parsed_input: HashMap<String, Value> = serde_yaml::from_str(conf_str).unwrap();
     ///
     /// env.set_input(&parsed_input).unwrap()
+    /// # })
     /// ```
     pub fn set_input(&mut self, input: &HashMap<String, Value>) -> Result<(), Error> {
         let parsed_item = parse_configuration_item(ItemType::Input, input)?;
@@ -217,10 +214,9 @@ impl Runtime {
     /// # use fiddler::Runtime;
     /// # let conf_str = r#"input:
     /// #   stdin: {}
-    /// # pipeline:
-    /// #   processors:
-    /// #    - label: my_cool_mapping
-    /// #      noop: {}
+    /// # processors:
+    /// #  - label: my_cool_mapping
+    /// #    noop: {}
     /// # output:
     /// #   stdout: {}"#;
     /// # let mut env = Runtime::from_config(conf_str).unwrap();
@@ -234,6 +230,32 @@ impl Runtime {
     pub fn set_output(&mut self, output: &HashMap<String, Value>) -> Result<(), Error> {
         let parsed_item = parse_configuration_item(ItemType::Output, output)?;
         self.config.output = parsed_item;
+        Ok(())
+    }
+
+    /// The function replaces the existing output configuration with the provided output.
+    /// ```
+    /// # use fiddler::config::{ConfigSpec, ItemType, ExecutionType};
+    /// # use fiddler::modules::inputs;
+    /// # use std::collections::HashMap;
+    /// # use fiddler::Runtime;
+    /// # let conf_str = r#"input:
+    /// #   stdin: {}
+    /// # processors:
+    /// #  - label: my_cool_mapping
+    /// #    noop: {}
+    /// # output:
+    /// #   stdout: {}"#;
+    /// # let mut env = Runtime::from_config(conf_str).unwrap();
+    ///
+    /// use serde_yaml::Value;
+    /// let conf_str = r#"stdout: {}"#;
+    /// let parsed_output: HashMap<String, Value> = serde_yaml::from_str(conf_str).unwrap();
+    ///
+    /// env.set_threads(1).unwrap()
+    /// ```
+    pub fn set_threads(&mut self, count: usize) -> Result<(), Error> {
+        self.config.num_threads = count;
         Ok(())
     }
 
@@ -410,8 +432,8 @@ struct State {
 }
 
 async fn message_handler(
-    mut new_msg: Receiver<MessageHandle>,
-    mut msg_status: Receiver<InternalMessageState>,
+    new_msg: Receiver<MessageHandle>,
+    msg_status: Receiver<InternalMessageState>,
 ) -> Result<(), Error> {
     let mut handles: HashMap<String, State> = HashMap::new();
 

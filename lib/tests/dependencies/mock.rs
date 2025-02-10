@@ -7,8 +7,6 @@ use fiddler::{new_callback_chan, CallbackChan};
 use fiddler::{Closer, Error, Input};
 use serde::{Deserialize, Serialize};
 use serde_yaml::Value;
-use std::cell::RefCell;
-use std::sync::{Arc, Mutex};
 
 #[derive(Serialize, Deserialize)]
 pub struct MockInputConf {

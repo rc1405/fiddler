@@ -6,7 +6,6 @@ use fiddler::Message;
 use fiddler::MessageBatch;
 use fiddler::{Closer, Error, Processor};
 use serde_yaml::Value;
-use std::sync::Arc;
 
 #[derive(Clone)]
 pub struct Echo {}

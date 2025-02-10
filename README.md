@@ -239,6 +239,10 @@ Apache License, Version 2.0, without any additional terms or conditions.
 
 // Needed Test Cases
 OutputBatch provided as Output doesn't elevate the error
-CLI Test should only use one thread
+[Done] CLI Test should only use one thread
 Add thread limit on output
-Update doc tests
+[Done] Update doc tests
+[Done] Fix test yamls
+Improve Logging
+Add Metrics
+Fix warnings

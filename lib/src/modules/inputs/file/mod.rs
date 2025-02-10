@@ -35,9 +35,6 @@ struct FileReaderConfig {
 }
 
 pub struct FileReader {
-    filename: String,
-    position_filename: Option<String>,
-    codec: CodecType,
     receiver: Receiver<Result<(Message, CallbackChan), Error>>,
 }
 
@@ -46,7 +43,7 @@ async fn read_file(
     sender: Sender<Result<(Message, CallbackChan), Error>>,
 ) -> Result<(), Error> {
     match reader {
-        ReaderType::Lines(mut li) => {
+        ReaderType::Lines(li) => {
             for line in li {
                 match line {
                     Ok(line) => {
@@ -164,8 +161,6 @@ async fn read_file(
                     )))
                     .await;
             }
-
-            return Ok(());
         }
     }
 }
@@ -281,12 +276,7 @@ fn create_file(conf: &Value) -> Result<ExecutionType, Error> {
         runtime.block_on(read_file(inner, sender))
     });
 
-    Ok(ExecutionType::Input(Box::new(FileReader {
-        filename: c.filename,
-        position_filename: c.position_filename,
-        codec: c.codec,
-        receiver,
-    })))
+    Ok(ExecutionType::Input(Box::new(FileReader { receiver })))
 }
 
 // #[fiddler_registration_func]
