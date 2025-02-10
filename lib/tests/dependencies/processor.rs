@@ -22,14 +22,11 @@ impl Processor for Echo {
     }
 }
 
-impl Closer for Echo {
-    fn close(self: &Self) -> Result<(), Error> {
-        Ok(())
-    }
-}
+#[async_trait]
+impl Closer for Echo {}
 
 fn create_echo(_conf: &Value) -> Result<ExecutionType, Error> {
-    return Ok(ExecutionType::Processor(Arc::new(Echo {})));
+    return Ok(ExecutionType::Processor(Box::new(Echo {})));
 }
 
 pub fn register_echo() -> Result<(), Error> {

@@ -1,5 +1,5 @@
 use std::convert::Into;
-use crate::{Error, Output, Connect, Closer};
+use crate::{Error, Output, Closer};
 use crate::config::{ConfigSpec, ExecutionType};
 use crate::config::register_plugin;
 use crate::config::{Item, ItemType, parse_configuration_item};
@@ -7,7 +7,6 @@ use crate::Message;
 use serde_yaml::Value;
 use async_trait::async_trait;
 use serde::{Serialize, Deserialize};
-use std::sync::Arc;
 
 #[derive(Deserialize, Serialize)]
 struct CheckConfig {
@@ -19,7 +18,7 @@ struct CheckConfig {
 pub struct Check {
     _label: Option<String>,
     condition: String,
-    output: Arc<dyn Output + Send + Sync>,
+    output: Box<dyn Output + Send + Sync>,
 }
 
 fn perform_check(condition: &str, json_str: String) -> Result<(), Error> {
@@ -37,7 +36,7 @@ fn perform_check(condition: &str, json_str: String) -> Result<(), Error> {
 
 #[async_trait]
 impl Output for Check {
-    async fn write(&self, message: Message) -> Result<(), Error> {
+    async fn write(&mut self, message: Message) -> Result<(), Error> {
         let json_str = String::from_utf8(message.bytes.clone()).map_err(|e| Error::ProcessingError(e.to_string()))?;
 
         perform_check(&self.condition, json_str)?;
@@ -47,19 +46,12 @@ impl Output for Check {
     }
 }
 
-impl Closer for Check {
-    fn close(&self) -> Result<(), Error> {
-        self.output.close()
-    }
-}
-
 #[async_trait]
-impl Connect for Check {
-    async fn connect(&self) -> Result<(), Error> {
-        self.output.close()
+impl Closer for Check {
+    async fn close(&mut self) -> Result<(), Error> {
+        self.output.close().await
     }
 }
-
 
 fn create_check(conf: &Value) -> Result<ExecutionType, Error> {
     let c: CheckConfig = serde_yaml::from_value(conf.clone())?;
@@ -67,7 +59,8 @@ fn create_check(conf: &Value) -> Result<ExecutionType, Error> {
 
     let ri = parse_configuration_item(ItemType::Output, &c.output.extra)?;
 
-    let out = match ri.execution_type {
+    let step = ((ri.creator)(&ri.config))?;
+    let out = match step {
         ExecutionType::Output(o) => o,
         _ => return Err(Error::ConfigFailedValidation("output must be a valid output".into())),
     };
@@ -78,7 +71,7 @@ fn create_check(conf: &Value) -> Result<ExecutionType, Error> {
         output: out,
     };
 
-    Ok(ExecutionType::Output(Arc::new(s)))
+    Ok(ExecutionType::Output(Box::new(s)))
 }
 
 pub fn register_check() -> Result<(), Error> {

@@ -6,8 +6,6 @@ use crate::Message;
 use crate::MessageBatch;
 use serde_yaml::Value;
 use async_trait::async_trait;
-use fiddler_macros::fiddler_registration_func;
-use std::sync::Arc;
 
 #[derive(Clone)]
 pub struct NoOp {}
@@ -19,17 +17,12 @@ impl Processor for NoOp {
     }
 }
 
-impl Closer for NoOp {
-    fn close(&self) -> Result<(), Error> {
-        Ok(())
-    }
-}
+impl Closer for NoOp {}
 
 fn create_noop(_conf: &Value) -> Result<ExecutionType, Error> {
-    Ok(ExecutionType::Processor(Arc::new(NoOp{})))
+    Ok(ExecutionType::Processor(Box::new(NoOp{})))
 }
 
-// #[fiddler_registration_func]
 pub fn register_noop() -> Result<(), Error> {
     let config = "type: object";
     let conf_spec = ConfigSpec::from_schema(config)?;

@@ -6,8 +6,6 @@ use crate::Message;
 use crate::MessageBatch;
 use serde_yaml::Value;
 use async_trait::async_trait;
-use fiddler_macros::fiddler_registration_func;
-use std::sync::Arc;
 
 #[derive(Clone)]
 pub struct Lines {}
@@ -21,17 +19,12 @@ impl Processor for Lines {
     }
 }
 
-impl Closer for Lines {
-    fn close(&self) -> Result<(), Error> {
-        Ok(())
-    }
-}
+impl Closer for Lines {}
 
 fn create_lines(_conf: &Value) -> Result<ExecutionType, Error> {
-    Ok(ExecutionType::Processor(Arc::new(Lines{})))
+    Ok(ExecutionType::Processor(Box::new(Lines{})))
 }
 
-// #[fiddler_registration_func]
 pub fn register_lines() -> Result<(), Error> {
     let config = "type: object";
     let conf_spec = ConfigSpec::from_schema(config)?;

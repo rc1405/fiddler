@@ -2,7 +2,6 @@ use std::collections::HashMap;
 use std::env;
 use std::fmt;
 use std::str::FromStr;
-use std::sync::Arc;
 use std::sync::Mutex;
 
 use handlebars::Handlebars;
@@ -36,9 +35,9 @@ impl fmt::Display for ItemType {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         let msg = match self {
             ItemType::Input => "input",
-            ItemType::InputBatch => "input_batch",
+            ItemType::InputBatch => "input",
             ItemType::Output => "output",
-            ItemType::OutputBatch => "output_batch",
+            ItemType::OutputBatch => "output",
             ItemType::Processor => "processors",
         };
         write!(f, "{}", msg)
@@ -46,13 +45,13 @@ impl fmt::Display for ItemType {
 }
 
 /// Enum for holding the implementation of the plugin trait to be called during processing
-#[derive(Clone)]
+// #[derive(Clone)]
 pub enum ExecutionType {
-    Input(Arc<dyn Input + Send + Sync>),
-    InputBatch(Arc<dyn InputBatch + Send + Sync>),
-    Output(Arc<dyn Output + Send + Sync>),
-    OutputBatch(Arc<dyn OutputBatch + Send + Sync>),
-    Processor(Arc<dyn Processor + Send + Sync>),
+    Input(Box<dyn Input + Send + Sync>),
+    InputBatch(Box<dyn InputBatch + Send + Sync>),
+    Output(Box<dyn Output + Send + Sync>),
+    OutputBatch(Box<dyn OutputBatch + Send + Sync>),
+    Processor(Box<dyn Processor + Send + Sync>),
 }
 
 static ENV: Lazy<Mutex<HashMap<ItemType, HashMap<String, RegisteredItem>>>> = Lazy::new(|| {
@@ -75,24 +74,8 @@ pub struct RegisteredItem {
 /// Execution placeholder of the plugin to be used during processing
 #[derive(Clone)]
 pub struct ParsedRegisteredItem {
-    pub item_type: ItemType,
-    pub execution_type: ExecutionType,
-}
-
-/// Unparsed configuration pipeline prior to validation
-#[derive(Debug, Deserialize, Serialize)]
-pub struct Pipeline {
-    pub max_in_flight: Option<usize>,
-    pub label: Option<String>,
-    pub processors: Vec<Item>,
-}
-
-/// Parsed and validated pipeline to be used during processing
-#[derive(Clone)]
-pub struct ParsedPipeline {
-    pub max_in_flight: usize,
-    pub label: Option<String>,
-    pub processors: Vec<ParsedRegisteredItem>,
+    pub creator: Callback,
+    pub config: Value,
 }
 
 /// Unparsed configuration item used prior to validation
@@ -108,8 +91,9 @@ pub struct Item {
 #[derive(Debug, Deserialize, Serialize)]
 pub struct Config {
     pub label: Option<String>,
+    pub num_threads: Option<usize>,
     pub input: Item,
-    pub pipeline: Pipeline,
+    pub processors: Vec<Item>,
     pub output: Item,
 }
 
@@ -170,31 +154,25 @@ impl Config {
             ));
         };
 
-        if self.pipeline.processors.is_empty() {
-            error!("pipeline must contain at least one processor");
-            return Err(Error::Validation(
-                "pipeline must contain at least one processor".into(),
-            ));
-        };
-
         let input = parse_configuration_item(ItemType::Input, &self.input.extra)?;
 
-        let output = parse_configuration_item(ItemType::Output, &self.output.extra)?;
+        let output = match parse_configuration_item(ItemType::Output, &self.output.extra) {
+            Ok(i) => i,
+            Err(e) => match e {
+                Error::ConfigurationItemNotFound(_) => parse_configuration_item(ItemType::OutputBatch, &self.output.extra)?,
+                _ => return Err(e),
+            },
+        };
 
-        let mut processors = Vec::new();
-
-        for p in &self.pipeline.processors {
+        let mut processors= Vec::new();
+ 
+        for p in &self.processors {
             let proc = parse_configuration_item(ItemType::Processor, &p.extra)?;
             processors.push(proc);
         }
 
-        let max_in_flight = self.pipeline.max_in_flight.unwrap_or(0);
-
-        let parsed_pipeline = ParsedPipeline {
-            label: self.pipeline.label.clone(),
-            max_in_flight,
-            processors,
-        };
+        let num_threads = self.num_threads.unwrap_or(num_cpus::get());
+        trace!("Num threads are {}", num_threads);
 
         let label = self.label.clone();
         debug!("configuration is valid");
@@ -202,7 +180,8 @@ impl Config {
         Ok(ParsedConfig {
             label,
             input,
-            pipeline: parsed_pipeline,
+            processors,
+            num_threads,
             output,
         })
     }
@@ -213,7 +192,8 @@ impl Config {
 pub struct ParsedConfig {
     pub label: Option<String>,
     pub input: ParsedRegisteredItem,
-    pub pipeline: ParsedPipeline,
+    pub processors: Vec<ParsedRegisteredItem>,
+    pub num_threads: usize,
     pub output: ParsedRegisteredItem,
 }
 
@@ -317,12 +297,11 @@ mod test {
     stdin:
         scanner:
             lines: {}
-pipeline:
-    processors:
-        - label: my_cool_mapping
-          mapping: |
-            root.message = this
-            root.meta.link_count = this.links.length()
+processors:
+    - label: my_cool_mapping
+      mapping: |
+        root.message = this
+        root.meta.link_count = this.links.length()
 output:
     label: my_s3_output    
     aws_s3:

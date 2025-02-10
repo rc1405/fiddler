@@ -236,3 +236,8 @@ Apache License, Version 2.0, without any additional terms or conditions.
 * Cargo shows warnings on switch plugins when compiled on Windows that they are skipped when in fact they are not.
 * build.rs doesn't validate Python is present when compiled on Windows
 * Integration tests failing on windows GHA
+
+// Needed Test Cases
+OutputBatch provided as Output doesn't elevate the error
+CLI Test should only use one thread
+Add thread limit on output

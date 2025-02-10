@@ -1,23 +1,20 @@
-use crate::{Error, Output, Connect, Closer};
+use crate::{Error, Output, Closer};
 use crate::config::{ConfigSpec, ExecutionType};
 use crate::config::register_plugin;
 use crate::config::{Item, ItemType, parse_configuration_item};
 use crate::Message;
 use serde_yaml::Value;
 use async_trait::async_trait;
-use fiddler_macros::fiddler_registration_func;
-use std::sync::Arc;
-
 mod check;
 
 pub struct Switch {
-    steps: Vec<Arc<dyn Output + Send + Sync>>,
+    steps: Vec<Box<dyn Output + Send + Sync>>,
 }
 
 #[async_trait]
 impl Output for Switch {
-    async fn write(&self, message: Message) -> Result<(), Error> {
-        'steps: for p in &self.steps {
+    async fn write(&mut self, message: Message) -> Result<(), Error> {
+        'steps: for p in &mut self.steps {
             match p.write(message.clone()).await {
                 Ok(_) => return Ok(()),
                 Err(e) => {
@@ -36,18 +33,12 @@ impl Output for Switch {
     }
 }
 
-impl Closer for Switch {
-    fn close(&self) -> Result<(), Error> {
-        for p in &self.steps {
-            p.close()?;
-        };
-        Ok(())
-    }
-}
-
 #[async_trait]
-impl Connect for Switch {
-    async fn connect(&self) -> Result<(), Error> {
+impl Closer for Switch {
+    async fn close(&mut self) -> Result<(), Error> {
+        for p in &mut self.steps {
+            p.close().await?;
+        };
         Ok(())
     }
 }
@@ -57,7 +48,8 @@ fn create_switch(conf: &Value) -> Result<ExecutionType, Error> {
     let mut steps = Vec::new();
     for p in c {
         let ri = parse_configuration_item(ItemType::Output, &p.extra)?;
-        if let ExecutionType::Output(rp) = ri.execution_type {
+        let step = ((ri.creator)(&ri.config))?;
+        if let ExecutionType::Output(rp) = step {
             steps.push(rp);
         };        
     };
@@ -66,10 +58,9 @@ fn create_switch(conf: &Value) -> Result<ExecutionType, Error> {
         steps,
     };
 
-    Ok(ExecutionType::Output(Arc::new(s)))
+    Ok(ExecutionType::Output(Box::new(s)))
 }
 
-// #[fiddler_registration_func]
 pub fn register_switch() -> Result<(), Error> {
     let config = "type: array";
 

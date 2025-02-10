@@ -13,10 +13,10 @@ async fn fiddler_single_event() {
   let config = "input:
   generator: 
     count: 1
-pipeline:
-  processors:
-    - label: my_cool_mapping
-      noop: {}
+num_threads: 1
+processors:
+  - label: my_cool_mapping
+    noop: {}
 output:
   validate:
     expected: 
@@ -41,11 +41,10 @@ async fn end_to_end() {
     let config = "input:
   generator: 
     count: 5
-pipeline:
-    max_in_flight: 1
-    processors:
-        - label: my_cool_mapping
-          echo: {}
+num_threads: 1
+processors:
+  - label: my_cool_mapping
+    echo: {}
 output:
   validate: 
     expected: 
@@ -72,16 +71,15 @@ async fn fiddler_python_test() {
     let config = "input:
   generator: 
     count: 5
-pipeline:
-    max_in_flight: 1
-    processors:
-        - label: my_cool_mapping
-          python: 
-            code: |
-                import json
-                decoded_string = root.decode(\"utf-8\")
-                new_string = f\"python: {decoded_string}\"
-                root = new_string.encode(\"utf-8\")
+num_threads: 1
+processors:
+  - label: my_cool_mapping
+    python: 
+      code: |
+        import json
+        decoded_string = root.decode(\"utf-8\")
+        new_string = f\"python: {decoded_string}\"
+        root = new_string.encode(\"utf-8\")
 output:
   validate: 
     expected: 
@@ -108,18 +106,17 @@ async fn fiddler_python_string_test() {
     let config = "input:
   generator: 
     count: 5
-pipeline:
-    max_in_flight: 1
-    processors:
-        - label: my_cool_mapping
-          python: 
-            string: true
-            code: |
-                import json
-                new_string = f\"python: {root}\"
-                root = new_string
-        - label: my_cool_mapping
-          echo: {}
+num_threads: 1
+processors:
+  - label: my_cool_mapping
+    python: 
+      string: true
+      code: |
+        import json
+        new_string = f\"python: {root}\"
+        root = new_string
+  - label: my_cool_mapping
+    echo: {}
 output:
   validate: 
     expected: 
@@ -146,21 +143,20 @@ async fn fiddler_switch_check_test() {
     let config = "input:
   json_generator: 
     count: 5
-pipeline:
-    max_in_flight: 1
-    processors:
-        - switch:
-            - check: 
-                condition: '\"Hello World\" > `5`'
-                processors:
-                  - python: 
-                        string: true
-                        code: |
-                            import json
-                            new_string = f\"python: {root}\"
-                            root = new_string
-            - label: my_cool_mapping
-              echo: {}
+num_threads: 1
+processors:
+    - switch:
+        - check: 
+            condition: '\"Hello World\" > `5`'
+            processors:
+              - python: 
+                  string: true
+                  code: |
+                    import json
+                    new_string = f\"python: {root}\"
+                    root = new_string
+        - label: my_cool_mapping
+          echo: {}
 output:
   validate: 
     expected: 
@@ -187,22 +183,21 @@ async fn fiddler_switch_check_many_procs_test() {
     let config = "input:
   json_generator: 
     count: 5
-pipeline:
-    max_in_flight: 1
-    processors:
-        - switch:
-            - check: 
-                condition: '\"Hello World\" <= `5`'
-                processors:
-                  - python: 
-                        string: true
-                        code: |
-                            import json
-                            new_string = f\"python: {root}\"
-                            root = new_string
-                  - echo: {}
-            - label: my_cool_mapping
-              echo: {}
+num_threads: 1
+processors:
+    - switch:
+        - check: 
+            condition: '\"Hello World\" <= `5`'
+            processors:
+              - python: 
+                  string: true
+                  code: |
+                    import json
+                    new_string = f\"python: {root}\"
+                    root = new_string
+              - echo: {}
+        - label: my_cool_mapping
+          echo: {}
 output:
   validate: 
     expected: 
@@ -229,9 +224,8 @@ async fn fiddler_switch_output_test() {
     let config = "input:
   json_generator: 
     count: 5
-pipeline:
-    max_in_flight: 1
-    processors:
+num_threads: 1
+processors:
     - label: my_cool_mapping
       python: 
         string: true
@@ -274,11 +268,10 @@ async fn fiddler_file_reader_test() {
   file: 
     filename: tests{MAIN_SEPARATOR_STR}data{MAIN_SEPARATOR_STR}input.txt
     codec: Lines
-pipeline:
-  max_in_flight: 1
-  processors:
-    - label: my_cool_mapping
-      noop: {{}}
+num_threads: 1
+processors:
+  - label: my_cool_mapping
+    noop: {{}}
 output:
   validate:
     expected: 
@@ -305,11 +298,10 @@ async fn fiddler_file_reader_test_full() {
   file: 
     filename: tests{MAIN_SEPARATOR_STR}data{MAIN_SEPARATOR_STR}input.txt
     codec: ToEnd
-pipeline:
-  max_in_flight: 1
-  processors:
-    - label: my_cool_mapping
-      lines: {{}}
+num_threads: 1
+processors:
+  - label: my_cool_mapping
+    lines: {{}}
 output:
   validate:
     expected: 
@@ -329,18 +321,49 @@ output:
     env.run().await.unwrap();
 }
 
+#[tokio::test]
+async fn fiddler_file_reader_test_ful_json() {
+    let EXPECTED_OUTPUT = "{\"this\": \"is\", \"a\": \"testing\", \"document\": true}";
+    let config = format!(
+        "input:
+  file: 
+    filename: tests{MAIN_SEPARATOR_STR}data{MAIN_SEPARATOR_STR}input.json
+    codec: ToEnd
+num_threads: 1
+processors:
+  - label: my_cool_mapping
+    lines: {{}}
+output:
+  validate:
+    expected: 
+      - |
+        {EXPECTED_OUTPUT}", 
+    );
+
+    REGISTER.call_once(|| {
+        mock::register_mock_input().unwrap();
+        jsongenerator::register_json_generator().unwrap();
+        generator::register_generator().unwrap();
+        processor::register_echo().unwrap();
+        output::register_validate().unwrap();
+    });
+
+    let env = Runtime::from_config(&config).unwrap();
+    env.run().await.unwrap();
+}
+
 #[cfg_attr(feature = "python", tokio::test)]
 async fn fiddler_env_replacement_test() {
     let config = "input:
   json_generator: 
     count: 1
-pipeline:
-    processors:
-    - label: my_cool_mapping
-      python: 
-        string: true
-        code: |
-            root = '{{ TestingEnvVarReplacement }}'
+num_threads: 1
+processors:
+  - label: my_cool_mapping
+    python: 
+      string: true
+      code: |
+        root = '{{ TestingEnvVarReplacement }}'
 output:
   validate:
     expected: 

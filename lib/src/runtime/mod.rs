@@ -1,9 +1,7 @@
-use tokio::sync::mpsc::error::TryRecvError;
-use tokio::sync::mpsc::{Sender, Receiver, channel};
+use async_channel::{Sender, Receiver, bounded};
 use serde::Deserialize;
 use serde::Serialize;
 use serde_yaml::Value;
-use tokio::task::yield_now;
 use tokio::task::JoinSet;
 use tokio::sync::oneshot;
 use std::mem;
@@ -14,7 +12,6 @@ use std::collections::HashMap;
 use std::str::FromStr;
 use std::sync::Once;
 use std::sync::Arc;
-use tokio::sync::Notify;
 use tokio::time::{sleep, Duration};
 use uuid::Uuid;
 
@@ -23,7 +20,7 @@ use super::Error;
 use super::Message;
 use crate::config::parse_configuration_item;
 use crate::config::ExecutionType;
-use crate::config::{Config, ItemType, ParsedConfig, ParsedPipeline, ParsedRegisteredItem};
+use crate::config::{Config, ItemType, ParsedConfig, ParsedRegisteredItem, RegisteredItem};
 
 use crate::modules::inputs;
 use crate::modules::outputs;
@@ -35,10 +32,12 @@ static REGISTER: Once = Once::new();
 /// Represents a single data pipeline configuration Runtime to run
 pub struct Runtime {
     config: ParsedConfig,
+    state_tx: Sender<InternalMessageState>,
+    state_rx: Receiver<InternalMessageState>,
 }
 
 #[derive(Clone, Serialize, Deserialize, Default)]
-enum MessageStatus {
+pub(crate) enum MessageStatus {
     #[default]
     New,
     Processed,
@@ -62,7 +61,7 @@ impl fmt::Display for MessageStatus {
 }
 
 #[derive(Clone, Serialize, Deserialize, Default)]
-enum ProcessingState {
+pub(crate) enum ProcessingState {
     #[default]
     InputComplete,
     ProcessorSubscribe((usize, String)),
@@ -73,16 +72,16 @@ enum ProcessingState {
 }
 
 #[derive(Clone, Serialize, Deserialize)]
-struct InternalMessageState {
-    message_id: String,
-    status: MessageStatus,
+pub(crate) struct InternalMessageState {
+    pub message_id: String,
+    pub status: MessageStatus,
 }
 
 #[derive(Clone, Serialize, Deserialize)]
-struct InternalMessage {
-    message: Message,
-    message_id: String,
-    status: MessageStatus,
+pub(crate) struct InternalMessage {
+    pub message: Message,
+    pub message_id: String,
+    pub status: MessageStatus,
 }
 
 #[derive(Clone)]
@@ -118,9 +117,13 @@ impl Runtime {
         let conf: Config = Config::from_str(config)?;
         let parsed_conf = conf.validate()?;
 
+        let (state_tx, state_rx) = bounded(100);
+
         debug!("Runtime is ready");
         Ok(Runtime {
             config: parsed_conf,
+            state_rx,
+            state_tx,
         })
     }
 
@@ -242,10 +245,9 @@ impl Runtime {
     /// # use fiddler::Runtime;
     /// # let conf_str = r#"input:
     /// #   stdin: {}
-    /// # pipeline:
-    /// #   processors:
-    /// #    - label: my_cool_mapping
-    /// #      noop: {}
+    /// # processors:
+    /// #  - label: my_cool_mapping
+    /// #    noop: {}
     /// # output:
     /// #   stdout: {}"#;
     /// # let mut env = Runtime::from_config(conf_str).unwrap();
@@ -254,44 +256,49 @@ impl Runtime {
     /// # })
     /// ```
     pub async fn run(&self) -> Result<(), Error> {
-        let bus = fiddler_bus::EventBus::new().await.unwrap();
-        bus.create_topic("input", Some(1)).await.unwrap();
-        bus.create_topic("message-state", Some(1)).await.unwrap();
-        bus.create_topic("processing-state", None).await.unwrap();
-        for n in 0..self.config.pipeline.processors.len() {
-            bus.create_topic(&format!("processor{}", n), Some(1)).await.unwrap()
-        }
-        bus.create_topic("output", Some(1)).await.unwrap();
-        let (state_sender, state_receiver) = channel(1);
-
-        let barrier = Arc::new(Notify::new());
-
         let mut handles = JoinSet::new();
 
-        let msg_state = message_handler(state_receiver, bus.clone());
-        handles.spawn(msg_state);
+        
+        let (msg_tx, msg_rx) = bounded(10000);
+        let msg_state = message_handler(msg_rx, self.state_rx.clone());
+        handles.spawn_blocking(move || {
+            let runtime = tokio::runtime::Builder::new_multi_thread()
+                .enable_all()
+                .thread_name("state")
+                .worker_threads(1)
+                // .on_thread_start(move || set_current_thread_priority_low())
+                .build()
+                .expect("Creating tokio runtime");
+            runtime.block_on(msg_state)
+        });
 
-        let state = state_handler(bus.clone(), self.config.pipeline.processors.len(), barrier.clone());
-        handles.spawn(state);
-       
-        let output = output(bus.clone(), self.config.output.clone());
-        handles.spawn(output);
-
-        let p = pipeline(
-            self.config.pipeline.clone(),
-            bus.clone(),
-        );
-        handles.spawn(p);
+        println!("Starting output in run");
+        let output = self.output(self.config.output.clone(), &mut handles).await?;
+        println!("Started output");
+               
+        let processors = self.pipeline(
+            output,
+            &mut handles,
+        ).await?;
 
         let input = input(
             self.config.input.clone(),
-            bus.clone(),
-            state_sender,
-            barrier,
+            processors,
+            msg_tx,
         );
 
+        handles.spawn_blocking(move || {
+            let runtime = tokio::runtime::Builder::new_multi_thread()
+                .enable_all()
+                .thread_name("input")
+                .worker_threads(1)
+                // .on_thread_start(move || set_current_thread_priority_low())
+                .build()
+                .expect("Creating tokio runtime");
+            runtime.block_on(input)
+        });
+
         info!("pipeline started");
-        handles.spawn(input);
 
         while let Some(res) = handles.join_next().await {
             res.map_err(|e| Error::ProcessingError(format!("{}", e)))??;
@@ -299,6 +306,97 @@ impl Runtime {
 
         info!("pipeline finished");
         Ok(())
+    }
+
+    async fn pipeline(
+        &self,
+        input: Sender<InternalMessage>,
+        handles: &mut JoinSet<Result<(), Error>>,
+    ) -> Result<Sender<InternalMessage>, Error> {
+        trace!("starting pipeline");
+
+        let mut processors = self.config.processors.clone();
+        processors.reverse();
+    
+        let mut next_tx = input;
+    
+        for i in 0..processors.len() {
+            let p = processors[i].clone();
+    
+            let (tx, rx) = bounded(100);
+    
+            for n in 0..self.config.num_threads {
+                // tokio::spawn(processors::run_processor(p.clone(), next_tx.clone(), rx.clone(), self.state_tx.clone()));
+                let proc = processors::run_processor(p.clone(), next_tx.clone(), rx.clone(), self.state_tx.clone());
+                handles.spawn_blocking(move || {
+                    let runtime = tokio::runtime::Builder::new_multi_thread()
+                        .enable_all()
+                        .thread_name(format!("processor{}-{}", i, n))
+                        .worker_threads(1)
+                        // .on_thread_start(move || set_current_thread_priority_low())
+                        .build()
+                        .expect("Creating tokio runtime");
+                    runtime.block_on(proc)
+                });
+            };
+    
+            next_tx = tx;
+        };
+        
+        Ok(next_tx)
+    }
+    
+    async fn output(
+        &self,
+        output: ParsedRegisteredItem,
+        handles: &mut JoinSet<Result<(), Error>>,
+    ) -> Result<Sender<InternalMessage>, Error> {
+        trace!("started output");
+    
+        let (tx, rx) = bounded(100);
+    
+        for i in 0..self.config.num_threads {
+            println!("Starting output thread {}", i);
+            let item = (output.creator)(&output.config)?; 
+            match item {
+                ExecutionType::Output(o) => {
+                    // handles.spawn(outputs::run_output(rx.clone(), self.state_tx.clone(), o));
+                    let state_tx = self.state_tx.clone();
+                    let new_rx = rx.clone();
+                    handles.spawn_blocking(move || {
+                        let runtime = tokio::runtime::Builder::new_multi_thread()
+                            .enable_all()
+                            .thread_name(format!("output{}", i))
+                            .worker_threads(1)
+                            // .on_thread_start(move || set_current_thread_priority_low())
+                            .build()
+                            .expect("Creating tokio runtime");
+                        runtime.block_on(outputs::run_output(new_rx, state_tx, o))
+                    });
+                },
+                ExecutionType::OutputBatch(o) => {
+                    // handles.spawn(outputs::run_output_batch(rx.clone(), self.state_tx.clone(), o))
+                    let state_tx = self.state_tx.clone();
+                    let new_rx = rx.clone();
+                    handles.spawn_blocking(move || {
+                        let runtime = tokio::runtime::Builder::new_multi_thread()
+                            .enable_all()
+                            .thread_name(format!("output{}", i))
+                            .worker_threads(1)
+                            // .on_thread_start(move || set_current_thread_priority_low())
+                            .build()
+                            .expect("Creating tokio runtime");
+                        runtime.block_on(outputs::run_output_batch(new_rx, state_tx, o))
+                    });
+                },
+                _ => {
+                    error!("invalid execution type for output");
+                    return Err(Error::Validation("invalid execution type".into()))
+                },
+            };
+        }
+        
+        Ok(tx)
     }
 }
 
@@ -312,121 +410,16 @@ struct State {
     errors: Vec<String>,
 }
 
-// processor subs not in place when input finishes.
-
-async fn state_handler(
-    bus: fiddler_bus::EventBus::<fiddler_bus::Connected>,
-    processor_count: usize,
-    barrier: Arc<Notify>,
-) -> Result<(), Error> {
-    let (proc_id, mut proc_topic) = bus.subscribe::<ProcessingState>("processing-state").await.unwrap();
-    let mut processor_subs: HashMap<usize, String> = HashMap::new();
-    let mut output_handle: Option<String> = None;
-    
-    
-
-    loop {
-        tokio::select! {
-            Some(msg) = proc_topic.recv() => {
-                match msg {
-                    ProcessingState::InputComplete => {
-                        trace!("Received input complete state");
-                        let b = bus.clone();
-
-                        let i = processor_subs.get(&0);
-                        if let Some(id) = i {
-                            let rid = id.clone();
-                            tokio::spawn(async move {
-                                while b.count::<InternalMessage>("processor0").await.unwrap() > 0 {
-                                    sleep(Duration::from_secs(5)).await
-                                };
-        
-                                trace!(topic = "processor0", "closing subscription");
-                                b.unsubscribe(&rid).await.unwrap();
-                            });
-                        } else {
-                            error!("no processor to unsubscribe");
-                        };
-
-                    },
-                    ProcessingState::ProcessorSubscribe((i, id)) => {
-                        trace!(index = i, subscription_id = id, "Received processor subscribe state");
-                        processor_subs.insert(i, id);
-
-                        if processor_subs.len() == processor_count && output_handle.is_some() {
-                            trace!("notifying input to start");
-                            barrier.notify_one();
-                        };
-                        
-                    },
-                    ProcessingState::ProcessorComplete(i) => {
-                        trace!(index = i, "Received processor complete state");
-                        let index = i+1;
-                        let topic = format!("processor{}", index);
-                        let b = bus.clone();
-
-                        let p = processor_subs.get(&index);
-                        if let Some(id) = p {
-                            let rid = id.clone();
-                            tokio::spawn(async move {
-                                while b.count::<InternalMessage>(&topic).await.unwrap() > 0 {
-                                    sleep(Duration::from_secs(5)).await
-                                };
-                                trace!(topic = topic, "closing subscription");
-                                b.unsubscribe(&rid).await.unwrap();
-                            });
-                        } else {
-                            error!("no processor to unsubscribe");
-                        }
-                        
-                    },
-                    ProcessingState::PipelineComplete => {
-                        trace!("Received pipeline complete state");
-                        if let Some(ref id) = output_handle {
-                            let rid = id.clone();
-                            let b = bus.clone();
-                            tokio::spawn(async move {
-                                while b.count::<InternalMessage>("output").await.unwrap() > 0 {
-                                    sleep(Duration::from_secs(5)).await
-                                };
-                                trace!(topic = "output", "closing subscription");
-                                b.unsubscribe(&rid).await.unwrap();
-                            });
-                        } else {
-                            error!("no output to unsubscribe");
-                        }
-                    },
-                    ProcessingState::OutputSubscribe(id) => {
-                        trace!(subscription_id = id, "Received output subscribe state");
-                        output_handle = Some(id);
-                        if processor_subs.len() == processor_count && output_handle.is_some() {
-                            trace!("notifying input to start");
-                            barrier.notify_one();
-                        };
-                    },
-                    ProcessingState::OutputComplete => {
-                        trace!("Received output complete state");
-                        bus.unsubscribe(&proc_id).await.unwrap();
-                        return Ok(())
-                    },
-                }
-            },
-            else => break,
-        }
-    }
-    Ok(())
-}
 
 async fn message_handler(
-    mut input: Receiver<MessageHandle>,
-    bus: fiddler_bus::EventBus::<fiddler_bus::Connected>
+    mut new_msg: Receiver<MessageHandle>,
+    mut msg_status: Receiver<InternalMessageState>,
 ) -> Result<(), Error> {
-    let (sub_id, mut msg_topic) = bus.subscribe::<InternalMessageState>("message-state").await.unwrap();
     let mut handles: HashMap<String, State> = HashMap::new();
 
     loop {
         tokio::select! {
-            Some(msg) = input.recv() => {
+            Ok(msg) = new_msg.recv() => {
                 trace!(message_id = msg.message_id, "Received new message");
                 let closure = Arc::into_inner(msg.closure).unwrap();
                 let i = handles.insert(msg.message_id.clone(), State { instance_count: 1, processed_count: 0, processed_error_count: 0, output_count: 0, output_error_count: 0, closure: closure, errors: Vec::new() });
@@ -435,7 +428,7 @@ async fn message_handler(
                     return Err(Error::ExecutionError("Duplicate Message ID Error".into()))
                 };
             },
-            Some(msg) = msg_topic.recv() => {
+            Ok(msg) = msg_status.recv() => {
                 debug!(state = msg.status.to_string(), message_id = msg.message_id, "Received message state");
                 match msg.status {
                     MessageStatus::New => {
@@ -509,7 +502,6 @@ async fn message_handler(
                         }
                     },
                     MessageStatus::Shutdown => {
-                        bus.unsubscribe(&sub_id).await.unwrap();
                         return Ok(())
                     },
                 }
@@ -522,12 +514,14 @@ async fn message_handler(
 
 async fn input(
     input: ParsedRegisteredItem,
-    bus: fiddler_bus::EventBus<fiddler_bus::Connected>,
+    output: Sender<InternalMessage>,
     state_handle: Sender<MessageHandle>,
-    barrier: Arc<Notify>,
 ) -> Result<(), Error> {
     trace!("started input");
-    let i = match &input.execution_type {
+
+    let item = (input.creator)(&input.config)?;
+
+    let mut i = match item {
         ExecutionType::Input(i) => i,
         _ => {
             error!("invalid execution type for input");
@@ -535,17 +529,23 @@ async fn input(
         }
     };
 
-    i.connect().await?;
     debug!("input connected");
 
-    barrier.notified().await;
+    // let mut count = 0;
 
     loop {
+        // if count >= 1000 {
+        //     i.close()?;
+        //     debug!("input closed");
+        //     bus.publish::<ProcessingState>("processing-state", ProcessingState::InputComplete).await.unwrap();
+        //     return Ok(());
+        // }
+
         match i.read().await {
             Ok((msg, closure)) => {
                 let message_id: String = Uuid::new_v4().into();
 
-                trace!("message received from input");
+                // trace!("message received from input");
                 let internal_msg = InternalMessage {
                     message: msg,
                     message_id: message_id.clone(),
@@ -557,13 +557,16 @@ async fn input(
                     closure: Arc::new(closure),
                 }).await.unwrap();
 
-                bus.publish::<InternalMessage>("input", internal_msg).await.unwrap();
+                match output.send(internal_msg).await {
+                    Ok(_) => {},
+                    Err(e) => return Err(Error::UnableToSendToChannel(format!("{}", e)))
+                }
+                // count += 1;
             }
             Err(e) => match e {
                 Error::EndOfInput => {
-                    i.close()?;
+                    i.close().await?;
                     debug!("input closed");
-                    bus.publish::<ProcessingState>("processing-state", ProcessingState::InputComplete).await.unwrap();
                     return Ok(());
                 }
                 Error::NoInputToReturn => {
@@ -571,7 +574,7 @@ async fn input(
                     continue;
                 }
                 _ => {
-                    i.close()?;
+                    i.close().await?;
                     debug!("input closed");
                     error!(error = format!("{}", e), "read error from input");
                     return Err(Error::ExecutionError(format!(
@@ -584,165 +587,4 @@ async fn input(
     }
 }
 
-async fn pipeline(
-    pipeline: ParsedPipeline,
-    bus: fiddler_bus::EventBus<fiddler_bus::Connected>,
-) -> Result<(), Error> {
-    trace!("starting pipeline");
-    
-    let mut pipelines = JoinSet::new();
 
-    for i in 0..pipeline.processors.len() {
-        let p = pipeline.processors[i].clone();
-        let subscription = match i {
-            0 => "input".into(),
-            _ => format!("processor{}", i-1),
-        };
-
-        let publisher = if (i+1) == pipeline.processors.len() {
-            "output".into()
-        } else {
-            format!("processor{}", i)
-        };
-
-        let b = bus.clone();
-        pipelines.spawn(async move { run_processor(b, subscription, publisher, p, i).await });
-    }
-
-    while let Some(res) = pipelines.join_next().await {
-        res.map_err(|e| Error::ProcessingError(format!("{}", e)))??;
-    }
-
-    debug!("shutting down pipeline");
-    bus.publish::<ProcessingState>("processing-state", ProcessingState::PipelineComplete).await.unwrap();
-
-    Ok(())
-}
-
-async fn run_processor(
-    bus: fiddler_bus::EventBus<fiddler_bus::Connected>,
-    subscription: String,
-    publisher: String,
-    processor: ParsedRegisteredItem,
-    id: usize,
-) -> Result<(), Error> {
-    trace!(subscribed_to = subscription, publish_to = publisher, "Started processor");
-    let p = match &processor.execution_type {
-        ExecutionType::Processor(p) => p,
-        _ => {
-            error!("invalid execution type for processor");
-            return Err(Error::Validation("invalid execution type".into()));
-        }
-    };
-
-    let (sub_id, mut input) = bus.subscribe::<InternalMessage>(&subscription).await.unwrap();
-    bus.publish::<ProcessingState>("processing-state", ProcessingState::ProcessorSubscribe((id, sub_id))).await.unwrap();
-
-    loop {
-        match input.try_recv() {
-            Ok(msg) => {
-                trace!("received processing message");
-                match p.process(msg.message.clone()).await {
-                    Ok(m) => {
-                        for (i, m) in m.iter().enumerate() {
-                            let mut new_msg = msg.clone();
-                            new_msg.message = m.clone();
-                            if i > 0 {
-                                bus.publish::<InternalMessageState>("message-state", InternalMessageState{
-                                    message_id: msg.message_id.clone(),
-                                    status: MessageStatus::New,
-                                }).await.unwrap();
-                            };
-                            trace!("message processed");
-                            bus.publish::<InternalMessage>(&publisher, new_msg).await.unwrap();
-                        }
-                    }
-                    Err(e) => match e {
-                        Error::ConditionalCheckfailed => {
-                            debug!("conditional check failed for processor");
-
-                            bus.publish::<InternalMessageState>("message-state", InternalMessageState{
-                                message_id: msg.message_id,
-                                status: MessageStatus::ProcessError(format!("{}", e)),
-                            }).await.unwrap();
-                        }
-                        _ => {
-                            error!(error = format!("{}", e), "read error from processor");
-                            return Err(e);
-                        }
-                    },
-                }
-            }
-            Err(e) => match e {
-                TryRecvError::Disconnected => {
-                    p.close()?;
-                    debug!("processor closed");
-                    bus.publish::<ProcessingState>("processing-state", ProcessingState::ProcessorComplete(id)).await.unwrap();
-                    return Ok(());
-                }
-                TryRecvError::Empty => sleep(Duration::from_millis(250)).await,
-            },
-        };
-        yield_now().await;
-    }
-}
-
-async fn output(
-    bus: fiddler_bus::EventBus<fiddler_bus::Connected>,
-    output: ParsedRegisteredItem,
-) -> Result<(), Error> {
-    trace!("started output");
-    let o = match &output.execution_type {
-        ExecutionType::Output(o) => o,
-        _ => {
-            error!("invalid execution type for output");
-            return Err(Error::Validation("invalid execution type".into()));
-        }
-    };
-
-    o.connect().await?;
-    debug!("output connected");
-
-    let (sub_id, mut input) = bus.subscribe::<InternalMessage>("output").await.unwrap();
-    bus.publish::<ProcessingState>("processing-state", ProcessingState::OutputSubscribe(sub_id)).await.unwrap();
-
-    loop {
-        match input.try_recv() {
-            Ok(msg) => {
-                trace!("received output message");
-                match o.write(msg.message.clone()).await {
-                    Ok(_) => {
-                        bus.publish::<InternalMessageState>("message-state", InternalMessageState{
-                            message_id: msg.message_id,
-                            status: MessageStatus::Output,
-                        }).await.unwrap();
-                    }
-                    Err(e) => match e {
-                        Error::ConditionalCheckfailed => {
-                            debug!("conditional check failed for output");
-                        }
-                        _ => {
-                            bus.publish::<InternalMessageState>("message-state", InternalMessageState{
-                                message_id: msg.message_id,
-                                status: MessageStatus::OutputError(format!("{}", e)),
-                            }).await.unwrap();
-                        }
-                    },
-                }
-            }
-            Err(e) => match e {
-                TryRecvError::Disconnected => {
-                    o.close()?;
-                    debug!("output closed");
-                    bus.publish::<ProcessingState>("processing-state", ProcessingState::OutputComplete).await.unwrap();
-                    bus.publish::<InternalMessageState>("message-state", InternalMessageState{
-                        message_id: "end of the line".into(),
-                        status: MessageStatus::Shutdown,
-                    }).await.unwrap();
-                    return Ok(());
-                }
-                TryRecvError::Empty => sleep(Duration::from_millis(250)).await,
-            },
-        };
-    }
-}

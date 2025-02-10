@@ -4,7 +4,7 @@ use fiddler::config::ItemType;
 use fiddler::config::{ConfigSpec, ExecutionType};
 use fiddler::Message;
 use fiddler::{new_callback_chan, CallbackChan};
-use fiddler::{Closer, Connect, Error, Input};
+use fiddler::{Closer, Error, Input};
 use serde::{Deserialize, Serialize};
 use serde_yaml::Value;
 use std::cell::RefCell;
@@ -12,54 +12,38 @@ use std::sync::{Arc, Mutex};
 
 #[derive(Serialize, Deserialize)]
 pub struct JsonGenerator {
-    count: Mutex<RefCell<isize>>,
+    count: isize,
 }
 
 #[async_trait]
 impl Input for JsonGenerator {
-    async fn read(self: &Self) -> Result<(Message, CallbackChan), Error> {
-        match self.count.lock() {
-            Ok(c) => {
-                let mut count = c.borrow_mut();
+    async fn read(&mut self) -> Result<(Message, CallbackChan), Error> {
 
-                if *count <= 0 {
-                    return Err(Error::EndOfInput);
-                };
+        if self.count <= 0 {
+            return Err(Error::EndOfInput)
+        };
 
-                *count -= 1;
+        self.count -= 1;
 
-                let (tx, rx) = new_callback_chan();
-                tokio::spawn(async move { rx.await });
+        let (tx, rx) = new_callback_chan();
+        tokio::spawn(async move { rx.await });
 
-                Ok((
-                    Message {
-                        bytes: format!("{{\"Hello World\": {}}}", count).as_bytes().into(),
-                        ..Default::default()
-                    },
-                    tx,
-                ))
-            }
-            Err(_) => return Err(Error::ExecutionError(format!("Unable to get inner lock"))),
-        }
-    }
-}
-
-impl Closer for JsonGenerator {
-    fn close(self: &Self) -> Result<(), Error> {
-        Ok(())
+        Ok((
+            Message {
+                bytes: format!("{{\"Hello World\": {}}}", self.count).as_bytes().into(),
+                ..Default::default()
+            },
+            tx,
+        ))
     }
 }
 
 #[async_trait]
-impl Connect for JsonGenerator {
-    async fn connect(self: &Self) -> Result<(), Error> {
-        Ok(())
-    }
-}
+impl Closer for JsonGenerator {}
 
 fn create_json_generator(conf: &Value) -> Result<ExecutionType, Error> {
     let g: JsonGenerator = serde_yaml::from_value(conf.clone())?;
-    return Ok(ExecutionType::Input(Arc::new(g)));
+    return Ok(ExecutionType::Input(Box::new(g)));
 }
 
 pub fn register_json_generator() -> Result<(), Error> {

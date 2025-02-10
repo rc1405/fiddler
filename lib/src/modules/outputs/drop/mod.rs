@@ -1,38 +1,25 @@
-use crate::{Error, Output, Closer, Connect};
+use crate::{Error, Output, Closer};
 use crate::config::{ConfigSpec, ExecutionType};
 use crate::config::register_plugin;
 use crate::config::ItemType;
 use crate::Message;
 use serde_yaml::Value;
 use async_trait::async_trait;
-use fiddler_macros::fiddler_registration_func;
-use std::sync::Arc;
 
 #[derive(Clone)]
 pub struct StdDrop {}
 
+impl Closer for StdDrop {}
+
 #[async_trait]
 impl Output for StdDrop {
-    async fn write(&self, _message: Message) -> Result<(), Error> {
-        Ok(())
-    }
-}
-
-impl Closer for StdDrop {
-    fn close(&self) -> Result<(), Error> {
-        Ok(())
-    }
-}
-
-#[async_trait]
-impl Connect for StdDrop {
-    async fn connect(&self) -> Result<(), Error> {
+    async fn write(&mut self, _message: Message) -> Result<(), Error> {
         Ok(())
     }
 }
 
 fn create_drop(_conf: &Value) -> Result<ExecutionType, Error> {
-    Ok(ExecutionType::Output(Arc::new(StdDrop{})))
+    Ok(ExecutionType::Output(Box::new(StdDrop{})))
 }
 
 // #[fiddler_registration_func]

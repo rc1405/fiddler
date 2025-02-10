@@ -6,13 +6,10 @@ use crate::Message;
 use crate::MessageBatch;
 use serde_yaml::Value;
 use async_trait::async_trait;
-use fiddler_macros::fiddler_registration_func;
-use std::sync::Arc;
-
 mod check;
 
 pub struct Switch {
-    steps: Vec<Arc<dyn Processor + Send + Sync>>,
+    steps: Vec<Box<dyn Processor + Send + Sync>>,
 }
 
 #[async_trait]
@@ -37,10 +34,11 @@ impl Processor for Switch {
     }
 }
 
+#[async_trait]
 impl Closer for Switch {
-    fn close(&self) -> Result<(), Error> {
-        for p in &self.steps {
-            p.close()?;
+    async fn close(&mut self) -> Result<(), Error> {
+        for p in &mut self.steps {
+            p.close().await?;
         };
         Ok(())
     }
@@ -51,7 +49,8 @@ fn create_switch(conf: &Value) -> Result<ExecutionType, Error> {
     let mut steps = Vec::new();
     for p in c {
         let ri = parse_configuration_item(ItemType::Processor, &p.extra)?;
-        if let ExecutionType::Processor(rp) = ri.execution_type {
+        let proc = ((ri.creator)(&ri.config))?;
+        if let ExecutionType::Processor(rp) = proc {
             steps.push(rp);
         };        
     };
@@ -60,10 +59,9 @@ fn create_switch(conf: &Value) -> Result<ExecutionType, Error> {
         steps,
     };
 
-    Ok(ExecutionType::Processor(Arc::new(s)))
+    Ok(ExecutionType::Processor(Box::new(s)))
 }
 
-// #[fiddler_registration_func]
 pub fn register_switch() -> Result<(), Error> {
     let config = "type: array";
 

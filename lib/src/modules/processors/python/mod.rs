@@ -8,9 +8,7 @@ use crate::Message;
 use crate::MessageBatch;
 use serde_yaml::Value;
 use async_trait::async_trait;
-use fiddler_macros::fiddler_registration_func;
 use serde::{Deserialize, Serialize};
-use std::sync::Arc;
 
 #[derive(Clone, Deserialize, Serialize)]
 pub struct PyProcSpec {
@@ -71,11 +69,7 @@ impl Processor for PyProc {
     }
 }
 
-impl Closer for PyProc {
-    fn close(&self) -> Result<(), Error> {
-        Ok(())
-    }
-}
+impl Closer for PyProc {}
 
 fn create_python(conf: &Value) -> Result<ExecutionType, Error> {
     let c: PyProcSpec = serde_yaml::from_value(conf.clone())?;
@@ -88,10 +82,9 @@ fn create_python(conf: &Value) -> Result<ExecutionType, Error> {
         p.use_string = b;
     };
 
-    Ok(ExecutionType::Processor(Arc::new(p)))
+    Ok(ExecutionType::Processor(Box::new(p)))
 }
 
-// #[cfg_attr(feature = "python", fiddler_registration_func)]
 pub fn register_python() -> Result<(), Error> {
     let config = "type: object
 properties:

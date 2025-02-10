@@ -30,10 +30,10 @@ async fn fiddler_elasticsearch_output_test() {
   file: 
     filename: tests{MAIN_SEPARATOR_STR}data{MAIN_SEPARATOR_STR}input.json
     codec: ToEnd
-pipeline:
-    processors:
-        - label: my_cool_mapping
-          noop: {{}}
+num_threads: 1
+processors:
+    - label: my_cool_mapping
+      noop: {{}}
 output:
   elasticsearch: 
     index: fiddler

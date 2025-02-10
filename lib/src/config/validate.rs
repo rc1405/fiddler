@@ -1,6 +1,7 @@
 use super::{ExecutionType, ItemType, ParsedRegisteredItem, RegisteredItem, ENV};
 use crate::Error;
 use serde_yaml::Value;
+use tracing::{error, trace};
 use std::collections::HashMap;
 
 /// The function takes the raw hashmap configuration item and looks up the registered
@@ -30,6 +31,7 @@ pub fn parse_configuration_item(
         "unable to determine {} key",
         itype
     )))?;
+    trace!("validationg item {} of type {}", first_key, itype);
     let item = get_item(&itype, first_key)?;
 
     let content = map
@@ -38,8 +40,10 @@ pub fn parse_configuration_item(
             "unable to validate {} key {}",
             itype, first_key
         )))?;
+
     let content_str = serde_yaml::to_string(content)?;
     item.format.validate(&content_str)?;
+    trace!("Format for {} validated", first_key);
     match itype {
         ItemType::Input => {
             let creator = (item.creator)(content)?;
@@ -51,13 +55,8 @@ pub fn parse_configuration_item(
                     ))
                 }
             };
-
-            Ok(ParsedRegisteredItem {
-                execution_type: creator,
-                item_type: ItemType::Input,
-            })
         }
-        ItemType::InputBatch => Err(Error::NotYetImplemented),
+        ItemType::InputBatch => return Err(Error::NotYetImplemented),
         ItemType::Output => {
             let creator = (item.creator)(content)?;
             match &creator {
@@ -68,13 +67,19 @@ pub fn parse_configuration_item(
                     ))
                 }
             };
-
-            Ok(ParsedRegisteredItem {
-                execution_type: creator,
-                item_type: ItemType::Output,
-            })
         }
-        ItemType::OutputBatch => Err(Error::NotYetImplemented),
+        ItemType::OutputBatch => {
+            let creator = (item.creator)(content)?;
+            match &creator {
+                ExecutionType::OutputBatch(_) => {}
+                _ => {
+                    error!("type validation failed");
+                    return Err(Error::ConfigFailedValidation(
+                        "invalid type returned for output".into(),
+                    ))
+                }
+            };
+        },
         ItemType::Processor => {
             let creator = (item.creator)(content)?;
             match &creator {
@@ -85,13 +90,14 @@ pub fn parse_configuration_item(
                     ))
                 }
             };
-
-            Ok(ParsedRegisteredItem {
-                execution_type: creator,
-                item_type: ItemType::Processor,
-            })
         }
     }
+
+    trace!("Item {} parsed", first_key);
+    Ok(ParsedRegisteredItem{
+        creator: item.creator.clone(),
+        config: content.clone(),
+    })
 }
 
 fn get_item(itype: &ItemType, key: &String) -> Result<RegisteredItem, Error> {

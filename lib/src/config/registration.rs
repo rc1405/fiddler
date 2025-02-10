@@ -15,7 +15,7 @@ use tracing::{debug, error};
 /// let conf_spec = ConfigSpec::from_schema(conf_str).unwrap();
 ///
 /// register_plugin("noop".into(), ItemType::Processor, conf_spec, |v| {
-///     Ok(ExecutionType::Processor(Arc::new(NoOp{})))
+///     Ok(ExecutionType::Processor(Box::new(NoOp{})))
 /// }).unwrap();
 /// ```
 pub fn register_plugin(
@@ -34,7 +34,7 @@ pub fn register_plugin(
                         error!(name = name.clone(), "plugin is already registered");
                         return Err(Error::DuplicateRegisteredName(name));
                     };
-                    debug!(name = name.clone(), "plugin registered")
+                    debug!(name = name.clone(), plugin_type = format!("{}", itype), "plugin registered");
                 }
                 None => {
                     error!(kind = "unable to borrow mut", "InternalServerError");

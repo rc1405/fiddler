@@ -21,7 +21,7 @@ struct CheckConfig {
 pub struct Check {
     _label: Option<String>,
     condition: String,
-    processors: Vec<Arc<dyn Processor + Send + Sync>>,
+    processors: Vec<Box<dyn Processor + Send + Sync>>,
 }
 
 fn perform_check(condition: &str, json_str: String) -> Result<(), Error> {
@@ -59,10 +59,11 @@ impl Processor for Check {
     }
 }
 
+#[async_trait]
 impl Closer for Check {
-    fn close(&self) -> Result<(), Error> {
-        for p in &self.processors {
-            p.close()?;
+    async fn close(&mut self) -> Result<(), Error> {
+        for p in &mut self.processors {
+            p.close().await?;
         };
         Ok(())
     }
@@ -75,7 +76,8 @@ fn create_check(conf: &Value) -> Result<ExecutionType, Error> {
     let mut steps = Vec::new();
     for p in c.processors {
         let ri = parse_configuration_item(ItemType::Processor, &p.extra)?;
-        if let ExecutionType::Processor(rp) = ri.execution_type {
+        let proc = ((ri.creator)(&ri.config))?;
+        if let ExecutionType::Processor(rp) = proc {
             steps.push(rp);
         };        
     };
@@ -86,7 +88,7 @@ fn create_check(conf: &Value) -> Result<ExecutionType, Error> {
         processors: steps,
     };
 
-    Ok(ExecutionType::Processor(Arc::new(s)))
+    Ok(ExecutionType::Processor(Box::new(s)))
 }
 
 pub fn register_check() -> Result<(), Error> {

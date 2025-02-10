@@ -122,7 +122,7 @@ fn setup_subscriber(arg_log_level: LogLevel) {
             .with_default_directive(LevelFilter::OFF.into())
             .from_env()
             .unwrap()
-            .add_directive(format!("fiddler::runtime={}", l).parse().unwrap());
+            .add_directive(format!("fiddler={}", l).parse().unwrap());
 
         tracing_subscriber::fmt()
             .with_env_filter(filter)

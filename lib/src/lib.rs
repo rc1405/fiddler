@@ -2,6 +2,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::collections::HashMap;
 use tokio::sync::oneshot;
+use tokio::time::Duration;
 
 use thiserror::Error;
 pub mod config;
@@ -9,8 +10,6 @@ mod runtime;
 pub mod modules;
 use async_trait::async_trait;
 pub use runtime::Runtime;
-
-mod macros;
 
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
 pub struct Message {
@@ -32,31 +31,33 @@ pub enum Status {
     Errored(Vec<String>),
 }
 
+#[async_trait]
 pub trait Closer {
-    fn close(&self) -> Result<(), Error>;
+    async fn close(&mut self) -> Result<(), Error> {
+        Ok(())
+    }
 }
 
 #[async_trait]
-pub trait Connect {
-    async fn connect(&self) -> Result<(), Error>;
+pub trait Input: Closer {
+    async fn read(&mut self) -> Result<(Message, CallbackChan), Error>;
 }
 
 #[async_trait]
-pub trait Input: Connect + Closer {
-    async fn read(&self) -> Result<(Message, CallbackChan), Error>;
-}
-
-pub trait InputBatch: Connect + Closer {
-    fn read_batch(&self) -> Result<(MessageBatch, CallbackChan), Error>;
+pub trait InputBatch: Closer {
+    fn read_batch(&mut self) -> Result<(MessageBatch, CallbackChan), Error>;
 }
 
 #[async_trait]
-pub trait Output: Connect + Closer {
-    async fn write(&self, message: Message) -> Result<(), Error>;
+pub trait Output: Closer {
+    async fn write(&mut self, message: Message) -> Result<(), Error>;
 }
 
-pub trait OutputBatch: Connect + Closer {
-    fn write_batch(&self, message_batch: MessageBatch) -> Result<(), Error>;
+#[async_trait]
+pub trait OutputBatch: Closer {
+    async fn write_batch(&mut self, message_batch: MessageBatch) -> Result<(), Error>;
+    async fn batch_size(&self) -> usize;
+    async fn interval(&self) -> Duration;
 }
 
 #[async_trait]
@@ -103,3 +104,4 @@ pub enum Error {
     #[error("NoInputToReturn")]
     NoInputToReturn,
 }
+

@@ -1,17 +1,14 @@
-use crate::{Error, Output, Closer, Connect};
+use crate::{Error, OutputBatch, Closer};
 use crate::config::{ConfigSpec, ExecutionType};
 use crate::config::register_plugin;
 use crate::config::ItemType;
-use crate::Message;
+use crate::MessageBatch;
 use serde_yaml::Value;
 use async_trait::async_trait;
 use serde::Deserialize;
-use fiddler_macros::fiddler_registration_func;
-use std::cell::RefCell;
-use tokio::sync::Mutex;
-use std::sync::Arc;
-use std::pin::Pin;
-use tokio::sync::mpsc::{Sender, Receiver, channel};
+use std::time::Duration;
+use async_channel::{Sender, Receiver, bounded};
+use tracing::debug;
 
 use elasticsearch::{
     auth::Credentials, 
@@ -38,23 +35,25 @@ pub enum CertValidation {
 }
 
 #[derive(Deserialize, Default)]
-pub struct Elastic {
+struct ElasticConfig {
     url: Option<String>,
     username: Option<String>,
     password: Option<String>,
     cloud_id: Option<String>,
     index: String,
     cert_validation: Option<CertValidation>,
-    #[serde(skip)]
-    sender: Mutex<RefCell<Option<Sender<Request>>>>,
+}
+
+pub struct Elastic {
+    sender: Sender<Request>,
 }
 
 struct Request {
-    message: Message,
+    message: MessageBatch,
     output: Sender<Result<(), Error>>,
 }
 
-impl Elastic {
+impl ElasticConfig {
     fn get_client(&self) -> Result<Elasticsearch, Error> {
         let cert_validation = match self.cert_validation.clone().unwrap_or(CertValidation::Default) {
             CertValidation::None => CertificateValidation::None,
@@ -96,13 +95,20 @@ impl Elastic {
     }
 }
 
-async fn elasticsearch_handler(es_client: Elasticsearch, index: String, mut requests: Receiver<Request>) -> Result<(), Error> {
-    while let Some(req) = requests.recv().await {
-        let v: serde_json::Value = serde_json::from_slice(&req.message.bytes)?;
+async fn elasticsearch_handler(es_client: Elasticsearch, index: String, requests: Receiver<Request>) -> Result<(), Error> {
+    while let Ok(req) = requests.recv().await {
+        let mut body: Vec<BulkOperation<_>> = Vec::new();
+        
+        for msg in req.message {
+            let v: serde_json::Value = match serde_json::from_slice(&msg.bytes) {
+                Ok(i) => i,
+                Err(e) => {
+                    continue
+                }
+            };
 
-        let body: Vec<BulkOperation<_>> = vec![
-            BulkOperation::index(v).into()
-        ];
+            body.push(BulkOperation::index(v).into());
+        };
 
         let response = match es_client
             .bulk(BulkParts::Index(&index))
@@ -111,7 +117,7 @@ async fn elasticsearch_handler(es_client: Elasticsearch, index: String, mut requ
             .await {
                 Ok(i) => i,
                 Err(e) => {
-                    let _ = req.output.send(Err(Error::OutputError(format!("{}", e)))).await;
+                    let _ = req.output.send(Err(Error::OutputError(format!("{}", e)))).await.unwrap();
                     continue
                 },
             };
@@ -120,7 +126,7 @@ async fn elasticsearch_handler(es_client: Elasticsearch, index: String, mut requ
             .await {
                 Ok(i) => i,
                 Err(e) => {
-                    let _ = req.output.send(Err(Error::OutputError(format!("{}", e)))).await;
+                    let _ = req.output.send(Err(Error::OutputError(format!("{}", e)))).await.unwrap();
                     continue
                 }
             };
@@ -135,90 +141,75 @@ async fn elasticsearch_handler(es_client: Elasticsearch, index: String, mut requ
                             .collect();
 
                         if failed.len() > 0 {
-                            let _ = req.output.send(Err(Error::OutputError(format!("failed to insert record: {}", failed.join(","))))).await;
+                            let _ = req.output.send(Err(Error::OutputError(format!("failed to insert record: {}", failed.join(","))))).await.unwrap();
                             continue
                         }
                     },
                     None => {
-                        let _ = req.output.send(Err(Error::OutputError("unable to deteremine result".into()))).await;
+                        let _ = req.output.send(Err(Error::OutputError("unable to deteremine result".into()))).await.unwrap();
                         continue
                     },
                 }
             },
             None => {
-                let _ = {
-                    req.output.send(Err(Error::OutputError("unable to deteremine result".into()))).await;
-                    continue
-                };
+                let _ = req.output.send(Err(Error::OutputError("unable to deteremine result".into()))).await.unwrap();
+                continue
             },
         };
 
         // use req.output.is_closed();
-        req.output.send(Ok(())).await;
+        let _ = req.output.send(Ok(())).await.unwrap();
     }
-    println!("exiting");
-
     Ok(())
 }
 
 #[async_trait]
-impl Output for Elastic {
-    async fn write(&self, message: Message) -> Result<(), Error> {
-        let s = self.sender.lock().await;
-        let mut sender = s.replace(None);
-
-        match sender {
-            Some(ref mut r) => {
-                let (tx, mut rx) = channel(1);
-                r.send(Request {
-                    message,
-                    output: tx,
-                }).await.unwrap();
-                
-                rx.recv().await.unwrap()?;
-
-            },
-            None => {},
-        }
+impl OutputBatch for Elastic {
+    async fn write_batch(&mut self, message: MessageBatch) -> Result<(), Error> {
+        debug!("Received batch, sending");
+        let (tx, rx) = bounded(1);
+        self.sender.send(Request {
+            message: message,
+            output: tx,
+        }).await.unwrap();
+        debug!("Waiting for results");
+        rx.recv().await.unwrap()?;
+        debug!("Done sending details");
         Ok(())
     }
-}
 
-impl Closer for Elastic {
-    fn close(&self) -> Result<(), Error> {
-        Ok(())
+    async fn batch_size(&self) -> usize {
+        1000
+    }
+
+    async fn interval(&self) -> Duration {
+        Duration::from_secs(10)
     }
 }
 
 #[async_trait]
-impl Connect for Elastic {
-    async fn connect(&self) -> Result<(), Error> {
-        let c = self.get_client()?;
-        let (sender, receiver) = channel(1);
-        tokio::spawn(elasticsearch_handler(c, self.index.clone(), receiver));
-
-        let i = self.sender.lock().await;
-        let mut s = i.borrow_mut();
-        
-        *s = Some(sender);
-        
-        Ok(())
-    }
-}
+impl Closer for Elastic {}
 
 fn create_elasticsearch(conf: &Value) -> Result<ExecutionType, Error> {
-    let elastic: Elastic = serde_yaml::from_value(conf.clone())?;
+    let elastic: ElasticConfig = serde_yaml::from_value(conf.clone())?;
+
     if elastic.username.is_none() && elastic.password.is_some() {
         return Err(Error::ConfigFailedValidation("password is set but username is not".into()))
+
     } else if elastic.username.is_some() && elastic.password.is_none() {
         return Err(Error::ConfigFailedValidation("username is set but password is not".into()))
+
     } else if elastic.cloud_id.is_some() && (elastic.username.is_none() || elastic.password.is_none()) {
         return Err(Error::ConfigFailedValidation("cloud_id is set but username and/or password are not".into()))
+
     } else if elastic.cloud_id.is_none() && elastic.url.is_none() {
         return Err(Error::ConfigFailedValidation("cloud_id or url is required".into()))
     }
 
-    Ok(ExecutionType::Output(Arc::new(elastic)))
+    let c = elastic.get_client()?;
+    let (sender, receiver) = bounded(1);
+    tokio::spawn(elasticsearch_handler(c, elastic.index.clone(), receiver));
+    Ok(ExecutionType::OutputBatch(Box::new(Elastic{ sender })))
 }
 
 // #[cfg_attr(feature = "elasticsearch", fiddler_registration_func)]
@@ -244,7 +235,7 @@ required:
   - index";
     let conf_spec = ConfigSpec::from_schema(config)?;
 
-    register_plugin("elasticsearch".into(), ItemType::Output, conf_spec, create_elasticsearch)
+    register_plugin("elasticsearch".into(), ItemType::OutputBatch, conf_spec, create_elasticsearch)
 }
 
 #[cfg(test)]
