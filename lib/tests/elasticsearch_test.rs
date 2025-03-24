@@ -1,5 +1,5 @@
-#![ allow(unused_crate_dependencies)]
-#![ allow(missing_docs)]
+#![allow(unused_crate_dependencies)]
+#![allow(missing_docs)]
 #[cfg(feature = "elasticsearch")]
 use testcontainers_modules::{
     elastic_search, testcontainers::clients::Cli, testcontainers::RunnableImage,

@@ -23,7 +23,7 @@ fn create_drop(_conf: &Value) -> Result<ExecutionType, Error> {
 }
 
 // #[fiddler_registration_func]
-pub (super) fn register_drop() -> Result<(), Error> {
+pub(super) fn register_drop() -> Result<(), Error> {
     let config = "type: object";
     let conf_spec = ConfigSpec::from_schema(config)?;
 

@@ -19,7 +19,7 @@ impl Input for StdIn {
             .read_line(&mut buffer)
             .await
             .map_err(|_| Error::EndOfInput)?;
-        
+
         // remove new line character
         let _ = buffer.pop();
 
@@ -46,7 +46,7 @@ fn create_stdin(_conf: &Value) -> Result<ExecutionType, Error> {
     Ok(ExecutionType::Input(Box::new(StdIn {})))
 }
 
-pub (super) fn register_stdin() -> Result<(), Error> {
+pub(super) fn register_stdin() -> Result<(), Error> {
     let config = "type: object";
     let conf_spec = ConfigSpec::from_schema(config)?;
 

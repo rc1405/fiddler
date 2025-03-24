@@ -17,7 +17,7 @@ use crate::{InputBatch, OutputBatch};
 mod registration;
 mod validate;
 pub use registration::register_plugin;
-pub (crate) use validate::parse_configuration_item;
+pub(crate) use validate::parse_configuration_item;
 
 type Callback = fn(&Value) -> Result<ExecutionType, Error>;
 
@@ -87,14 +87,14 @@ pub(crate) struct RegisteredItem {
 
 /// Execution placeholder of the plugin to be used during processing
 #[derive(Clone)]
-pub (crate) struct ParsedRegisteredItem {
+pub(crate) struct ParsedRegisteredItem {
     pub creator: Callback,
     pub config: Value,
 }
 
 /// Unparsed configuration item used prior to validation
 #[derive(Debug, Deserialize, Serialize)]
-pub (crate) struct Item {
+pub(crate) struct Item {
     pub label: Option<String>,
 
     #[serde(flatten)]

@@ -23,7 +23,7 @@ fn create_noop(_conf: &Value) -> Result<ExecutionType, Error> {
     Ok(ExecutionType::Processor(Box::new(NoOp {})))
 }
 
-pub (super) fn register_noop() -> Result<(), Error> {
+pub(super) fn register_noop() -> Result<(), Error> {
     let config = "type: object";
     let conf_spec = ConfigSpec::from_schema(config)?;
 

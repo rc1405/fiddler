@@ -254,7 +254,7 @@ fn create_elasticsearch(conf: &Value) -> Result<ExecutionType, Error> {
 }
 
 // #[cfg_attr(feature = "elasticsearch", fiddler_registration_func)]
-pub (super) fn register_elasticsearch() -> Result<(), Error> {
+pub(super) fn register_elasticsearch() -> Result<(), Error> {
     let config = "type: object
 properties:
   url:

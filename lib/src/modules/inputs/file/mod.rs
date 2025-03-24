@@ -37,7 +37,7 @@ struct FileReaderConfig {
 /// stuff and things
 /// ```yaml
 /// input:
-///   file: 
+///   file:
 ///   filename: tests{MAIN_SEPARATOR_STR}data{MAIN_SEPARATOR_STR}input.txt
 ///   codec: Lines
 /// num_threads: 1
@@ -46,7 +46,7 @@ struct FileReaderConfig {
 ///   noop: {{}}
 /// output:
 /// validate:
-///   expected: 
+///   expected:
 ///     - Hello World
 ///     - This is the end
 /// ```
@@ -295,7 +295,7 @@ fn create_file(conf: &Value) -> Result<ExecutionType, Error> {
     Ok(ExecutionType::Input(Box::new(FileReader { receiver })))
 }
 
-pub (super) fn register_file() -> Result<(), Error> {
+pub(super) fn register_file() -> Result<(), Error> {
     let config = "type: object
 properties:
   filename: 

@@ -44,13 +44,14 @@ impl Processor for PyProc {
 
             py.run_bound(&self.code.clone(), None, Some(&locals))
                 .map_err(|e| Error::ProcessingError(format!("{}", e)))?;
-            
+
             if self.use_string {
                 let root: String = locals
                     .get_item("root")
                     .map_err(|e| Error::ProcessingError(format!("{}", e)))?
                     .ok_or(Error::ProcessingError("no root module found".into()))?
-                    .extract().map_err(|e| Error::ProcessingError(format!("{}", e)))?;
+                    .extract()
+                    .map_err(|e| Error::ProcessingError(format!("{}", e)))?;
 
                 Ok(vec![Message {
                     bytes: root.as_bytes().into(),
@@ -61,7 +62,8 @@ impl Processor for PyProc {
                     .get_item("root")
                     .map_err(|e| Error::ProcessingError(format!("{}", e)))?
                     .ok_or(Error::ProcessingError("no root module found".into()))?
-                    .extract().map_err(|e| Error::ProcessingError(format!("{}", e)))?;
+                    .extract()
+                    .map_err(|e| Error::ProcessingError(format!("{}", e)))?;
 
                 Ok(vec![Message {
                     bytes: root,
@@ -88,7 +90,7 @@ fn create_python(conf: &Value) -> Result<ExecutionType, Error> {
     Ok(ExecutionType::Processor(Box::new(p)))
 }
 
-pub (super) fn register_python() -> Result<(), Error> {
+pub(super) fn register_python() -> Result<(), Error> {
     let config = "type: object
 properties:
   code: 

@@ -7,7 +7,7 @@ use tokio::time::Duration;
 
 use thiserror::Error;
 pub mod config;
-pub (crate) mod modules;
+pub(crate) mod modules;
 mod runtime;
 use async_trait::async_trait;
 pub use runtime::Runtime;

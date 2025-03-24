@@ -24,7 +24,7 @@ fn create_stdout(_conf: &Value) -> Result<ExecutionType, Error> {
     Ok(ExecutionType::Output(Box::new(StdOut {})))
 }
 
-pub (super) fn register_stdout() -> Result<(), Error> {
+pub(super) fn register_stdout() -> Result<(), Error> {
     let config = "type: object";
     let conf_spec = ConfigSpec::from_schema(config)?;
 

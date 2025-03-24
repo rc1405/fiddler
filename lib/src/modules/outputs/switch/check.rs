@@ -84,7 +84,7 @@ fn create_check(conf: &Value) -> Result<ExecutionType, Error> {
     Ok(ExecutionType::Output(Box::new(s)))
 }
 
-pub (super) fn register_check() -> Result<(), Error> {
+pub(super) fn register_check() -> Result<(), Error> {
     let config = "type: object
 properties:
   label:
