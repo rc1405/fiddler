@@ -12,7 +12,7 @@ use tokio::task::yield_now;
 use tokio::time::{sleep, Duration};
 use tracing::{debug, error, trace};
 
-pub fn register_plugins() -> Result<(), Error> {
+pub (crate) fn register_plugins() -> Result<(), Error> {
     lines::register_lines()?;
     noop::register_noop()?;
     #[cfg(feature = "python")]

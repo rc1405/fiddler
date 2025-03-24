@@ -237,7 +237,7 @@ Apache License, Version 2.0, without any additional terms or conditions.
 * build.rs doesn't validate Python is present when compiled on Windows
 * Integration tests failing on windows GHA
 
-// Needed Test Cases
+# TODO List NOW
 OutputBatch provided as Output doesn't elevate the error
 [Done] CLI Test should only use one thread
 Add thread limit on output
@@ -246,3 +246,13 @@ Add thread limit on output
 Improve Logging
 Add Metrics
 Fix warnings
+Fix MacOS Tests
+Tune channel size in runtime
+Handle Results
+do not unwrap
+
+# Future Items
+Github Pages
+Add Batching Policy
+Multiple Inputs
+Metadata

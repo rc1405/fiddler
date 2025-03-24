@@ -1,3 +1,4 @@
+//! Some Crate level documentation to make the linter happy
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::collections::HashMap;
@@ -6,7 +7,7 @@ use tokio::time::Duration;
 
 use thiserror::Error;
 pub mod config;
-pub mod modules;
+pub (crate) mod modules;
 mod runtime;
 use async_trait::async_trait;
 pub use runtime::Runtime;

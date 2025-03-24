@@ -26,49 +26,45 @@ pub struct PyProc {
 impl Processor for PyProc {
     async fn process(&self, message: Message) -> Result<MessageBatch, Error> {
         Python::with_gil(|py| {
-            let locals = PyDict::new(py);
+            let locals = PyDict::new_bound(py);
             if self.use_string {
                 let raw_string = String::from_utf8(message.bytes)
                     .map_err(|e| Error::ProcessingError(format!("{}", e)))?;
-                let python_string = PyString::new(py, &raw_string);
+                let python_string = PyString::new_bound(py, &raw_string);
                 locals
                     .set_item("root", python_string)
                     .map_err(|e| Error::ProcessingError(format!("{}", e)))?;
             } else {
                 let raw_bytes = message.bytes.as_slice();
-                let python_bytes = PyBytes::new(py, raw_bytes);
+                let python_bytes = PyBytes::new_bound(py, raw_bytes);
                 locals
                     .set_item("root", python_bytes)
                     .map_err(|e| Error::ProcessingError(format!("{}", e)))?;
             };
 
-            py.run(&self.code.clone(), None, Some(locals))
+            py.run_bound(&self.code.clone(), None, Some(&locals))
                 .map_err(|e| Error::ProcessingError(format!("{}", e)))?;
-
-            let root = locals
-                .get_item("root")
-                .map_err(|e| Error::ProcessingError(format!("{}", e)))?
-                .ok_or(Error::ProcessingError("no root module found".into()))?;
-
+            
             if self.use_string {
-                let result: &PyString = root
-                    .downcast()
-                    .map_err(|e| Error::ProcessingError(format!("{}", e)))?;
-                let vec_str = result
-                    .to_str()
-                    .map_err(|e| Error::ProcessingError(format!("{}", e)))?;
+                let root: String = locals
+                    .get_item("root")
+                    .map_err(|e| Error::ProcessingError(format!("{}", e)))?
+                    .ok_or(Error::ProcessingError("no root module found".into()))?
+                    .extract().map_err(|e| Error::ProcessingError(format!("{}", e)))?;
 
                 Ok(vec![Message {
-                    bytes: vec_str.as_bytes().into(),
+                    bytes: root.as_bytes().into(),
                     metadata: message.metadata.clone(),
                 }])
             } else {
-                let result: &PyBytes = root
-                    .downcast()
-                    .map_err(|e| Error::ProcessingError(format!("{}", e)))?;
+                let root: Vec<u8> = locals
+                    .get_item("root")
+                    .map_err(|e| Error::ProcessingError(format!("{}", e)))?
+                    .ok_or(Error::ProcessingError("no root module found".into()))?
+                    .extract().map_err(|e| Error::ProcessingError(format!("{}", e)))?;
 
                 Ok(vec![Message {
-                    bytes: result.as_bytes().to_vec(),
+                    bytes: root,
                     metadata: message.metadata.clone(),
                 }])
             }
@@ -92,7 +88,7 @@ fn create_python(conf: &Value) -> Result<ExecutionType, Error> {
     Ok(ExecutionType::Processor(Box::new(p)))
 }
 
-pub fn register_python() -> Result<(), Error> {
+pub (super) fn register_python() -> Result<(), Error> {
     let config = "type: object
 properties:
   code: 

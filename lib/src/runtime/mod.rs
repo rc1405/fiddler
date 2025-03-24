@@ -178,7 +178,6 @@ impl Runtime {
     /// The function replaces the existing input configuration with the provided input.
     /// ```
     /// # use fiddler::config::{ConfigSpec, ItemType, ExecutionType};
-    /// # use fiddler::modules::inputs;
     /// # use std::collections::HashMap;
     /// # use fiddler::Runtime;
     /// # let conf_str = r#"input:
@@ -209,7 +208,6 @@ impl Runtime {
     /// The function replaces the existing output configuration with the provided output.
     /// ```
     /// # use fiddler::config::{ConfigSpec, ItemType, ExecutionType};
-    /// # use fiddler::modules::inputs;
     /// # use std::collections::HashMap;
     /// # use fiddler::Runtime;
     /// # let conf_str = r#"input:
@@ -236,7 +234,6 @@ impl Runtime {
     /// The function replaces the existing output configuration with the provided output.
     /// ```
     /// # use fiddler::config::{ConfigSpec, ItemType, ExecutionType};
-    /// # use fiddler::modules::inputs;
     /// # use std::collections::HashMap;
     /// # use fiddler::Runtime;
     /// # let conf_str = r#"input:
@@ -262,7 +259,6 @@ impl Runtime {
     /// The function runs the existing data pipeline until receiving an Error::EndOfInput
     /// ```no_run
     /// # use fiddler::config::{ConfigSpec, ItemType, ExecutionType};
-    /// # use fiddler::modules::inputs;
     /// # use std::collections::HashMap;
     /// # use fiddler::Runtime;
     /// # let conf_str = r#"input:
@@ -282,7 +278,7 @@ impl Runtime {
 
         let (msg_tx, msg_rx) = bounded(10000);
         let msg_state = message_handler(msg_rx, self.state_rx.clone());
-        handles.spawn_blocking(move || {
+        let _ = handles.spawn_blocking(move || {
             let runtime = tokio::runtime::Builder::new_multi_thread()
                 .enable_all()
                 .thread_name("state")
@@ -303,7 +299,7 @@ impl Runtime {
 
         let input = input(self.config.input.clone(), processors, msg_tx);
 
-        handles.spawn_blocking(move || {
+        let _ = handles.spawn_blocking(move || {
             let runtime = tokio::runtime::Builder::new_multi_thread()
                 .enable_all()
                 .thread_name("input")
@@ -349,7 +345,7 @@ impl Runtime {
                     rx.clone(),
                     self.state_tx.clone(),
                 );
-                handles.spawn_blocking(move || {
+                let _ = handles.spawn_blocking(move || {
                     let runtime = tokio::runtime::Builder::new_multi_thread()
                         .enable_all()
                         .thread_name(format!("processor{}-{}", i, n))
@@ -384,7 +380,7 @@ impl Runtime {
                     // handles.spawn(outputs::run_output(rx.clone(), self.state_tx.clone(), o));
                     let state_tx = self.state_tx.clone();
                     let new_rx = rx.clone();
-                    handles.spawn_blocking(move || {
+                    let _ = handles.spawn_blocking(move || {
                         let runtime = tokio::runtime::Builder::new_multi_thread()
                             .enable_all()
                             .thread_name(format!("output{}", i))
@@ -399,7 +395,7 @@ impl Runtime {
                     // handles.spawn(outputs::run_output_batch(rx.clone(), self.state_tx.clone(), o))
                     let state_tx = self.state_tx.clone();
                     let new_rx = rx.clone();
-                    handles.spawn_blocking(move || {
+                    let _ = handles.spawn_blocking(move || {
                         let runtime = tokio::runtime::Builder::new_multi_thread()
                             .enable_all()
                             .thread_name(format!("output{}", i))
@@ -508,7 +504,7 @@ async fn message_handler(
 
                         if remove_entry {
                             trace!(message_id = msg.message_id, "Removing message from state");
-                            handles.remove(&msg.message_id);
+                            let _ = handles.remove(&msg.message_id);
                         }
                     },
                     MessageStatus::OutputError(s) => {

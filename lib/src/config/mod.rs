@@ -17,17 +17,22 @@ use crate::{InputBatch, OutputBatch};
 mod registration;
 mod validate;
 pub use registration::register_plugin;
-pub use validate::parse_configuration_item;
+pub (crate) use validate::parse_configuration_item;
 
 type Callback = fn(&Value) -> Result<ExecutionType, Error>;
 
-/// Plugin Configuration Type
+/// Plugin Configuration Type utilized for registration of fiddler modules
 #[derive(PartialEq, Eq, Hash, Clone)]
 pub enum ItemType {
+    /// [crate::Input] trait enum variant
     Input,
+    /// [crate::InputBatch] trait enum variant
     InputBatch,
+    /// [crate::Output] trait enum variant
     Output,
+    /// [crate::OutputBatch] trait enum variant
     OutputBatch,
+    /// [crate::Processor] trait enum variant
     Processor,
 }
 
@@ -45,42 +50,51 @@ impl fmt::Display for ItemType {
 }
 
 /// Enum for holding the implementation of the plugin trait to be called during processing
-// #[derive(Clone)]
 pub enum ExecutionType {
+    /// [crate::Input] trait enum variant
     Input(Box<dyn Input + Send + Sync>),
+    /// [crate::InputBatch] trait enum variant
     InputBatch(Box<dyn InputBatch + Send + Sync>),
+    /// [crate::Output] trait enum variant
     Output(Box<dyn Output + Send + Sync>),
+    /// [crate::OutputBatch] trait enum variant
     OutputBatch(Box<dyn OutputBatch + Send + Sync>),
+    /// [crate::Processor] trait enum variant
     Processor(Box<dyn Processor + Send + Sync>),
 }
 
 static ENV: Lazy<Mutex<HashMap<ItemType, HashMap<String, RegisteredItem>>>> = Lazy::new(|| {
     let mut m = HashMap::new();
+    #[allow(unused_results)]
     m.insert(ItemType::Input, HashMap::new());
+    #[allow(unused_results)]
     m.insert(ItemType::InputBatch, HashMap::new());
+    #[allow(unused_results)]
     m.insert(ItemType::Output, HashMap::new());
+    #[allow(unused_results)]
     m.insert(ItemType::OutputBatch, HashMap::new());
+    #[allow(unused_results)]
     m.insert(ItemType::Processor, HashMap::new());
     Mutex::new(m)
 });
 
 /// Parsed and validated configuration item
 #[derive(Clone)]
-pub struct RegisteredItem {
+pub(crate) struct RegisteredItem {
     pub creator: Callback,
     pub format: ConfigSpec,
 }
 
 /// Execution placeholder of the plugin to be used during processing
 #[derive(Clone)]
-pub struct ParsedRegisteredItem {
+pub (crate) struct ParsedRegisteredItem {
     pub creator: Callback,
     pub config: Value,
 }
 
 /// Unparsed configuration item used prior to validation
 #[derive(Debug, Deserialize, Serialize)]
-pub struct Item {
+pub (crate) struct Item {
     pub label: Option<String>,
 
     #[serde(flatten)]
@@ -90,10 +104,18 @@ pub struct Item {
 /// Unparsed fiddler configuration
 #[derive(Debug, Deserialize, Serialize)]
 pub struct Config {
+    /// Optional string label for the pipeline
     pub label: Option<String>,
+    /// Number of threads to use for Processors and Outputs
     pub num_threads: Option<usize>,
+    /// Input configuration following [crate::Input] or [crate::InputBatch] traits
+    #[allow(private_interfaces)]
     pub input: Item,
+    /// Processor configuration following [crate::Processor] traits
+    #[allow(private_interfaces)]
     pub processors: Vec<Item>,
+    /// Input configuration following [crate::Output] or [crate::OutputBatch] traits
+    #[allow(private_interfaces)]
     pub output: Item,
 }
 
@@ -121,7 +143,7 @@ impl Config {
     /// Validates the configuration object has valid and registered inputs, outputs, and processors.
     /// Note: Plugins must be registered with the environment prior to calling validate.  This is
     /// automatically done when using Environment
-    /// ```
+    /// ```compile_fail
     /// # use fiddler::config::Config;
     /// # use serde_yaml;
     /// # use fiddler::modules::{inputs, outputs, processors};
@@ -191,10 +213,18 @@ impl Config {
 /// Parsed and validated fiddler configuration
 #[derive(Clone)]
 pub struct ParsedConfig {
+    /// Optional string label for the pipeline
     pub label: Option<String>,
-    pub input: ParsedRegisteredItem,
-    pub processors: Vec<ParsedRegisteredItem>,
+    /// Number of threads to use for Processors and Outputs
     pub num_threads: usize,
+    /// Input configuration following [crate::Input] or [crate::InputBatch] traits
+    #[allow(private_interfaces)]
+    pub input: ParsedRegisteredItem,
+    /// Processor configuration following [crate::Processor] traits
+    #[allow(private_interfaces)]
+    pub processors: Vec<ParsedRegisteredItem>,
+    /// Input configuration following [crate::Output] or [crate::OutputBatch] traits
+    #[allow(private_interfaces)]
     pub output: ParsedRegisteredItem,
 }
 

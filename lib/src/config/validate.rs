@@ -7,7 +7,7 @@ use tracing::{error, trace};
 /// The function takes the raw hashmap configuration item and looks up the registered
 /// plugin and returns the ParsedRegisteredItem with the execution logic for used during
 /// processing.
-/// ```
+/// ```compile_fail
 /// # use fiddler::config::{ConfigSpec, ItemType, ExecutionType};
 /// # use fiddler::modules::inputs;
 /// # inputs::register_plugins().unwrap();

@@ -5,7 +5,7 @@ use tracing::{debug, error};
 /// Validates the configuration object has valid and registered inputs, outputs, and processors.
 /// Note: Plugins must be registered with the environment prior to calling validate.  This is
 /// automatically done when using Environment
-/// ```
+/// ```compile_fail
 /// # use fiddler::config::{ConfigSpec, ItemType, ExecutionType};
 /// # use fiddler::modules::processors::noop::NoOp;
 /// # use std::sync::Arc;

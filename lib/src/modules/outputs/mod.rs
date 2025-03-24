@@ -11,7 +11,7 @@ use std::time;
 use tokio::time::{sleep, Duration};
 use tracing::{debug, trace};
 
-pub fn register_plugins() -> Result<(), Error> {
+pub (crate) fn register_plugins() -> Result<(), Error> {
     drop::register_drop()?;
     #[cfg(feature = "elasticsearch")]
     elasticsearch::register_elasticsearch()?;

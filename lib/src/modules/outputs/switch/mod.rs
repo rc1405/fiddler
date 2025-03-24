@@ -53,7 +53,7 @@ fn create_switch(conf: &Value) -> Result<ExecutionType, Error> {
     Ok(ExecutionType::Output(Box::new(s)))
 }
 
-pub fn register_switch() -> Result<(), Error> {
+pub (super) fn register_switch() -> Result<(), Error> {
     let config = "type: array";
 
     let conf_spec = ConfigSpec::from_schema(config)?;

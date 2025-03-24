@@ -7,7 +7,6 @@ use crate::{Closer, Error, Processor};
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 use serde_yaml::Value;
-use std::convert::Into;
 use std::mem;
 
 #[derive(Deserialize, Serialize)]
@@ -97,7 +96,7 @@ fn create_check(conf: &Value) -> Result<ExecutionType, Error> {
     Ok(ExecutionType::Processor(Box::new(s)))
 }
 
-pub fn register_check() -> Result<(), Error> {
+pub (super) fn register_check() -> Result<(), Error> {
     let config = "type: object
 properties:
   label:

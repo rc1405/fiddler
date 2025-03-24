@@ -109,7 +109,7 @@ async fn elasticsearch_handler(
         for msg in req.message {
             let v: serde_json::Value = match serde_json::from_slice(&msg.bytes) {
                 Ok(i) => i,
-                Err(e) => continue,
+                Err(_e) => continue,
             };
 
             body.push(BulkOperation::index(v).into());
@@ -249,12 +249,12 @@ fn create_elasticsearch(conf: &Value) -> Result<ExecutionType, Error> {
 
     let c = elastic.get_client()?;
     let (sender, receiver) = bounded(1);
-    tokio::spawn(elasticsearch_handler(c, elastic.index.clone(), receiver));
+    let _ = tokio::spawn(elasticsearch_handler(c, elastic.index.clone(), receiver));
     Ok(ExecutionType::OutputBatch(Box::new(Elastic { sender })))
 }
 
 // #[cfg_attr(feature = "elasticsearch", fiddler_registration_func)]
-pub fn register_elasticsearch() -> Result<(), Error> {
+pub (super) fn register_elasticsearch() -> Result<(), Error> {
     let config = "type: object
 properties:
   url:

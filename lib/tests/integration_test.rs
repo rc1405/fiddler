@@ -1,3 +1,5 @@
+#![ allow(unused_crate_dependencies)]
+#![ allow(missing_docs)]
 #![allow(dead_code)]
 use fiddler::Runtime;
 

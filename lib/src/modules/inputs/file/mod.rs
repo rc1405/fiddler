@@ -10,7 +10,7 @@ use crate::{Closer, Error, Input};
 use serde::Deserialize;
 use serde_yaml::Value;
 use std::fs::{self, read_to_string, File};
-use std::io::{prelude::*, BufReader, Seek, SeekFrom};
+use std::io::{prelude::*, BufReader, SeekFrom};
 use std::sync::mpsc::{sync_channel, SyncSender, TryRecvError};
 
 #[derive(Deserialize, Default)]
@@ -34,6 +34,22 @@ struct FileReaderConfig {
     position_filename: Option<String>,
 }
 
+/// stuff and things
+/// ```yaml
+/// input:
+///   file: 
+///   filename: tests{MAIN_SEPARATOR_STR}data{MAIN_SEPARATOR_STR}input.txt
+///   codec: Lines
+/// num_threads: 1
+/// processors:
+/// - label: my_cool_mapping
+///   noop: {{}}
+/// output:
+/// validate:
+///   expected: 
+///     - Hello World
+///     - This is the end
+/// ```
 pub struct FileReader {
     receiver: Receiver<Result<(Message, CallbackChan), Error>>,
 }
@@ -47,11 +63,10 @@ async fn read_file(
             for line in li {
                 match line {
                     Ok(line) => {
-                        // println!("Read line");
                         let (tx, rx) = new_callback_chan();
-                        tokio::spawn(rx);
+                        let _ = tokio::spawn(rx);
 
-                        sender
+                        let _ = sender
                             .send(Ok((
                                 Message {
                                     bytes: line.into_bytes(),
@@ -62,13 +77,13 @@ async fn read_file(
                             .await;
                     }
                     Err(e) => {
-                        sender.send(Err(Error::InputError(format!("{}", e)))).await;
+                        let _ = sender.send(Err(Error::InputError(format!("{}", e)))).await;
                         return Ok(());
                     }
                 }
             }
 
-            sender.send(Err(Error::EndOfInput)).await;
+            let _ = sender.send(Err(Error::EndOfInput)).await;
             return Ok(());
         }
         ReaderType::ToEnd(mut f) => {
@@ -76,15 +91,15 @@ async fn read_file(
             match f.read_to_string(&mut contents) {
                 Ok(_) => {}
                 Err(e) => {
-                    sender.send(Err(Error::InputError(format!("{}", e)))).await;
+                    let _ = sender.send(Err(Error::InputError(format!("{}", e)))).await;
                     return Ok(());
                 }
             };
 
             let (tx, rx) = new_callback_chan();
-            tokio::spawn(rx);
+            let _ = tokio::spawn(rx);
 
-            sender
+            let _ = sender
                 .send(Ok((
                     Message {
                         bytes: contents.into_bytes(),
@@ -94,7 +109,7 @@ async fn read_file(
                 )))
                 .await;
 
-            sender.send(Err(Error::EndOfInput)).await;
+            let _ = sender.send(Err(Error::EndOfInput)).await;
 
             return Ok(());
         }
@@ -127,31 +142,31 @@ async fn read_file(
                 let s = sync.clone();
 
                 if len == 0 {
-                    sender.send(Err(Error::NoInputToReturn)).await;
+                    let _ = sender.send(Err(Error::NoInputToReturn)).await;
                     continue;
                 };
 
                 // remove new line character
                 if line.ends_with('\n') {
-                    line.pop();
+                    let _ = line.pop();
                     if line.ends_with('\r') {
-                        line.pop();
+                        let _ = line.pop();
                     }
                 };
 
                 let (tx, rx) = new_callback_chan();
-                tokio::spawn(async move {
+                let _ = tokio::spawn(async move {
                     match rx.await {
                         Ok(status) => {
                             if let Status::Processed = status {
-                                s.send(current_pos).unwrap();
+                                let _ = s.send(current_pos).unwrap();
                             };
                         }
                         Err(_) => {}
                     };
                 });
 
-                sender
+                let _ = sender
                     .send(Ok((
                         Message {
                             bytes: line.into_bytes(),
@@ -223,7 +238,7 @@ fn create_file(conf: &Value) -> Result<ExecutionType, Error> {
             let passed_position_reader = current_position.clone();
             let filename = c.filename.clone();
 
-            tokio::spawn(async move {
+            let _ = tokio::spawn(async move {
                 loop {
                     match receiver.try_recv() {
                         Ok(msg) => {
@@ -233,8 +248,8 @@ fn create_file(conf: &Value) -> Result<ExecutionType, Error> {
                                     position_file_name.clone(),
                                     format!("{current_position}"),
                                 )
-                                .map_err(|e| Error::InputError(format!("{}: {}", filename, e)));
-                                //.unwrap();
+                                .map_err(|e| Error::InputError(format!("{}: {}", filename, e)))
+                                .unwrap();
                             };
 
                             if &msg > &current_position {
@@ -243,12 +258,13 @@ fn create_file(conf: &Value) -> Result<ExecutionType, Error> {
                                     position_file_name.clone(),
                                     format!("{current_position}"),
                                 )
-                                .map_err(|e| Error::InputError(format!("{}: {}", filename, e)));
-                                //.unwrap();
+                                .map_err(|e| Error::InputError(format!("{}: {}", filename, e)))
+                                .unwrap();
                             };
                         }
                         Err(e) => {
                             if let TryRecvError::Empty = e {
+                                // TODO: Update this to tokio sleep
                                 std::thread::sleep(std::time::Duration::from_millis(10));
                                 continue;
                             } else {
@@ -265,7 +281,7 @@ fn create_file(conf: &Value) -> Result<ExecutionType, Error> {
 
     let (sender, receiver) = channel(1000);
 
-    tokio::task::spawn_blocking(move || {
+    let _ = tokio::task::spawn_blocking(move || {
         let runtime = tokio::runtime::Builder::new_multi_thread()
             .enable_all()
             .thread_name("file_reader")
@@ -279,8 +295,7 @@ fn create_file(conf: &Value) -> Result<ExecutionType, Error> {
     Ok(ExecutionType::Input(Box::new(FileReader { receiver })))
 }
 
-// #[fiddler_registration_func]
-pub fn register_file() -> Result<(), Error> {
+pub (super) fn register_file() -> Result<(), Error> {
     let config = "type: object
 properties:
   filename: 

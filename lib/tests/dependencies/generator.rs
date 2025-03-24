@@ -23,7 +23,7 @@ impl Input for Generator {
         self.count -= 1;
 
         let (tx, rx) = new_callback_chan();
-        tokio::spawn(async move { rx.await });
+        let _ = tokio::spawn(async move { rx.await });
 
         Ok((
             Message {

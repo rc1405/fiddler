@@ -110,16 +110,16 @@ pub async fn handle_tests(configs: Vec<String>) -> Result<(), Error> {
         let label = proc_maps.get(&i).expect("Unable to track test");
         match r {
             Ok(_) => {
-                table.add_row(row![label, bFg->"passed"]);
+                let _ = table.add_row(row![label, bFg->"passed"]);
             }
             Err(e) => {
                 failures += 1;
-                table.add_row(
+                let _ = table.add_row(
                     row![label, bFr->format!("{}", e).replace("ExecutionError: ", "failed\n")],
                 );
             }
         };
-        table.add_empty_row();
+        let _ = table.add_empty_row();
     }
 
     table.printstd();

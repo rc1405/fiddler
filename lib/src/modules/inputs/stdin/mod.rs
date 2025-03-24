@@ -15,19 +15,20 @@ impl Input for StdIn {
     async fn read(&mut self) -> Result<(Message, CallbackChan), Error> {
         let mut buffer = String::new();
         let stdin = io::stdin();
-        stdin
+        let _ = stdin
             .read_line(&mut buffer)
             .await
             .map_err(|_| Error::EndOfInput)?;
+        
         // remove new line character
-        buffer.pop();
+        let _ = buffer.pop();
 
         if buffer == *"exit()" {
             return Err(Error::EndOfInput);
         };
 
         let (tx, rx) = new_callback_chan();
-        tokio::spawn(rx);
+        let _ = tokio::spawn(rx);
 
         Ok((
             Message {
@@ -45,8 +46,7 @@ fn create_stdin(_conf: &Value) -> Result<ExecutionType, Error> {
     Ok(ExecutionType::Input(Box::new(StdIn {})))
 }
 
-// #[fiddler_registration_func]
-pub fn register_stdin() -> Result<(), Error> {
+pub (super) fn register_stdin() -> Result<(), Error> {
     let config = "type: object";
     let conf_spec = ConfigSpec::from_schema(config)?;
 

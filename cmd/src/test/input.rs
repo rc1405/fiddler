@@ -21,7 +21,7 @@ pub struct MockInput {
 impl Input for MockInput {
     async fn read(&mut self) -> Result<(Message, CallbackChan), Error> {
         let (tx, rx) = new_callback_chan();
-        tokio::spawn(rx);
+        let _ = tokio::spawn(rx);
 
         match self.input.pop() {
             Some(i) => Ok((
