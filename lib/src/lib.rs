@@ -65,7 +65,7 @@ pub enum Status {
     Errored(Vec<String>),
 }
 
-/// Closer trait utilized by input and output modules to optionally gracefully 
+/// Closer trait utilized by input and output modules to optionally gracefully
 /// exit upon successful processing of the pipeline
 #[async_trait]
 pub trait Closer {
@@ -110,17 +110,17 @@ pub trait OutputBatch: Closer {
 
     /// returns the desired size of the [crate::MessageBatch] to provide the the output module
     async fn batch_size(&self) -> usize {
-        return 500
+        500
     }
 
     /// returns the duration of how long the runtime should wait between sending [crate::MessageBatch] to
     /// the output.
     async fn interval(&self) -> Duration {
-        return Duration::from_secs(10)
+        Duration::from_secs(10)
     }
 }
 
-/// Processor is the processing module trait utilized to accept a single [crate::Message] and provide 
+/// Processor is the processing module trait utilized to accept a single [crate::Message] and provide
 /// one to many additional messages through [crate::MessageBatch]
 #[async_trait]
 pub trait Processor: Closer {
@@ -189,11 +189,11 @@ pub enum Error {
     #[error("ProcessorFailure: {0}")]
     ProcessingError(String),
 
-    /// Conditional check has failed for [crate::Message], such as use with [crate::modules::processors::switch] 
+    /// Conditional check has failed for [crate::Message], such as use with [crate::modules::processors::switch]
     /// conditions
     #[error("ConditionalCheckfailed")]
     ConditionalCheckfailed,
-    
+
     /// Error encountered while calling [crate::Input::read] on an input module
     #[error("InputError: {0}")]
     InputError(String),
