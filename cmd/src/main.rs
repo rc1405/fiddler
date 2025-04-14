@@ -50,7 +50,6 @@ struct RunArgs {
 
 #[tokio::main]
 async fn main() -> Result<(), Error> {
-    
     match FiddlerCli::parse() {
         FiddlerCli::Lint(args) => {
             let mut failures: Vec<String> = Vec::new();
