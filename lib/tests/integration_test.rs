@@ -324,8 +324,8 @@ output:
 }
 
 #[tokio::test]
-async fn fiddler_file_reader_test_ful_json() {
-    let EXPECTED_OUTPUT = "{\"this\": \"is\", \"a\": \"testing\", \"document\": true}";
+async fn fiddler_file_reader_test_full_json() {
+    let expected_output = "{\"this\": \"is\", \"a\": \"testing\", \"document\": true}";
     let config = format!(
         "input:
   file: 
@@ -339,7 +339,7 @@ output:
   validate:
     expected: 
       - |
-        {EXPECTED_OUTPUT}",
+        {expected_output}",
     );
 
     REGISTER.call_once(|| {

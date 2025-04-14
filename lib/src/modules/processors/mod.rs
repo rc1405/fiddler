@@ -1,3 +1,5 @@
+use std::collections::VecDeque;
+
 use crate::Error;
 pub mod lines;
 pub mod noop;
@@ -7,7 +9,9 @@ pub mod switch;
 
 use crate::config::{ExecutionType, ParsedRegisteredItem};
 use crate::runtime::{InternalMessage, InternalMessageState, MessageStatus};
-use async_channel::{Receiver, Sender, TryRecvError};
+use crate::Message;
+// use async_channel::{Receiver, Sender, TryRecvError};
+use flume::{Receiver, Sender, TryRecvError};
 use tokio::task::yield_now;
 use tokio::time::{sleep, Duration};
 use tracing::{debug, error, trace};
@@ -42,21 +46,24 @@ pub(crate) async fn run_processor(
             Ok(msg) => {
                 trace!("received processing message");
                 match p.process(msg.message.clone()).await {
-                    Ok(m) => {
-                        for (i, m) in m.iter().enumerate() {
-                            let mut new_msg = msg.clone();
-                            new_msg.message = m.clone();
-                            if i > 0 {
+                    Ok(mut m) => {
+                        if m.len() > 1 {
+                            for _ in 0..(m.len() - 1) {
                                 state_tx
-                                    .send(InternalMessageState {
+                                    .send_async(InternalMessageState {
                                         message_id: msg.message_id.clone(),
                                         status: MessageStatus::New,
                                     })
                                     .await
                                     .unwrap();
-                            };
+                            }
+                        }
+
+                        for m in m.iter() {
+                            let mut new_msg = msg.clone();
+                            new_msg.message = m.clone();
                             trace!("message processed");
-                            match output.send(new_msg).await {
+                            match output.send_async(new_msg).await {
                                 Ok(_) => {}
                                 Err(e) => {
                                     return Err(Error::UnableToSendToChannel(format!("{}", e)))
@@ -69,7 +76,7 @@ pub(crate) async fn run_processor(
                             debug!("conditional check failed for processor");
 
                             state_tx
-                                .send(InternalMessageState {
+                                .send_async(InternalMessageState {
                                     message_id: msg.message_id,
                                     status: MessageStatus::ProcessError(format!("{}", e)),
                                 })
@@ -84,7 +91,7 @@ pub(crate) async fn run_processor(
                 }
             }
             Err(e) => match e {
-                TryRecvError::Closed => {
+                TryRecvError::Disconnected => {
                     p.close().await?;
                     debug!("processor closed");
                     return Ok(());

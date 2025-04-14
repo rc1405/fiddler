@@ -247,9 +247,9 @@ Improve Logging
 Add Metrics
 Fix warnings
 Fix MacOS Tests
-Tune channel size in runtime
 Handle Results
 do not unwrap
+Add timestamp to event
 
 # Future Items
 Github Pages

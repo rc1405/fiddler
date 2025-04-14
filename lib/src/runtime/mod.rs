@@ -1,4 +1,6 @@
-use async_channel::{bounded, Receiver, Sender};
+use flume::TryRecvError;
+// use async_channel::{bounded, Receiver, Sender};
+use flume::{bounded, Receiver, Sender};
 use serde::Deserialize;
 use serde::Serialize;
 use serde_yaml::Value;
@@ -116,7 +118,7 @@ impl Runtime {
         let conf: Config = Config::from_str(config)?;
         let parsed_conf = conf.validate()?;
 
-        let (state_tx, state_rx) = bounded(100);
+        let (state_tx, state_rx) = bounded(0);
 
         debug!("Runtime is ready");
         Ok(Runtime {
@@ -276,8 +278,8 @@ impl Runtime {
     pub async fn run(&self) -> Result<(), Error> {
         let mut handles = JoinSet::new();
 
-        let (msg_tx, msg_rx) = bounded(10000);
-        let msg_state = message_handler(msg_rx, self.state_rx.clone());
+        let (msg_tx, msg_rx) = bounded(0);
+        let msg_state = message_handler(msg_rx, self.state_rx.clone(), self.config.num_threads);
         let _ = handles.spawn_blocking(move || {
             let runtime = tokio::runtime::Builder::new_multi_thread()
                 .enable_all()
@@ -289,11 +291,9 @@ impl Runtime {
             runtime.block_on(msg_state)
         });
 
-        println!("Starting output in run");
         let output = self
             .output(self.config.output.clone(), &mut handles)
             .await?;
-        println!("Started output");
 
         let processors = self.pipeline(output, &mut handles).await?;
 
@@ -310,7 +310,7 @@ impl Runtime {
             runtime.block_on(input)
         });
 
-        info!("pipeline started");
+        info!(label = self.config.label, "pipeline started");
 
         while let Some(res) = handles.join_next().await {
             res.map_err(|e| Error::ProcessingError(format!("{}", e)))??;
@@ -335,7 +335,7 @@ impl Runtime {
         for i in 0..processors.len() {
             let p = processors[i].clone();
 
-            let (tx, rx) = bounded(100);
+            let (tx, rx) = bounded(0);
 
             for n in 0..self.config.num_threads {
                 // tokio::spawn(processors::run_processor(p.clone(), next_tx.clone(), rx.clone(), self.state_tx.clone()));
@@ -370,10 +370,9 @@ impl Runtime {
     ) -> Result<Sender<InternalMessage>, Error> {
         trace!("started output");
 
-        let (tx, rx) = bounded(100);
+        let (tx, rx) = bounded(0);
 
         for i in 0..self.config.num_threads {
-            println!("Starting output thread {}", i);
             let item = (output.creator)(&output.config)?;
             match item {
                 ExecutionType::Output(o) => {
@@ -430,12 +429,15 @@ struct State {
 async fn message_handler(
     new_msg: Receiver<MessageHandle>,
     msg_status: Receiver<InternalMessageState>,
+    output_ct: usize,
 ) -> Result<(), Error> {
     let mut handles: HashMap<String, State> = HashMap::new();
+    let mut closed_outputs = 0;
 
     loop {
         tokio::select! {
-            Ok(msg) = new_msg.recv() => {
+            biased;
+            Ok(msg) = new_msg.recv_async() => {
                 trace!(message_id = msg.message_id, "Received new message");
                 let closure = Arc::into_inner(msg.closure).unwrap();
                 let i = handles.insert(msg.message_id.clone(), State { instance_count: 1, processed_count: 0, processed_error_count: 0, output_count: 0, output_error_count: 0, closure: closure, errors: Vec::new() });
@@ -444,7 +446,7 @@ async fn message_handler(
                     return Err(Error::ExecutionError("Duplicate Message ID Error".into()))
                 };
             },
-            Ok(msg) = msg_status.recv() => {
+            Ok(msg) = msg_status.recv_async() => {
                 debug!(state = msg.status.to_string(), message_id = msg.message_id, "Received message state");
                 match msg.status {
                     MessageStatus::New => {
@@ -467,12 +469,27 @@ async fn message_handler(
                     },
                     MessageStatus::ProcessError(s) => {
                         let m = handles.get_mut(&msg.message_id);
+                        let mut remove_entry = false;
                         match m {
                             None => return Err(Error::ExecutionError(format!("Message ID {} does not exist", msg.message_id))),
                             Some(state) => {
                                 state.processed_error_count += 1;
                                 state.errors.push(s);
+
+                                if (state.output_count + state.output_error_count + state.processed_error_count) >= state.instance_count {
+                                    remove_entry = true;
+                                    let (s, _) = oneshot::channel();
+                                    let chan = mem::replace(&mut state.closure, s);
+                                    let e = Vec::new();
+                                    let err = mem::replace(&mut state.errors, e);
+                                    let _ = chan.send(Status::Errored(err));
+                                }
                             },
+                        };
+
+                        if remove_entry {
+                            trace!(message_id = msg.message_id, "Removing message from state");
+                            let _ = handles.remove(&msg.message_id);
                         }
                     },
                     MessageStatus::Output => {
@@ -485,13 +502,13 @@ async fn message_handler(
 
                                 debug!(message_id = msg.message_id, errors = state.processed_error_count, "message fully processed");
 
-                                if state.output_count == state.instance_count {
+                                if state.output_count >= state.instance_count {
                                     remove_entry = true;
                                     let (s, _) = oneshot::channel();
                                     let chan = mem::replace(&mut state.closure, s);
                                     let _ = chan.send(Status::Processed);
 
-                                } else if state.instance_count == (state.output_count + state.output_error_count + state.processed_error_count) {
+                                } else if (state.output_count + state.output_error_count + state.processed_error_count) >= state.instance_count {
                                     remove_entry = true;
                                     let (s, _) = oneshot::channel();
                                     let chan = mem::replace(&mut state.closure, s);
@@ -509,22 +526,44 @@ async fn message_handler(
                     },
                     MessageStatus::OutputError(s) => {
                         let m = handles.get_mut(&msg.message_id);
+                        let mut remove_entry = false;
                         match m {
-                            None => return Err(Error::ExecutionError("Message ID5 does not exist".into())),
+                            None => return Err(Error::ExecutionError(format!("Message ID {} does not exist", msg.message_id))),
                             Some(state) => {
                                 state.output_error_count += 1;
                                 state.errors.push(s);
+
+                                if (state.output_count + state.output_error_count + state.processed_error_count) >= state.instance_count {
+                                    remove_entry = true;
+                                    let (s, _) = oneshot::channel();
+                                    let chan = mem::replace(&mut state.closure, s);
+                                    let e = Vec::new();
+                                    let err = mem::replace(&mut state.errors, e);
+                                    let _ = chan.send(Status::Errored(err));
+                                }
                             },
+                        };
+
+                        if remove_entry {
+                            trace!(message_id = msg.message_id, "Removing message from state");
+                            let _ = handles.remove(&msg.message_id);
                         }
                     },
                     MessageStatus::Shutdown => {
-                        return Ok(())
+                        info!("still have {} items in queue: closed_outputs: {} output_ct: {}", handles.len(), closed_outputs, output_ct);
+                        closed_outputs += 1;
+                        if closed_outputs == output_ct {
+                            debug!("exiting message handler");
+                            return Ok(())
+                        }
                     },
                 }
             },
             else => break,
         }
     }
+
+    // add counter and metrics dump how many processed // errored // etc
     Ok(())
 }
 
@@ -547,16 +586,7 @@ async fn input(
 
     debug!("input connected");
 
-    // let mut count = 0;
-
     loop {
-        // if count >= 1000 {
-        //     i.close()?;
-        //     debug!("input closed");
-        //     bus.publish::<ProcessingState>("processing-state", ProcessingState::InputComplete).await.unwrap();
-        //     return Ok(());
-        // }
-
         match i.read().await {
             Ok((msg, closure)) => {
                 let message_id: String = Uuid::new_v4().into();
@@ -569,18 +599,17 @@ async fn input(
                 };
 
                 state_handle
-                    .send(MessageHandle {
+                    .send_async(MessageHandle {
                         message_id,
                         closure: Arc::new(closure),
                     })
                     .await
                     .unwrap();
 
-                match output.send(internal_msg).await {
+                match output.send_async(internal_msg).await {
                     Ok(_) => {}
                     Err(e) => return Err(Error::UnableToSendToChannel(format!("{}", e))),
                 }
-                // count += 1;
             }
             Err(e) => match e {
                 Error::EndOfInput => {

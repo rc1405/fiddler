@@ -1,5 +1,5 @@
 use async_trait::async_trait;
-use tokio::sync::mpsc::{channel, Receiver, Sender};
+// use tokio::sync::mpsc::{channel, Receiver, Sender};
 
 use crate::config::register_plugin;
 use crate::config::ItemType;
@@ -11,7 +11,10 @@ use serde::Deserialize;
 use serde_yaml::Value;
 use std::fs::{self, read_to_string, File};
 use std::io::{prelude::*, BufReader, SeekFrom};
-use std::sync::mpsc::{sync_channel, SyncSender, TryRecvError};
+// use std::sync::mpsc::{sync_channel, SyncSender, TryRecvError};
+use flume::{bounded, Receiver, Sender, TryRecvError};
+use tokio::time::{sleep, Duration};
+use tracing::error;
 
 #[derive(Deserialize, Default)]
 enum CodecType {
@@ -24,7 +27,7 @@ enum CodecType {
 enum ReaderType {
     Lines(std::io::Lines<BufReader<File>>),
     ToEnd(File),
-    Tail(String, u64, SyncSender<u64>),
+    Tail(String, u64, Sender<u64>),
 }
 
 #[derive(Deserialize, Default)]
@@ -67,7 +70,7 @@ async fn read_file(
                         let _ = tokio::spawn(rx);
 
                         let _ = sender
-                            .send(Ok((
+                            .send_async(Ok((
                                 Message {
                                     bytes: line.into_bytes(),
                                     ..Default::default()
@@ -77,13 +80,15 @@ async fn read_file(
                             .await;
                     }
                     Err(e) => {
-                        let _ = sender.send(Err(Error::InputError(format!("{}", e)))).await;
+                        let _ = sender
+                            .send_async(Err(Error::InputError(format!("{}", e))))
+                            .await;
                         return Ok(());
                     }
                 }
             }
 
-            let _ = sender.send(Err(Error::EndOfInput)).await;
+            let _ = sender.send_async(Err(Error::EndOfInput)).await;
             return Ok(());
         }
         ReaderType::ToEnd(mut f) => {
@@ -91,7 +96,9 @@ async fn read_file(
             match f.read_to_string(&mut contents) {
                 Ok(_) => {}
                 Err(e) => {
-                    let _ = sender.send(Err(Error::InputError(format!("{}", e)))).await;
+                    let _ = sender
+                        .send_async(Err(Error::InputError(format!("{}", e))))
+                        .await;
                     return Ok(());
                 }
             };
@@ -100,7 +107,7 @@ async fn read_file(
             let _ = tokio::spawn(rx);
 
             let _ = sender
-                .send(Ok((
+                .send_async(Ok((
                     Message {
                         bytes: contents.into_bytes(),
                         ..Default::default()
@@ -109,7 +116,7 @@ async fn read_file(
                 )))
                 .await;
 
-            let _ = sender.send(Err(Error::EndOfInput)).await;
+            let _ = sender.send_async(Err(Error::EndOfInput)).await;
 
             return Ok(());
         }
@@ -142,7 +149,7 @@ async fn read_file(
                 let s = sync.clone();
 
                 if len == 0 {
-                    let _ = sender.send(Err(Error::NoInputToReturn)).await;
+                    let _ = sender.send_async(Err(Error::NoInputToReturn)).await;
                     continue;
                 };
 
@@ -159,7 +166,7 @@ async fn read_file(
                     match rx.await {
                         Ok(status) => {
                             if let Status::Processed = status {
-                                let _ = s.send(current_pos).unwrap();
+                                let _ = s.send_async(current_pos).await.unwrap();
                             };
                         }
                         Err(_) => {}
@@ -167,7 +174,7 @@ async fn read_file(
                 });
 
                 let _ = sender
-                    .send(Ok((
+                    .send_async(Ok((
                         Message {
                             bytes: line.into_bytes(),
                             ..Default::default()
@@ -185,10 +192,9 @@ impl Closer for FileReader {}
 #[async_trait]
 impl Input for FileReader {
     async fn read(&mut self) -> Result<(Message, CallbackChan), Error> {
-        // println!("reading input");
-        match self.receiver.recv().await {
-            Some(i) => i,
-            None => Err(Error::EndOfInput),
+        match self.receiver.recv_async().await {
+            Ok(i) => i,
+            Err(_e) => Err(Error::EndOfInput),
         }
     }
 }
@@ -198,7 +204,7 @@ fn create_file(conf: &Value) -> Result<ExecutionType, Error> {
     if let CodecType::Tail = c.codec {
         if c.position_filename.is_none() {
             return Err(Error::ConfigFailedValidation(
-                "position_file must be included with tail type".into(),
+                "position_filename must be included with tail type".into(),
             ));
         }
     }
@@ -213,7 +219,7 @@ fn create_file(conf: &Value) -> Result<ExecutionType, Error> {
         }
         CodecType::ToEnd => ReaderType::ToEnd(file),
         CodecType::Tail => {
-            let (sync_sender, receiver) = sync_channel(1);
+            let (sync_sender, receiver) = bounded(0);
             let position_file_name = c
                 .position_filename
                 .clone()
@@ -225,6 +231,7 @@ fn create_file(conf: &Value) -> Result<ExecutionType, Error> {
                 .metadata()
                 .map_err(|e| Error::InputError(format!("{}: {}", c.filename.clone(), e)))?;
             if metadata.len() < current_position {
+                panic!("Resetting position");
                 current_position = 0;
                 fs::write(position_file_name.clone(), format!("{current_position}"))
                     .map_err(|e| Error::InputError(format!("{}: {}", c.filename, e)))
@@ -243,6 +250,7 @@ fn create_file(conf: &Value) -> Result<ExecutionType, Error> {
                     match receiver.try_recv() {
                         Ok(msg) => {
                             if msg == 0 {
+                                panic!("resetting position2");
                                 current_position = 0;
                                 fs::write(
                                     position_file_name.clone(),
@@ -264,10 +272,10 @@ fn create_file(conf: &Value) -> Result<ExecutionType, Error> {
                         }
                         Err(e) => {
                             if let TryRecvError::Empty = e {
-                                // TODO: Update this to tokio sleep
-                                std::thread::sleep(std::time::Duration::from_millis(10));
+                                sleep(Duration::from_millis(10)).await;
                                 continue;
                             } else {
+                                error!("closing file state handler");
                                 return;
                             }
                         }
@@ -279,7 +287,7 @@ fn create_file(conf: &Value) -> Result<ExecutionType, Error> {
         }
     };
 
-    let (sender, receiver) = channel(1000);
+    let (sender, receiver) = bounded(0);
 
     let _ = tokio::task::spawn_blocking(move || {
         let runtime = tokio::runtime::Builder::new_multi_thread()

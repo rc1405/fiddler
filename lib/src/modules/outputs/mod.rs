@@ -6,10 +6,11 @@ pub mod stdout;
 pub mod switch;
 use crate::runtime::{InternalMessage, InternalMessageState, MessageStatus};
 use crate::{Output, OutputBatch};
-use async_channel::{Receiver, Sender, TryRecvError};
+// use async_channel::{Receiver, Sender, TryRecvError};
+use flume::{Receiver, Sender, TryRecvError};
 use std::time;
 use tokio::time::{sleep, Duration};
-use tracing::{debug, trace};
+use tracing::{debug, error, trace};
 
 pub(crate) fn register_plugins() -> Result<(), Error> {
     drop::register_drop()?;
@@ -35,7 +36,7 @@ pub(crate) async fn run_output(
                     Ok(_) => {
                         trace!("sending message");
                         state
-                            .send(InternalMessageState {
+                            .send_async(InternalMessageState {
                                 message_id: msg.message_id,
                                 status: MessageStatus::Output,
                             })
@@ -49,7 +50,7 @@ pub(crate) async fn run_output(
                         _ => {
                             trace!("sending state");
                             state
-                                .send(InternalMessageState {
+                                .send_async(InternalMessageState {
                                     message_id: msg.message_id,
                                     status: MessageStatus::OutputError(format!("{}", e)),
                                 })
@@ -60,11 +61,11 @@ pub(crate) async fn run_output(
                 }
             }
             Err(e) => match e {
-                TryRecvError::Closed => {
+                TryRecvError::Disconnected => {
                     o.close().await?;
                     debug!("output closed");
                     state
-                        .send(InternalMessageState {
+                        .send_async(InternalMessageState {
                             message_id: "end of the line".into(),
                             status: MessageStatus::Shutdown,
                         })
@@ -87,21 +88,20 @@ pub(crate) async fn run_output_batch(
 
     let batch_size = o.batch_size().await;
     let interval = o.interval().await;
-
-    let mut now = time::SystemTime::now();
+    let mut now = time::Instant::now();
 
     loop {
-        if input.is_closed() {
+        if input.is_disconnected() {
             break;
         };
 
         let mut internal_msg_batch: Vec<InternalMessage> = Vec::new();
-        while (now.elapsed().unwrap() < interval) && (internal_msg_batch.len() < batch_size) {
+        while (now.elapsed() < interval) && (internal_msg_batch.len() < batch_size) {
             match input.try_recv() {
                 Ok(i) => internal_msg_batch.push(i),
                 Err(e) => match e {
-                    TryRecvError::Closed => break,
-                    TryRecvError::Empty => sleep(Duration::from_millis(25)).await,
+                    TryRecvError::Disconnected => break,
+                    TryRecvError::Empty => sleep(Duration::from_nanos(25)).await,
                 },
             }
         }
@@ -111,13 +111,13 @@ pub(crate) async fn run_output_batch(
                 .iter()
                 .map(|i| i.message.clone())
                 .collect();
-            // println!("writing batch of {}", msg_batch.len());
             match o.write_batch(msg_batch).await {
                 Ok(_) => {
-                    now = time::SystemTime::now();
+                    now = time::Instant::now();
+
                     for msg in internal_msg_batch {
                         state
-                            .send(InternalMessageState {
+                            .send_async(InternalMessageState {
                                 message_id: msg.message_id,
                                 status: MessageStatus::Output,
                             })
@@ -132,7 +132,7 @@ pub(crate) async fn run_output_batch(
                     _ => {
                         for msg in internal_msg_batch {
                             state
-                                .send(InternalMessageState {
+                                .send_async(InternalMessageState {
                                     message_id: msg.message_id,
                                     status: MessageStatus::OutputError(format!("{}", e)),
                                 })
@@ -143,18 +143,20 @@ pub(crate) async fn run_output_batch(
                 },
             };
         } else {
-            now = time::SystemTime::now();
+            now = time::Instant::now();
         }
     }
 
-    println!("exiting output batch");
     o.close().await?;
-    state
-        .send(InternalMessageState {
+    match state
+        .send_async(InternalMessageState {
             message_id: "end of the line".into(),
             status: MessageStatus::Shutdown,
         })
         .await
-        .unwrap();
+    {
+        Ok(_) => debug!("exited successfuly"),
+        Err(e) => error!("unable to exit {}", e),
+    }
     Ok(())
 }

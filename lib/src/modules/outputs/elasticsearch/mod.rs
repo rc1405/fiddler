@@ -1,10 +1,12 @@
 use crate::config::register_plugin;
 use crate::config::ItemType;
 use crate::config::{ConfigSpec, ExecutionType};
-use crate::MessageBatch;
+use crate::{BatchingPolicy, MessageBatch};
 use crate::{Closer, Error, OutputBatch};
-use async_channel::{bounded, Receiver, Sender};
+// use async_channel::{bounded, Receiver, Sender};
 use async_trait::async_trait;
+use chrono::Datelike;
+use flume::{bounded, Receiver, Sender};
 use serde::Deserialize;
 use serde_yaml::Value;
 use std::time::Duration;
@@ -19,6 +21,7 @@ use elasticsearch::{
     BulkOperation, BulkParts, Elasticsearch,
 };
 
+use chrono::Utc;
 use elasticsearch::cert::CertificateValidation;
 
 #[derive(Deserialize, Default, Clone)]
@@ -36,10 +39,13 @@ struct ElasticConfig {
     cloud_id: Option<String>,
     index: String,
     cert_validation: Option<CertValidation>,
+    batch_policy: Option<BatchingPolicy>,
 }
 
 pub struct Elastic {
     sender: Sender<Request>,
+    size: usize,
+    duration: Duration,
 }
 
 struct Request {
@@ -103,8 +109,10 @@ async fn elasticsearch_handler(
     index: String,
     requests: Receiver<Request>,
 ) -> Result<(), Error> {
-    while let Ok(req) = requests.recv().await {
+    while let Ok(req) = requests.recv_async().await {
         let mut body: Vec<BulkOperation<_>> = Vec::new();
+        let now = Utc::now();
+        let index_date = format!("{}-{}-{}-{}", index, now.year(), now.month(), now.day());
 
         for msg in req.message {
             let v: serde_json::Value = match serde_json::from_slice(&msg.bytes) {
@@ -114,9 +122,8 @@ async fn elasticsearch_handler(
 
             body.push(BulkOperation::index(v).into());
         }
-
         let response = match es_client
-            .bulk(BulkParts::Index(&index))
+            .bulk(BulkParts::Index(&index_date))
             .body(body)
             .send()
             .await
@@ -125,7 +132,7 @@ async fn elasticsearch_handler(
             Err(e) => {
                 let _ = req
                     .output
-                    .send(Err(Error::OutputError(format!("{}", e))))
+                    .send_async(Err(Error::OutputError(format!("{}", e))))
                     .await
                     .unwrap();
                 continue;
@@ -137,7 +144,7 @@ async fn elasticsearch_handler(
             Err(e) => {
                 let _ = req
                     .output
-                    .send(Err(Error::OutputError(format!("{}", e))))
+                    .send_async(Err(Error::OutputError(format!("{}", e))))
                     .await
                     .unwrap();
                 continue;
@@ -156,7 +163,7 @@ async fn elasticsearch_handler(
                     if failed.len() > 0 {
                         let _ = req
                             .output
-                            .send(Err(Error::OutputError(format!(
+                            .send_async(Err(Error::OutputError(format!(
                                 "failed to insert record: {}",
                                 failed.join(",")
                             ))))
@@ -168,7 +175,7 @@ async fn elasticsearch_handler(
                 None => {
                     let _ = req
                         .output
-                        .send(Err(Error::OutputError(
+                        .send_async(Err(Error::OutputError(
                             "unable to deteremine result".into(),
                         )))
                         .await
@@ -179,7 +186,7 @@ async fn elasticsearch_handler(
             None => {
                 let _ = req
                     .output
-                    .send(Err(Error::OutputError(
+                    .send_async(Err(Error::OutputError(
                         "unable to deteremine result".into(),
                     )))
                     .await
@@ -189,7 +196,7 @@ async fn elasticsearch_handler(
         };
 
         // use req.output.is_closed();
-        let _ = req.output.send(Ok(())).await.unwrap();
+        let _ = req.output.send_async(Ok(())).await.unwrap();
     }
     Ok(())
 }
@@ -198,26 +205,26 @@ async fn elasticsearch_handler(
 impl OutputBatch for Elastic {
     async fn write_batch(&mut self, message: MessageBatch) -> Result<(), Error> {
         debug!("Received batch, sending");
-        let (tx, rx) = bounded(1);
+        let (tx, rx) = bounded(0);
         self.sender
-            .send(Request {
+            .send_async(Request {
                 message: message,
                 output: tx,
             })
             .await
             .unwrap();
         debug!("Waiting for results");
-        rx.recv().await.unwrap()?;
+        rx.recv_async().await.unwrap()?;
         debug!("Done sending details");
         Ok(())
     }
 
     async fn batch_size(&self) -> usize {
-        1000
+        self.size
     }
 
     async fn interval(&self) -> Duration {
-        Duration::from_secs(10)
+        self.duration
     }
 }
 
@@ -248,9 +255,28 @@ fn create_elasticsearch(conf: &Value) -> Result<ExecutionType, Error> {
     }
 
     let c = elastic.get_client()?;
-    let (sender, receiver) = bounded(1);
+    let (sender, receiver) = bounded(0);
     let _ = tokio::spawn(elasticsearch_handler(c, elastic.index.clone(), receiver));
-    Ok(ExecutionType::OutputBatch(Box::new(Elastic { sender })))
+    let size = match &elastic.batch_policy {
+        Some(i) => match i.size {
+            Some(s) => s,
+            None => 500,
+        },
+        None => 500,
+    };
+
+    let duration = match &elastic.batch_policy {
+        Some(i) => match i.duration {
+            Some(d) => d,
+            None => Duration::from_secs(10),
+        },
+        None => Duration::from_secs(10),
+    };
+    Ok(ExecutionType::OutputBatch(Box::new(Elastic {
+        sender,
+        size,
+        duration,
+    })))
 }
 
 // #[cfg_attr(feature = "elasticsearch", fiddler_registration_func)]

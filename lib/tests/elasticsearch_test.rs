@@ -60,7 +60,7 @@ output:
     });
 
     let mut response = es_client
-        .search(SearchParts::Index(&["fiddler"]))
+        .search(SearchParts::Index(&["fiddler*"]))
         .body(query)
         .pretty(true)
         .send()

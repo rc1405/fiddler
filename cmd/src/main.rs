@@ -1,3 +1,4 @@
+//! Some Crate level documentation to make the linter happy
 use clap::{Args, Parser};
 use futures::stream::FuturesOrdered;
 use futures::stream::StreamExt;
@@ -49,6 +50,7 @@ struct RunArgs {
 
 #[tokio::main]
 async fn main() -> Result<(), Error> {
+    
     match FiddlerCli::parse() {
         FiddlerCli::Lint(args) => {
             let mut failures: Vec<String> = Vec::new();
