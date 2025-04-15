@@ -97,7 +97,7 @@ pub fn parse_configuration_item(
 
     trace!("Item {} parsed", first_key);
     Ok(ParsedRegisteredItem {
-        creator: item.creator.clone(),
+        creator: item.creator,
         config: content.clone(),
     })
 }

@@ -237,6 +237,7 @@ pub struct ConfigSpec {
 
 impl Clone for ConfigSpec {
     fn clone(&self) -> Self {
+        #[allow(clippy::unwrap_used)]
         ConfigSpec::from_schema(&self.raw_schema).unwrap()
     }
 }

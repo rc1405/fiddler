@@ -1,7 +1,9 @@
+#![allow(missing_docs)]
 use std::env;
 
 fn main() {
     // check for certain dependencies
+    #[allow(clippy::unwrap_used)]
     let target = env::var("TARGET").unwrap();
     let windows = target.contains("windows");
 

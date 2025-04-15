@@ -48,7 +48,6 @@ tokio-test = "0.4.4"
 
 [lints.rust]
 unsafe_code = "forbid"
-unused-results = "warn"
 missing-docs = "warn"
 redundant-imports = "warn"
 unused-crate-dependencies = "warn"
@@ -58,4 +57,3 @@ unused-import-braces = "warn"
 [lints.clippy]
 enum_glob_use = "deny"
 unwrap_used = "warn"
-let_underscore_future = "deny"

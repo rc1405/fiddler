@@ -1,6 +1,5 @@
+#![allow(clippy::needless_return)]
 use async_trait::async_trait;
-// use tokio::sync::mpsc::{channel, Receiver, Sender};
-
 use crate::config::register_plugin;
 use crate::config::ItemType;
 use crate::config::{ConfigSpec, ExecutionType};
@@ -67,9 +66,9 @@ async fn read_file(
                 match line {
                     Ok(line) => {
                         let (tx, rx) = new_callback_chan();
-                        let _ = tokio::spawn(rx);
+                        tokio::spawn(rx);
 
-                        let _ = sender
+                        sender
                             .send_async(Ok((
                                 Message {
                                     bytes: line.into_bytes(),
@@ -77,18 +76,22 @@ async fn read_file(
                                 },
                                 tx,
                             )))
-                            .await;
+                            .await
+                            .map_err(|e| Error::UnableToSendToChannel(format!("{}", e)))?;;
                     }
                     Err(e) => {
-                        let _ = sender
+                        sender
                             .send_async(Err(Error::InputError(format!("{}", e))))
-                            .await;
+                            .await
+                            .map_err(|e| Error::UnableToSendToChannel(format!("{}", e)))?;
                         return Ok(());
                     }
                 }
             }
 
-            let _ = sender.send_async(Err(Error::EndOfInput)).await;
+            sender.send_async(Err(Error::EndOfInput))
+                .await
+                .map_err(|e| Error::UnableToSendToChannel(format!("{}", e)))?;
             return Ok(());
         }
         ReaderType::ToEnd(mut f) => {
@@ -96,17 +99,18 @@ async fn read_file(
             match f.read_to_string(&mut contents) {
                 Ok(_) => {}
                 Err(e) => {
-                    let _ = sender
+                    sender
                         .send_async(Err(Error::InputError(format!("{}", e))))
-                        .await;
+                        .await
+                        .map_err(|e| Error::UnableToSendToChannel(format!("{}", e)))?;;
                     return Ok(());
                 }
             };
 
             let (tx, rx) = new_callback_chan();
-            let _ = tokio::spawn(rx);
+            tokio::spawn(rx);
 
-            let _ = sender
+            sender
                 .send_async(Ok((
                     Message {
                         bytes: contents.into_bytes(),
@@ -114,9 +118,12 @@ async fn read_file(
                     },
                     tx,
                 )))
-                .await;
+                .await
+                .map_err(|e| Error::UnableToSendToChannel(format!("{}", e)))?;
 
-            let _ = sender.send_async(Err(Error::EndOfInput)).await;
+            sender.send_async(Err(Error::EndOfInput))
+                .await
+                .map_err(|e| Error::UnableToSendToChannel(format!("{}", e)))?;
 
             return Ok(());
         }
@@ -130,12 +137,15 @@ async fn read_file(
                 .map_err(|e| Error::InputError(format!("{}: {}", filename, e)))?;
             if metadata.len() < pos {
                 current_pos = 0;
-                sync.send(current_pos).unwrap();
+                sync.send_async(current_pos)
+                    .await
+                    .map_err(|e| Error::UnableToSendToChannel(format!("{}", e)))?;
             };
 
             let _ = file
-                .seek(SeekFrom::Start(current_pos.clone()))
+                .seek(SeekFrom::Start(current_pos))
                 .map_err(|e| Error::InputError(format!("{}: {}", filename, e)))?;
+
             let mut reader = BufReader::new(file);
 
             loop {
@@ -149,7 +159,9 @@ async fn read_file(
                 let s = sync.clone();
 
                 if len == 0 {
-                    let _ = sender.send_async(Err(Error::NoInputToReturn)).await;
+                    sender.send_async(Err(Error::NoInputToReturn))
+                        .await
+                        .map_err(|e| Error::UnableToSendToChannel(format!("{}", e)))?;
                     continue;
                 };
 
@@ -162,18 +174,16 @@ async fn read_file(
                 };
 
                 let (tx, rx) = new_callback_chan();
-                let _ = tokio::spawn(async move {
-                    match rx.await {
-                        Ok(status) => {
-                            if let Status::Processed = status {
-                                let _ = s.send_async(current_pos).await.unwrap();
-                            };
-                        }
-                        Err(_) => {}
+                tokio::spawn(async move {
+                    if let Ok(status) = rx.await  {
+                        if let Status::Processed = status {
+                            #[allow(clippy::unwrap_used)]
+                            let _ = s.send_async(current_pos).await.unwrap();
+                        };
                     };
                 });
 
-                let _ = sender
+                sender
                     .send_async(Ok((
                         Message {
                             bytes: line.into_bytes(),
@@ -181,7 +191,8 @@ async fn read_file(
                         },
                         tx,
                     )))
-                    .await;
+                    .await
+                    .map_err(|e| Error::UnableToSendToChannel(format!("{}", e)))?;
             }
         }
     }
@@ -231,7 +242,6 @@ fn create_file(conf: &Value) -> Result<ExecutionType, Error> {
                 .metadata()
                 .map_err(|e| Error::InputError(format!("{}: {}", c.filename.clone(), e)))?;
             if metadata.len() < current_position {
-                panic!("Resetting position");
                 current_position = 0;
                 fs::write(position_file_name.clone(), format!("{current_position}"))
                     .map_err(|e| Error::InputError(format!("{}: {}", c.filename, e)))
@@ -242,15 +252,14 @@ fn create_file(conf: &Value) -> Result<ExecutionType, Error> {
                 .seek(SeekFrom::Start(current_position))
                 .map_err(|e| Error::InputError(format!("{}: {}", c.filename.clone(), e)))?;
 
-            let passed_position_reader = current_position.clone();
+            let passed_position_reader = current_position;
             let filename = c.filename.clone();
 
-            let _ = tokio::spawn(async move {
+            tokio::spawn(async move {
                 loop {
                     match receiver.try_recv() {
                         Ok(msg) => {
                             if msg == 0 {
-                                panic!("resetting position2");
                                 current_position = 0;
                                 fs::write(
                                     position_file_name.clone(),
@@ -260,13 +269,13 @@ fn create_file(conf: &Value) -> Result<ExecutionType, Error> {
                                 .unwrap();
                             };
 
-                            if &msg > &current_position {
+                            if msg > current_position {
                                 current_position = msg;
+                                #[allow(clippy::unwrap_used)]
                                 fs::write(
                                     position_file_name.clone(),
                                     format!("{current_position}"),
                                 )
-                                .map_err(|e| Error::InputError(format!("{}: {}", filename, e)))
                                 .unwrap();
                             };
                         }
@@ -289,7 +298,7 @@ fn create_file(conf: &Value) -> Result<ExecutionType, Error> {
 
     let (sender, receiver) = bounded(0);
 
-    let _ = tokio::task::spawn_blocking(move || {
+    tokio::task::spawn_blocking(move || {
         let runtime = tokio::runtime::Builder::new_multi_thread()
             .enable_all()
             .thread_name("file_reader")

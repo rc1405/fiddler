@@ -184,6 +184,10 @@ pub enum Error {
     #[error("PipelineProcessingError: {0}")]
     UnableToSendToChannel(String),
 
+    /// Failure to receive from internal raw channel
+    #[error("ChannelRecvError: {0}")]
+    RecvChannelError(#[from] flume::RecvError),
+
     /// Processing module failed with an unrecoverable error.  Processing of [crate::Message] is stopped and
     /// [crate::Status] is returned to the input module once all messages in this lineage have been processed
     #[error("ProcessorFailure: {0}")]

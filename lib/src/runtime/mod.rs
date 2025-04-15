@@ -1,5 +1,3 @@
-use flume::TryRecvError;
-// use async_channel::{bounded, Receiver, Sender};
 use flume::{bounded, Receiver, Sender};
 use serde::Deserialize;
 use serde::Serialize;
@@ -109,8 +107,11 @@ impl Runtime {
     /// ```
     pub fn from_config(config: &str) -> Result<Self, Error> {
         REGISTER.call_once(|| {
+            #[allow(clippy::unwrap_used)]
             inputs::register_plugins().unwrap();
+            #[allow(clippy::unwrap_used)]
             outputs::register_plugins().unwrap();
+            #[allow(clippy::unwrap_used)]
             processors::register_plugins().unwrap();
         });
         trace!("plugins registered");
@@ -440,7 +441,15 @@ async fn message_handler(
             Ok(msg) = new_msg.recv_async() => {
                 trace!(message_id = msg.message_id, "Received new message");
                 let closure = Arc::into_inner(msg.closure).unwrap();
-                let i = handles.insert(msg.message_id.clone(), State { instance_count: 1, processed_count: 0, processed_error_count: 0, output_count: 0, output_error_count: 0, closure: closure, errors: Vec::new() });
+                let i = handles.insert(msg.message_id.clone(), State { 
+                    instance_count: 1, 
+                    processed_count: 0, 
+                    processed_error_count: 0, 
+                    output_count: 0, 
+                    output_error_count: 0, 
+                    closure, 
+                    errors: Vec::new(),
+                });
                 if i.is_some() {
                     error!(message_id = msg.message_id, "Received duplicate message");
                     return Err(Error::ExecutionError("Duplicate Message ID Error".into()))
@@ -606,10 +615,9 @@ async fn input(
                     .await
                     .unwrap();
 
-                match output.send_async(internal_msg).await {
-                    Ok(_) => {}
-                    Err(e) => return Err(Error::UnableToSendToChannel(format!("{}", e))),
-                }
+                output.send_async(internal_msg)
+                    .await
+                    .map_err(|e| Error::UnableToSendToChannel(format!("{}", e)))?;
             }
             Err(e) => match e {
                 Error::EndOfInput => {

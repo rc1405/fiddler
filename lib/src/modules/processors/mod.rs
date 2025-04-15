@@ -1,5 +1,3 @@
-use std::collections::VecDeque;
-
 use crate::Error;
 pub mod lines;
 pub mod noop;
@@ -9,8 +7,6 @@ pub mod switch;
 
 use crate::config::{ExecutionType, ParsedRegisteredItem};
 use crate::runtime::{InternalMessage, InternalMessageState, MessageStatus};
-use crate::Message;
-// use async_channel::{Receiver, Sender, TryRecvError};
 use flume::{Receiver, Sender, TryRecvError};
 use tokio::task::yield_now;
 use tokio::time::{sleep, Duration};
@@ -46,7 +42,7 @@ pub(crate) async fn run_processor(
             Ok(msg) => {
                 trace!("received processing message");
                 match p.process(msg.message.clone()).await {
-                    Ok(mut m) => {
+                    Ok(m) => {
                         if m.len() > 1 {
                             for _ in 0..(m.len() - 1) {
                                 state_tx
@@ -55,7 +51,7 @@ pub(crate) async fn run_processor(
                                         status: MessageStatus::New,
                                     })
                                     .await
-                                    .unwrap();
+                                    .map_err(|e| Error::UnableToSendToChannel(format!("{}", e)))?;
                             }
                         }
 
@@ -63,12 +59,9 @@ pub(crate) async fn run_processor(
                             let mut new_msg = msg.clone();
                             new_msg.message = m.clone();
                             trace!("message processed");
-                            match output.send_async(new_msg).await {
-                                Ok(_) => {}
-                                Err(e) => {
-                                    return Err(Error::UnableToSendToChannel(format!("{}", e)))
-                                }
-                            }
+                            output.send_async(new_msg)
+                                .await
+                                .map_err(|e| Error::UnableToSendToChannel(format!("{}", e)))?;
                         }
                     }
                     Err(e) => match e {
@@ -81,7 +74,7 @@ pub(crate) async fn run_processor(
                                     status: MessageStatus::ProcessError(format!("{}", e)),
                                 })
                                 .await
-                                .unwrap();
+                                .map_err(|e| Error::UnableToSendToChannel(format!("{}", e)))?;
                         }
                         _ => {
                             error!(error = format!("{}", e), "read error from processor");

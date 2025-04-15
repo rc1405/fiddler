@@ -6,7 +6,6 @@ pub mod stdout;
 pub mod switch;
 use crate::runtime::{InternalMessage, InternalMessageState, MessageStatus};
 use crate::{Output, OutputBatch};
-// use async_channel::{Receiver, Sender, TryRecvError};
 use flume::{Receiver, Sender, TryRecvError};
 use std::time;
 use tokio::time::{sleep, Duration};
@@ -41,7 +40,7 @@ pub(crate) async fn run_output(
                                 status: MessageStatus::Output,
                             })
                             .await
-                            .unwrap();
+                            .map_err(|e| Error::UnableToSendToChannel(format!("{}", e)))?;
                     }
                     Err(e) => match e {
                         Error::ConditionalCheckfailed => {
@@ -55,7 +54,7 @@ pub(crate) async fn run_output(
                                     status: MessageStatus::OutputError(format!("{}", e)),
                                 })
                                 .await
-                                .unwrap();
+                                .map_err(|e| Error::UnableToSendToChannel(format!("{}", e)))?;
                         }
                     },
                 }
@@ -70,7 +69,7 @@ pub(crate) async fn run_output(
                             status: MessageStatus::Shutdown,
                         })
                         .await
-                        .unwrap();
+                        .map_err(|e| Error::UnableToSendToChannel(format!("{}", e)))?;
                     return Ok(());
                 }
                 TryRecvError::Empty => sleep(Duration::from_millis(250)).await,
@@ -122,7 +121,7 @@ pub(crate) async fn run_output_batch(
                                 status: MessageStatus::Output,
                             })
                             .await
-                            .unwrap();
+                            .map_err(|e| Error::UnableToSendToChannel(format!("{}", e)))?;
                     }
                 }
                 Err(e) => match e {
@@ -137,7 +136,7 @@ pub(crate) async fn run_output_batch(
                                     status: MessageStatus::OutputError(format!("{}", e)),
                                 })
                                 .await
-                                .unwrap();
+                                .map_err(|e| Error::UnableToSendToChannel(format!("{}", e)))?;
                         }
                     }
                 },

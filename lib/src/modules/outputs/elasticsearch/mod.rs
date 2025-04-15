@@ -3,7 +3,6 @@ use crate::config::ItemType;
 use crate::config::{ConfigSpec, ExecutionType};
 use crate::{BatchingPolicy, MessageBatch};
 use crate::{Closer, Error, OutputBatch};
-// use async_channel::{bounded, Receiver, Sender};
 use async_trait::async_trait;
 use chrono::Datelike;
 use flume::{bounded, Receiver, Sender};
@@ -130,11 +129,11 @@ async fn elasticsearch_handler(
         {
             Ok(i) => i,
             Err(e) => {
-                let _ = req
+                req
                     .output
                     .send_async(Err(Error::OutputError(format!("{}", e))))
                     .await
-                    .unwrap();
+                    .map_err(|e| Error::UnableToSendToChannel(format!("{}", e)))?;
                 continue;
             }
         };
@@ -142,11 +141,11 @@ async fn elasticsearch_handler(
         let json: serde_json::Value = match response.json().await {
             Ok(i) => i,
             Err(e) => {
-                let _ = req
+                req
                     .output
                     .send_async(Err(Error::OutputError(format!("{}", e))))
                     .await
-                    .unwrap();
+                    .map_err(|e| Error::UnableToSendToChannel(format!("{}", e)))?;
                 continue;
             }
         };
@@ -160,43 +159,45 @@ async fn elasticsearch_handler(
                         .map(|v| format!("{}", v["error"]))
                         .collect();
 
-                    if failed.len() > 0 {
-                        let _ = req
+                    if !failed.is_empty() {
+                        req
                             .output
                             .send_async(Err(Error::OutputError(format!(
                                 "failed to insert record: {}",
                                 failed.join(",")
                             ))))
                             .await
-                            .unwrap();
+                            .map_err(|e| Error::UnableToSendToChannel(format!("{}", e)))?;
                         continue;
                     }
                 }
                 None => {
-                    let _ = req
+                    req
                         .output
                         .send_async(Err(Error::OutputError(
                             "unable to deteremine result".into(),
                         )))
                         .await
-                        .unwrap();
+                        .map_err(|e| Error::UnableToSendToChannel(format!("{}", e)))?;
                     continue;
                 }
             },
             None => {
-                let _ = req
+                req
                     .output
                     .send_async(Err(Error::OutputError(
                         "unable to deteremine result".into(),
                     )))
                     .await
-                    .unwrap();
+                    .map_err(|e| Error::UnableToSendToChannel(format!("{}", e)))?;
                 continue;
             }
         };
 
         // use req.output.is_closed();
-        let _ = req.output.send_async(Ok(())).await.unwrap();
+        req.output.send_async(Ok(()))
+            .await
+            .map_err(|e| Error::UnableToSendToChannel(format!("{}", e)))?;
     }
     Ok(())
 }
@@ -208,13 +209,14 @@ impl OutputBatch for Elastic {
         let (tx, rx) = bounded(0);
         self.sender
             .send_async(Request {
-                message: message,
+                message,
                 output: tx,
             })
             .await
-            .unwrap();
+            .map_err(|e| Error::UnableToSendToChannel(format!("{}", e)))?;
+
         debug!("Waiting for results");
-        rx.recv_async().await.unwrap()?;
+        rx.recv_async().await??;
         debug!("Done sending details");
         Ok(())
     }
@@ -258,18 +260,12 @@ fn create_elasticsearch(conf: &Value) -> Result<ExecutionType, Error> {
     let (sender, receiver) = bounded(0);
     let _ = tokio::spawn(elasticsearch_handler(c, elastic.index.clone(), receiver));
     let size = match &elastic.batch_policy {
-        Some(i) => match i.size {
-            Some(s) => s,
-            None => 500,
-        },
+        Some(i) => i.size.unwrap_or(500),
         None => 500,
     };
 
     let duration = match &elastic.batch_policy {
-        Some(i) => match i.duration {
-            Some(d) => d,
-            None => Duration::from_secs(10),
-        },
+        Some(i) => i.duration.unwrap_or(Duration::from_secs(10)),
         None => Duration::from_secs(10),
     };
     Ok(ExecutionType::OutputBatch(Box::new(Elastic {
