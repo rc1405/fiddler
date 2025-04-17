@@ -1,6 +1,6 @@
 [package]
 name = "fiddler-cli"
-version = "0.3.1"
+version = "1.0.0"
 edition = "2021"
 exclude = ["tests"]
 license-file = "../LICENSE"
@@ -16,7 +16,7 @@ msrv = "1.74.1"
 [dependencies]
 async-trait = "0.1.79"
 clap = { version = "4.5.3", features = ["derive"] }
-fiddler = { version = "0.3.1", path = "../fiddler", features = ["all"] }
+fiddler = { version = "1.0.0", path = "../fiddler", features = ["all"] }
 futures = "0.3.30"
 inline_colorization = "0.1.6"
 prettytable-rs = "0.10.0"

@@ -238,17 +238,8 @@ Apache License, Version 2.0, without any additional terms or conditions.
 * Integration tests failing on windows GHA
 
 # TODO List NOW
-OutputBatch provided as Output doesn't elevate the error
-[Done] CLI Test should only use one thread
 Add thread limit on output
-[Done] Update doc tests
-[Done] Fix test yamls
-Improve Logging
 Add Metrics
-Fix warnings
-Fix MacOS Tests
-Handle Results
-do not unwrap
 Add timestamp to event
 
 # Future Items
