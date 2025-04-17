@@ -50,7 +50,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [macos-latest ] #, windows-latest]
+        os: [macos-13 ] #, windows-latest]
     steps:
       # if your project needs OpenSSL, uncomment this to fix Windows builds.
       # it's commented out by default as the install command takes 5-10m.
@@ -60,7 +60,7 @@ jobs:
       #   if: runner.os == 'Windows'
       - run: brew install docker colima 
         if: runner.os != 'Windows'
-      - run: colima start -v
+      - run: colima start
         if: runner.os != 'Windows'
       - uses: actions/checkout@v4
         with:
