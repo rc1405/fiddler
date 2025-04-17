@@ -3,7 +3,15 @@ permissions:
 on:
   push:
     branches: [main]
+    paths:
+      - 'fiddler-cli/**'
+      - 'fiddler/**'
+      - 'Cargo.toml'
   pull_request:
+    paths:
+      - 'fiddler-cli/**'
+      - 'fiddler/**'
+      - 'Cargo.toml'
 concurrency:
   group: ${{ github.workflow }}-${{ github.head_ref || github.run_id }}
   cancel-in-progress: true
@@ -26,7 +34,7 @@ jobs:
       - name: cargo build --release --features all 
         run: cargo build --release --features all
       - name: run cli tests
-        working-directory: ./cmd/
+        working-directory: ./fiddler-cli/
         shell: /usr/bin/bash {0}
         run: |
           lint_failures=`ls -1 tests|grep lint|grep failed`

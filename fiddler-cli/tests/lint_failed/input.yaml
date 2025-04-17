@@ -1,0 +1,7 @@
+input:
+    stdin: {}
+processors:
+  - label: my_cool_mapping
+    noop: {}
+output:
+    dne: {}
