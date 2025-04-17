@@ -60,7 +60,7 @@ jobs:
       #   if: runner.os == 'Windows'
       - run: brew install docker colima 
         if: runner.os != 'Windows'
-      - run: colima start
+      - run: colima start || cat /Users/runner/.colima/_lima/colima/serial*.log && exit 1
         if: runner.os != 'Windows'
       - uses: actions/checkout@v4
         with:
