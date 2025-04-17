@@ -129,8 +129,7 @@ async fn elasticsearch_handler(
         {
             Ok(i) => i,
             Err(e) => {
-                req
-                    .output
+                req.output
                     .send_async(Err(Error::OutputError(format!("{}", e))))
                     .await
                     .map_err(|e| Error::UnableToSendToChannel(format!("{}", e)))?;
@@ -141,8 +140,7 @@ async fn elasticsearch_handler(
         let json: serde_json::Value = match response.json().await {
             Ok(i) => i,
             Err(e) => {
-                req
-                    .output
+                req.output
                     .send_async(Err(Error::OutputError(format!("{}", e))))
                     .await
                     .map_err(|e| Error::UnableToSendToChannel(format!("{}", e)))?;
@@ -160,8 +158,7 @@ async fn elasticsearch_handler(
                         .collect();
 
                     if !failed.is_empty() {
-                        req
-                            .output
+                        req.output
                             .send_async(Err(Error::OutputError(format!(
                                 "failed to insert record: {}",
                                 failed.join(",")
@@ -172,8 +169,7 @@ async fn elasticsearch_handler(
                     }
                 }
                 None => {
-                    req
-                        .output
+                    req.output
                         .send_async(Err(Error::OutputError(
                             "unable to deteremine result".into(),
                         )))
@@ -183,8 +179,7 @@ async fn elasticsearch_handler(
                 }
             },
             None => {
-                req
-                    .output
+                req.output
                     .send_async(Err(Error::OutputError(
                         "unable to deteremine result".into(),
                     )))
@@ -195,7 +190,8 @@ async fn elasticsearch_handler(
         };
 
         // use req.output.is_closed();
-        req.output.send_async(Ok(()))
+        req.output
+            .send_async(Ok(()))
             .await
             .map_err(|e| Error::UnableToSendToChannel(format!("{}", e)))?;
     }

@@ -59,7 +59,8 @@ pub(crate) async fn run_processor(
                             let mut new_msg = msg.clone();
                             new_msg.message = m.clone();
                             trace!("message processed");
-                            output.send_async(new_msg)
+                            output
+                                .send_async(new_msg)
                                 .await
                                 .map_err(|e| Error::UnableToSendToChannel(format!("{}", e)))?;
                         }

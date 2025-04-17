@@ -1,16 +1,16 @@
 #![allow(clippy::needless_return)]
-use async_trait::async_trait;
 use crate::config::register_plugin;
 use crate::config::ItemType;
 use crate::config::{ConfigSpec, ExecutionType};
 use crate::Message;
 use crate::{new_callback_chan, CallbackChan, Status};
 use crate::{Closer, Error, Input};
+use async_trait::async_trait;
+use flume::{bounded, Receiver, RecvError, Sender};
 use serde::Deserialize;
 use serde_yaml::Value;
 use std::fs::{self, read_to_string, File};
 use std::io::{prelude::*, BufReader, SeekFrom};
-use flume::{bounded, Receiver, Sender, RecvError};
 use tokio::time::{sleep, Duration};
 use tracing::error;
 
@@ -88,7 +88,8 @@ async fn read_file(
                 }
             }
 
-            sender.send_async(Err(Error::EndOfInput))
+            sender
+                .send_async(Err(Error::EndOfInput))
                 .await
                 .map_err(|e| Error::UnableToSendToChannel(format!("{}", e)))?;
             return Ok(());
@@ -120,7 +121,8 @@ async fn read_file(
                 .await
                 .map_err(|e| Error::UnableToSendToChannel(format!("{}", e)))?;
 
-            sender.send_async(Err(Error::EndOfInput))
+            sender
+                .send_async(Err(Error::EndOfInput))
                 .await
                 .map_err(|e| Error::UnableToSendToChannel(format!("{}", e)))?;
 
@@ -158,7 +160,8 @@ async fn read_file(
                 let s = sync.clone();
 
                 if len == 0 {
-                    sender.send_async(Err(Error::NoInputToReturn))
+                    sender
+                        .send_async(Err(Error::NoInputToReturn))
                         .await
                         .map_err(|e| Error::UnableToSendToChannel(format!("{}", e)))?;
                     continue;
@@ -174,7 +177,7 @@ async fn read_file(
 
                 let (tx, rx) = new_callback_chan();
                 tokio::spawn(async move {
-                    if let Ok(status) = rx.await  {
+                    if let Ok(status) = rx.await {
                         if let Status::Processed = status {
                             #[allow(clippy::unwrap_used)]
                             let _ = s.send_async(current_pos).await.unwrap();

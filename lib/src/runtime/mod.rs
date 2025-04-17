@@ -441,13 +441,13 @@ async fn message_handler(
             Ok(msg) = new_msg.recv_async() => {
                 trace!(message_id = msg.message_id, "Received new message");
                 let closure = Arc::into_inner(msg.closure).unwrap();
-                let i = handles.insert(msg.message_id.clone(), State { 
-                    instance_count: 1, 
-                    processed_count: 0, 
-                    processed_error_count: 0, 
-                    output_count: 0, 
-                    output_error_count: 0, 
-                    closure, 
+                let i = handles.insert(msg.message_id.clone(), State {
+                    instance_count: 1,
+                    processed_count: 0,
+                    processed_error_count: 0,
+                    output_count: 0,
+                    output_error_count: 0,
+                    closure,
                     errors: Vec::new(),
                 });
                 if i.is_some() {
@@ -615,7 +615,8 @@ async fn input(
                     .await
                     .unwrap();
 
-                output.send_async(internal_msg)
+                output
+                    .send_async(internal_msg)
                     .await
                     .map_err(|e| Error::UnableToSendToChannel(format!("{}", e)))?;
             }
