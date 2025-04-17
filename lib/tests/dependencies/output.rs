@@ -55,10 +55,10 @@ impl Closer for Validate {
 
 fn create_validator(conf: &Value) -> Result<ExecutionType, Error> {
     let g: ValidateSpec = serde_yaml::from_value(conf.clone())?;
-    return Ok(ExecutionType::Output(Box::new(Validate {
+    Ok(ExecutionType::Output(Box::new(Validate {
         expected: g.expected.clone(),
         count: 0,
-    })));
+    })))
 }
 
 pub fn register_validate() -> Result<(), Error> {

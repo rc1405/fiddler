@@ -23,7 +23,7 @@ impl Input for JsonGenerator {
         self.count -= 1;
 
         let (tx, rx) = new_callback_chan();
-        let _ = tokio::spawn(async move { rx.await });
+        let _ = tokio::spawn(rx);
 
         Ok((
             Message {
@@ -42,7 +42,7 @@ impl Closer for JsonGenerator {}
 
 fn create_json_generator(conf: &Value) -> Result<ExecutionType, Error> {
     let g: JsonGenerator = serde_yaml::from_value(conf.clone())?;
-    return Ok(ExecutionType::Input(Box::new(g)));
+    Ok(ExecutionType::Input(Box::new(g)))
 }
 
 pub fn register_json_generator() -> Result<(), Error> {

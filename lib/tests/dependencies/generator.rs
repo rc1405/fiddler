@@ -23,7 +23,7 @@ impl Input for Generator {
         self.count -= 1;
 
         let (tx, rx) = new_callback_chan();
-        let _ = tokio::spawn(async move { rx.await });
+        let _ = tokio::spawn(rx);
 
         Ok((
             Message {
@@ -40,7 +40,7 @@ impl Closer for Generator {}
 
 fn create_generator(conf: &Value) -> Result<ExecutionType, Error> {
     let g: Generator = serde_yaml::from_value(conf.clone())?;
-    return Ok(ExecutionType::Input(Box::new(g)));
+    Ok(ExecutionType::Input(Box::new(g)))
 }
 
 pub fn register_generator() -> Result<(), Error> {

@@ -6,12 +6,11 @@ use crate::Message;
 use crate::{new_callback_chan, CallbackChan, Status};
 use crate::{Closer, Error, Input};
 use async_trait::async_trait;
-use flume::{bounded, Receiver, RecvError, Sender};
+use flume::{bounded, Receiver, Sender};
 use serde::Deserialize;
 use serde_yaml::Value;
 use std::fs::{self, read_to_string, File};
 use std::io::{prelude::*, BufReader, SeekFrom};
-use tokio::time::{sleep, Duration};
 use tracing::error;
 
 #[derive(Deserialize, Default)]
@@ -180,7 +179,7 @@ async fn read_file(
                     if let Ok(status) = rx.await {
                         if let Status::Processed = status {
                             #[allow(clippy::unwrap_used)]
-                            let _ = s.send_async(current_pos).await.unwrap();
+                            s.send_async(current_pos).await.unwrap();
                         };
                     };
                 });

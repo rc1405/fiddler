@@ -54,7 +54,7 @@ impl Closer for Assert {
             ));
         };
 
-        if self.errors.len() > 0 {
+        if !self.errors.is_empty() {
             return Err(Error::ExecutionError(self.errors.join("\n")));
         };
 

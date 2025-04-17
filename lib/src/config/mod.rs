@@ -372,9 +372,6 @@ output:
                 type: number";
 
         let conf = ConfigSpec::from_schema(schema).unwrap();
-        match conf.validate(input) {
-            Ok(_) => panic!("expected error, none received"),
-            Err(_) => {}
-        }
+        if let Ok(_) = conf.validate(input) { panic!("expected error, none received") }
     }
 }

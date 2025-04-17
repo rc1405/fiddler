@@ -21,7 +21,7 @@ pub struct MockInput {
 impl Input for MockInput {
     async fn read(&mut self) -> Result<(Message, CallbackChan), Error> {
         let (tx, rx) = new_callback_chan();
-        let _ = tokio::spawn(async move { rx.await });
+        let _ = tokio::spawn(rx);
 
         match self.input.pop() {
             Some(i) => Ok((
@@ -41,9 +41,9 @@ impl Closer for MockInput {}
 
 fn create_mock_input(conf: &Value) -> Result<ExecutionType, Error> {
     let mut g: MockInputConf = serde_yaml::from_value(conf.clone())?;
-    g.input = g.input.iter().rev().map(|i| i.clone()).collect();
+    g.input = g.input.iter().rev().cloned().collect();
 
-    return Ok(ExecutionType::Input(Box::new(MockInput { input: g.input })));
+    Ok(ExecutionType::Input(Box::new(MockInput { input: g.input })))
 }
 
 pub fn register_mock_input() -> Result<(), Error> {
