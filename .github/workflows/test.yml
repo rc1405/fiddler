@@ -60,7 +60,7 @@ jobs:
       #   if: runner.os == 'Windows'
       - run: brew install docker colima 
         if: runner.os != 'Windows'
-      - run: colima start --network-driver slirp
+      - run: colima start -v
         if: runner.os != 'Windows'
       - uses: actions/checkout@v4
         with:
