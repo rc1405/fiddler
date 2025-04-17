@@ -34,7 +34,7 @@ jobs:
       - name: cargo build --release --features all 
         run: cargo build --release --features all
       - name: run cli tests
-        working-directory: ./cmd/
+        working-directory: ./fiddler-cli/
         shell: /usr/bin/bash {0}
         run: |
           lint_failures=`ls -1 tests|grep lint|grep failed`
