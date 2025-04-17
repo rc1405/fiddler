@@ -456,7 +456,7 @@ async fn message_handler(
                 };
             },
             Ok(msg) = msg_status.recv_async() => {
-                debug!(state = msg.status.to_string(), message_id = msg.message_id, "Received message state");
+                trace!(state = msg.status.to_string(), message_id = msg.message_id, "Received message state");
                 match msg.status {
                     MessageStatus::New => {
                         let m = handles.get_mut(&msg.message_id);

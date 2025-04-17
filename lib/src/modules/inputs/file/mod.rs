@@ -10,8 +10,7 @@ use serde::Deserialize;
 use serde_yaml::Value;
 use std::fs::{self, read_to_string, File};
 use std::io::{prelude::*, BufReader, SeekFrom};
-// use std::sync::mpsc::{sync_channel, SyncSender, TryRecvError};
-use flume::{bounded, Receiver, Sender, TryRecvError};
+use flume::{bounded, Receiver, Sender, RecvError};
 use tokio::time::{sleep, Duration};
 use tracing::error;
 
@@ -77,7 +76,7 @@ async fn read_file(
                                 tx,
                             )))
                             .await
-                            .map_err(|e| Error::UnableToSendToChannel(format!("{}", e)))?;;
+                            .map_err(|e| Error::UnableToSendToChannel(format!("{}", e)))?;
                     }
                     Err(e) => {
                         sender
@@ -102,7 +101,7 @@ async fn read_file(
                     sender
                         .send_async(Err(Error::InputError(format!("{}", e))))
                         .await
-                        .map_err(|e| Error::UnableToSendToChannel(format!("{}", e)))?;;
+                        .map_err(|e| Error::UnableToSendToChannel(format!("{}", e)))?;
                     return Ok(());
                 }
             };
@@ -244,8 +243,7 @@ fn create_file(conf: &Value) -> Result<ExecutionType, Error> {
             if metadata.len() < current_position {
                 current_position = 0;
                 fs::write(position_file_name.clone(), format!("{current_position}"))
-                    .map_err(|e| Error::InputError(format!("{}: {}", c.filename, e)))
-                    .unwrap();
+                    .map_err(|e| Error::InputError(format!("{}: {}", c.filename, e)))?;
             };
 
             let _ = file
@@ -257,7 +255,7 @@ fn create_file(conf: &Value) -> Result<ExecutionType, Error> {
 
             tokio::spawn(async move {
                 loop {
-                    match receiver.try_recv() {
+                    match receiver.recv_async().await {
                         Ok(msg) => {
                             if msg == 0 {
                                 current_position = 0;
@@ -280,13 +278,8 @@ fn create_file(conf: &Value) -> Result<ExecutionType, Error> {
                             };
                         }
                         Err(e) => {
-                            if let TryRecvError::Empty = e {
-                                sleep(Duration::from_millis(10)).await;
-                                continue;
-                            } else {
-                                error!("closing file state handler");
-                                return;
-                            }
+                            error!(error = format!("{}", e), "closing file state handler");
+                            return;
                         }
                     }
                 }
@@ -306,7 +299,7 @@ fn create_file(conf: &Value) -> Result<ExecutionType, Error> {
             // .on_thread_start(move || set_current_thread_priority_low())
             .build()
             .expect("Creating tokio runtime");
-        runtime.block_on(read_file(inner, sender))
+        runtime.block_on(read_file(inner, sender)).unwrap()
     });
 
     Ok(ExecutionType::Input(Box::new(FileReader { receiver })))
