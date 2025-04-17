@@ -20,7 +20,7 @@ all = ["python", "elasticsearch"]
 async-std = { version = "1.12.0", features = ["std"] }
 async-trait = "0.1.78"
 elasticsearch = { version = "8.5.0-alpha.1", features = ["rustls-tls"], optional = true }
-handlebars = { version = "5.1.2", features = ["no_logging"] }
+handlebars = { version = "6.3.2", features = ["no_logging"] }
 jmespath = "0.3.0"
 jsonschema = "0.17.1"
 num_cpus = "1.16.0"
