@@ -1,6 +1,6 @@
 //! Fast and flexible data stream processor written in Rust
 //!
-//! Provides a cli for running, linting and testing data streaming pipelines 
+//! Provides a cli for running, linting and testing data streaming pipelines
 //! using a declaritive yaml based configuration for data aggregation and
 //! transformation
 use clap::{Args, Parser};
