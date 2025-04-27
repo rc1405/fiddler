@@ -1,5 +1,5 @@
 //! Helper macro for developing fiddler modules
-//! 
+//!
 //! Fiddler [`fiddler::config::Callback`] requires a return signature of `std::pin::Pin<Box<dyn core::future::Future<Output = Result<ExecutionType, Error>> + Send>>`
 //! This helper macro will accept a function signature of `Fn(conf: Value) -> Result<ExecutionType, Error>`and convert it
 //! to the async Bos::pin future that is needed to store as a type
