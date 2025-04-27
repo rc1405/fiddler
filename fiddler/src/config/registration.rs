@@ -24,10 +24,7 @@ pub fn register_plugin(
     format: ConfigSpec,
     creator: Callback,
 ) -> Result<(), Error> {
-    let r = RegisteredItem {
-        creator,
-        format,
-    };
+    let r = RegisteredItem { creator, format };
 
     match ENV.lock() {
         Ok(mut lock) => {

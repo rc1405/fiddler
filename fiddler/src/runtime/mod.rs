@@ -667,7 +667,7 @@ async fn input(
                                 closure,
                             })
                             .await
-                            .unwrap();
+                            .map_err(|e| Error::UnableToSendToChannel(format!("{}", e)))?;
 
                         output
                             .send_async(internal_msg)

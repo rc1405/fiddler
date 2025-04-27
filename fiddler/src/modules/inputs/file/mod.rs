@@ -12,7 +12,7 @@ use serde::Deserialize;
 use serde_yaml::Value;
 use std::fs::{self, read_to_string, File};
 use std::io::{prelude::*, BufReader, SeekFrom};
-use tracing::error;
+use tracing::{debug, error, trace};
 
 #[derive(Deserialize, Default)]
 enum CodecType {
@@ -255,35 +255,60 @@ fn create_file(conf: Value) -> Result<ExecutionType, Error> {
             let passed_position_reader = current_position;
             let filename = c.filename.clone();
 
+            let (timer_tx, timer) = bounded(0);
             tokio::spawn(async move {
                 loop {
-                    match receiver.recv_async().await {
-                        Ok(msg) => {
-                            if msg == 0 {
-                                current_position = 0;
-                                #[allow(clippy::unwrap_used)]
-                                fs::write(
-                                    position_file_name.clone(),
-                                    format!("{current_position}"),
-                                )
-                                .map_err(|e| Error::InputError(format!("{}: {}", filename, e)))
-                                .unwrap();
-                            };
+                    tokio::time::sleep(tokio::time::Duration::from_secs(5)).await;
+                    if let Err(_e) = timer_tx.send_async(()).await {
+                        debug!("timer channel closed, exiting");
+                        return;
+                    };
+                }
+            });
 
-                            if msg > current_position {
-                                current_position = msg;
+            tokio::spawn(async move {
+                let mut last_known_position = current_position;
+                loop {
+                    tokio::select! {
+                        Ok(_) = timer.recv_async() => {
+                            if current_position != last_known_position {
+                                trace!("writing position to disk");
                                 #[allow(clippy::unwrap_used)]
                                 fs::write(
                                     position_file_name.clone(),
                                     format!("{current_position}"),
                                 )
-                                .unwrap();
-                            };
-                        }
-                        Err(e) => {
-                            error!(error = format!("{}", e), "closing file state handler");
-                            return;
-                        }
+                                    .map_err(|e| Error::InputError(format!("{}: {}", filename, e)))
+                                    .unwrap();
+                                last_known_position = current_position;
+                            }
+                        },
+                        m = receiver.recv_async() => {
+                            match m {
+                                Ok(msg) => {
+                                    if msg == 0 {
+                                        current_position = 0;
+                                        trace!("writing position to disk");
+                                        #[allow(clippy::unwrap_used)]
+                                        fs::write(
+                                            position_file_name.clone(),
+                                            format!("{current_position}"),
+                                        )
+                                            .map_err(|e| Error::InputError(format!("{}: {}", filename, e)))
+                                            .unwrap();
+                                        last_known_position = current_position;
+                                    };
+
+                                    if msg > current_position {
+                                        current_position = msg;
+                                    };
+                                }
+                                Err(e) => {
+                                    error!(error = format!("{}", e), "closing file state handler");
+                                    return;
+                                }
+                            }
+                        },
                     }
                 }
             });
