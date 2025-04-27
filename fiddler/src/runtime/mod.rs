@@ -653,8 +653,6 @@ async fn input(
                 match m {
                     Ok((msg, closure)) => {
                         let message_id: String = Uuid::new_v4().into();
-
-                        // trace!("message received from input");
                         let internal_msg = InternalMessage {
                             message: msg,
                             message_id: message_id.clone(),
