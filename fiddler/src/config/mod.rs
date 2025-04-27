@@ -1,15 +1,17 @@
-use std::collections::HashMap;
-use std::env;
-use std::fmt;
-use std::str::FromStr;
-use std::sync::Mutex;
-
 use handlebars::Handlebars;
 use jsonschema::{Draft, JSONSchema};
 use once_cell::sync::Lazy;
 use serde::{Deserialize, Serialize};
 use serde_yaml::Value;
+use std::collections::HashMap;
+use std::env;
+use std::fmt;
+use std::str::FromStr;
+use std::sync::Mutex;
 use tracing::{debug, error, trace};
+
+use core::future::Future;
+use std::pin::Pin;
 
 use super::{Error, Input, Output, Processor};
 use crate::{InputBatch, OutputBatch};
@@ -19,7 +21,7 @@ mod validate;
 pub use registration::register_plugin;
 pub(crate) use validate::parse_configuration_item;
 
-type Callback = fn(&Value) -> Result<ExecutionType, Error>;
+pub type Callback = fn(Value) -> Pin<Box<dyn Future<Output = Result<ExecutionType, Error>> + Send>>;
 
 /// Plugin Configuration Type utilized for registration of fiddler modules
 #[derive(PartialEq, Eq, Hash, Clone)]
@@ -146,10 +148,8 @@ impl Config {
     /// ```compile_fail
     /// # use fiddler::config::Config;
     /// # use serde_yaml;
-    /// # use fiddler::modules::{inputs, outputs, processors};
-    /// # inputs::register_plugins().unwrap();
-    /// # outputs::register_plugins().unwrap();
-    /// # processors::register_plugins().unwrap();
+    /// # use fiddler::modules::register_plugins;
+    /// # register_plugins().unwrap();
     /// let conf_str = r#"input:
     ///   stdin: {}
     /// processors:
@@ -160,7 +160,7 @@ impl Config {
     /// let config: Config = serde_yaml::from_str(&conf_str).unwrap();
     /// config.validate().unwrap();
     /// ```
-    pub fn validate(self) -> Result<ParsedConfig, Error> {
+    pub async fn validate(self) -> Result<ParsedConfig, Error> {
         if self.input.extra.len() > 1 {
             error!("input must only contain one entry");
             return Err(Error::Validation(
@@ -175,13 +175,13 @@ impl Config {
             ));
         };
 
-        let input = parse_configuration_item(ItemType::Input, &self.input.extra)?;
+        let input = parse_configuration_item(ItemType::Input, &self.input.extra).await?;
 
-        let output = match parse_configuration_item(ItemType::Output, &self.output.extra) {
+        let output = match parse_configuration_item(ItemType::Output, &self.output.extra).await {
             Ok(i) => i,
             Err(e) => match e {
                 Error::ConfigurationItemNotFound(_) => {
-                    parse_configuration_item(ItemType::OutputBatch, &self.output.extra)?
+                    parse_configuration_item(ItemType::OutputBatch, &self.output.extra).await?
                 }
                 _ => return Err(e),
             },
@@ -190,7 +190,7 @@ impl Config {
         let mut processors = Vec::new();
 
         for p in &self.processors {
-            let proc = parse_configuration_item(ItemType::Processor, &p.extra)?;
+            let proc = parse_configuration_item(ItemType::Processor, &p.extra).await?;
             processors.push(proc);
         }
 

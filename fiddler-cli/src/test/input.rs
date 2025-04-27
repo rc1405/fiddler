@@ -5,6 +5,7 @@ use fiddler::config::{ConfigSpec, ExecutionType};
 use fiddler::Message;
 use fiddler::{new_callback_chan, CallbackChan};
 use fiddler::{Closer, Error, Input};
+use fiddler_macros::fiddler_registration_func;
 use serde::{Deserialize, Serialize};
 use serde_yaml::Value;
 
@@ -39,7 +40,8 @@ impl Input for MockInput {
 #[async_trait]
 impl Closer for MockInput {}
 
-fn create_mock_input(conf: &Value) -> Result<ExecutionType, Error> {
+#[fiddler_registration_func]
+fn create_mock_input(conf: Value) -> Result<ExecutionType, Error> {
     let mut g: MockInputConf = serde_yaml::from_value(conf.clone())?;
     g.input = g.input.iter().rev().cloned().collect();
 

@@ -5,6 +5,7 @@ use fiddler::config::{ConfigSpec, ExecutionType};
 use fiddler::Message;
 use fiddler::{new_callback_chan, CallbackChan};
 use fiddler::{Closer, Error, Input};
+use fiddler_macros::fiddler_registration_func;
 use serde::{Deserialize, Serialize};
 use serde_yaml::Value;
 
@@ -38,7 +39,8 @@ impl Input for Generator {
 #[async_trait]
 impl Closer for Generator {}
 
-fn create_generator(conf: &Value) -> Result<ExecutionType, Error> {
+#[fiddler_registration_func]
+fn create_generator(conf: Value) -> Result<ExecutionType, Error> {
     let g: Generator = serde_yaml::from_value(conf.clone())?;
     Ok(ExecutionType::Input(Box::new(g)))
 }

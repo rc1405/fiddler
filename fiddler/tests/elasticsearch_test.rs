@@ -1,9 +1,7 @@
 #![allow(unused_crate_dependencies)]
 #![allow(missing_docs)]
 #[cfg(feature = "elasticsearch")]
-use testcontainers_modules::{
-    elastic_search, testcontainers::clients::Cli, testcontainers::RunnableImage,
-};
+use testcontainers_modules::elastic_search;
 
 #[cfg(feature = "elasticsearch")]
 use elasticsearch::{http::transport::Transport, Elasticsearch, SearchParts};
@@ -16,17 +14,13 @@ use serde_json::{json, Value};
 use std::path::MAIN_SEPARATOR_STR;
 
 #[cfg(feature = "elasticsearch")]
-fn create_elasticsearch() -> RunnableImage<elastic_search::ElasticSearch> {
-    RunnableImage::from(elastic_search::ElasticSearch::default())
-}
-
-#[cfg(feature = "elasticsearch")]
 #[cfg_attr(feature = "elasticsearch", tokio::test)]
 async fn fiddler_elasticsearch_output_test() {
-    let docker = Cli::default();
-    let image = create_elasticsearch();
-    let container = docker.run(image);
-    let host_port = container.get_host_port_ipv4(9200);
+    use testcontainers::runners::AsyncRunner;
+
+    let request = elastic_search::ElasticSearch::default();
+    let container = request.start().await.unwrap();
+    let host_port = container.get_host_port_ipv4(9200).await.unwrap();
     let config = format!(
         "input:
   file: 
@@ -42,7 +36,7 @@ output:
     url: http://127.0.0.1:{host_port}"
     );
 
-    let env = Runtime::from_config(&config).unwrap();
+    let env = Runtime::from_config(&config).await.unwrap();
     env.run().await.unwrap();
 
     let sleep_time = std::time::Duration::from_secs(1);

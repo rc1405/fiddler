@@ -5,6 +5,7 @@ use crate::{BatchingPolicy, MessageBatch};
 use crate::{Closer, Error, OutputBatch};
 use async_trait::async_trait;
 use chrono::Datelike;
+use fiddler_macros::fiddler_registration_func;
 use flume::{bounded, Receiver, Sender};
 use serde::Deserialize;
 use serde_yaml::Value;
@@ -229,7 +230,8 @@ impl OutputBatch for Elastic {
 #[async_trait]
 impl Closer for Elastic {}
 
-fn create_elasticsearch(conf: &Value) -> Result<ExecutionType, Error> {
+#[fiddler_registration_func]
+fn create_elasticsearch(conf: Value) -> Result<ExecutionType, Error> {
     let elastic: ElasticConfig = serde_yaml::from_value(conf.clone())?;
 
     if elastic.username.is_none() && elastic.password.is_some() {

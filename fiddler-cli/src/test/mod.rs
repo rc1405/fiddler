@@ -45,8 +45,8 @@ pub async fn handle_tests(configs: Vec<String>) -> Result<(), Error> {
         let conf = fs::read_to_string(&c)
             .map_err(|e| Error::ConfigurationItemNotFound(format!("cannot read {}: {}", c, e)))?;
         let config: Config = serde_yaml::from_str(&conf)?;
-        let _ = Runtime::from_config(&conf)?;
-        let _ = config.validate()?;
+        let _ = Runtime::from_config(&conf).await?;
+        let _ = config.validate().await?;
 
         let path = PathBuf::from(&c);
         let new_filename = path.clone().with_extension("");
@@ -68,7 +68,7 @@ pub async fn handle_tests(configs: Vec<String>) -> Result<(), Error> {
 
         let tests: Vec<Test> = serde_yaml::from_str(&test_file)?;
         for test in tests {
-            let mut env = Runtime::from_config(&conf)?;
+            let mut env = Runtime::from_config(&conf).await?;
 
             let i = Input {
                 input: test.inputs.clone(),
@@ -77,7 +77,7 @@ pub async fn handle_tests(configs: Vec<String>) -> Result<(), Error> {
             let input_value: Value = serde_yaml::to_value(i)?;
             let mut new_input_conf: HashMap<String, Value> = HashMap::new();
             let _ = new_input_conf.insert("mock".into(), input_value);
-            env.set_input(&new_input_conf)?;
+            env.set_input(&new_input_conf).await?;
 
             let o = Output {
                 expected: test.expected_outputs.clone(),
@@ -86,7 +86,7 @@ pub async fn handle_tests(configs: Vec<String>) -> Result<(), Error> {
             let output_value: Value = serde_yaml::to_value(o)?;
             let mut new_output_conf: HashMap<String, Value> = HashMap::new();
             let _ = new_output_conf.insert("assert".into(), output_value);
-            env.set_output(&new_output_conf)?;
+            env.set_output(&new_output_conf).await?;
 
             let label = format!("{}: {}", &c, test.name);
             let _ = proc_maps.insert(environments.len(), label.clone());

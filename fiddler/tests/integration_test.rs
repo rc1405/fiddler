@@ -34,7 +34,7 @@ output:
 
     std::env::set_var("TestingEnvVarReplacement", "ReplacementSuccessful");
 
-    let env = Runtime::from_config(config).unwrap();
+    let env = Runtime::from_config(config).await.unwrap();
     env.run().await.unwrap();
 }
 
@@ -64,7 +64,7 @@ output:
         output::register_validate().unwrap();
     });
 
-    let env = Runtime::from_config(config).unwrap();
+    let env = Runtime::from_config(config).await.unwrap();
     env.run().await.unwrap();
 }
 
@@ -99,7 +99,7 @@ output:
         output::register_validate().unwrap();
     });
 
-    let env = Runtime::from_config(config).unwrap();
+    let env = Runtime::from_config(config).await.unwrap();
     env.run().await.unwrap();
 }
 
@@ -136,7 +136,7 @@ output:
         output::register_validate().unwrap();
     });
 
-    let env = Runtime::from_config(config).unwrap();
+    let env = Runtime::from_config(config).await.unwrap();
     env.run().await.unwrap();
 }
 
@@ -176,7 +176,7 @@ output:
         output::register_validate().unwrap();
     });
 
-    let env = Runtime::from_config(config).unwrap();
+    let env = Runtime::from_config(config).await.unwrap();
     env.run().await.unwrap();
 }
 
@@ -217,7 +217,7 @@ output:
         output::register_validate().unwrap();
     });
 
-    let env = Runtime::from_config(config).unwrap();
+    let env = Runtime::from_config(config).await.unwrap();
     env.run().await.unwrap();
 }
 
@@ -259,7 +259,7 @@ output:
         output::register_validate().unwrap();
     });
 
-    let env = Runtime::from_config(config).unwrap();
+    let env = Runtime::from_config(config).await.unwrap();
     env.run().await.unwrap();
 }
 
@@ -289,7 +289,7 @@ output:
         output::register_validate().unwrap();
     });
 
-    let env = Runtime::from_config(&config).unwrap();
+    let env = Runtime::from_config(&config).await.unwrap();
     env.run().await.unwrap();
 }
 
@@ -319,7 +319,7 @@ output:
         output::register_validate().unwrap();
     });
 
-    let env = Runtime::from_config(&config).unwrap();
+    let env = Runtime::from_config(&config).await.unwrap();
     env.run().await.unwrap();
 }
 
@@ -350,7 +350,7 @@ output:
         output::register_validate().unwrap();
     });
 
-    let env = Runtime::from_config(&config).unwrap();
+    let env = Runtime::from_config(&config).await.unwrap();
     env.run().await.unwrap();
 }
 
@@ -381,6 +381,6 @@ output:
 
     std::env::set_var("TestingEnvVarReplacement", "ReplacementSuccessful");
 
-    let env = Runtime::from_config(config).unwrap();
+    let env = Runtime::from_config(config).await.unwrap();
     env.run().await.unwrap();
 }

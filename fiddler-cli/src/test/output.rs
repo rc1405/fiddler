@@ -7,6 +7,7 @@ use fiddler::config::ItemType;
 use fiddler::config::{ConfigSpec, ExecutionType};
 use fiddler::Message;
 use fiddler::{Closer, Error, Output};
+use fiddler_macros::fiddler_registration_func;
 
 #[derive(Deserialize, Serialize)]
 struct AssertSpec {
@@ -62,7 +63,8 @@ impl Closer for Assert {
     }
 }
 
-fn create_assert(conf: &Value) -> Result<ExecutionType, Error> {
+#[fiddler_registration_func]
+fn create_assert(conf: Value) -> Result<ExecutionType, Error> {
     let g: AssertSpec = serde_yaml::from_value(conf.clone())?;
     Ok(ExecutionType::Output(Box::new(Assert {
         expected: g.expected.clone(),

@@ -6,6 +6,7 @@ use crate::Message;
 use crate::{new_callback_chan, CallbackChan, Status};
 use crate::{Closer, Error, Input};
 use async_trait::async_trait;
+use fiddler_macros::fiddler_registration_func;
 use flume::{bounded, Receiver, Sender};
 use serde::Deserialize;
 use serde_yaml::Value;
@@ -176,11 +177,9 @@ async fn read_file(
 
                 let (tx, rx) = new_callback_chan();
                 tokio::spawn(async move {
-                    if let Ok(status) = rx.await {
-                        if let Status::Processed = status {
-                            #[allow(clippy::unwrap_used)]
-                            s.send_async(current_pos).await.unwrap();
-                        };
+                    if let Ok(Status::Processed) = rx.await {
+                        #[allow(clippy::unwrap_used)]
+                        s.send_async(current_pos).await.unwrap();
                     };
                 });
 
@@ -211,7 +210,8 @@ impl Input for FileReader {
     }
 }
 
-fn create_file(conf: &Value) -> Result<ExecutionType, Error> {
+#[fiddler_registration_func]
+fn create_file(conf: Value) -> Result<ExecutionType, Error> {
     let c: FileReaderConfig = serde_yaml::from_value(conf.clone())?;
     if let CodecType::Tail = c.codec {
         if c.position_filename.is_none() {
@@ -261,6 +261,7 @@ fn create_file(conf: &Value) -> Result<ExecutionType, Error> {
                         Ok(msg) => {
                             if msg == 0 {
                                 current_position = 0;
+                                #[allow(clippy::unwrap_used)]
                                 fs::write(
                                     position_file_name.clone(),
                                     format!("{current_position}"),
@@ -301,6 +302,7 @@ fn create_file(conf: &Value) -> Result<ExecutionType, Error> {
             // .on_thread_start(move || set_current_thread_priority_low())
             .build()
             .expect("Creating tokio runtime");
+        #[allow(clippy::unwrap_used)]
         runtime.block_on(read_file(inner, sender)).unwrap()
     });
 

@@ -29,7 +29,7 @@ pub(crate) async fn run_processor(
 ) -> Result<(), Error> {
     trace!("Started processor");
     // let proc = (processor.creator)(&processor.config)?;
-    let mut p = match (processor.creator)(&processor.config)? {
+    let mut p = match (processor.creator)(processor.config.clone()).await? {
         ExecutionType::Processor(p) => p,
         _ => {
             error!("invalid execution type for processor");

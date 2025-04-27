@@ -1,0 +1,16 @@
+[package]
+name = "fiddler-macros"
+version = "1.0.0"
+edition = "2021"
+license-file = "../LICENSE"
+description = "Macros for internal use of registering plugins in fiddler"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+proc-macro2 = "1.0.79"
+quote = "1.0.35"
+syn = { version = "2.0.53", features = ["full"] }
+
+[lib]
+proc_macro=true

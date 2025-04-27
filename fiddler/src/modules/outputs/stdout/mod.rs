@@ -4,6 +4,7 @@ use crate::config::{ConfigSpec, ExecutionType};
 use crate::Message;
 use crate::{Closer, Error, Output};
 use async_trait::async_trait;
+use fiddler_macros::fiddler_registration_func;
 use serde_yaml::Value;
 
 #[derive(Clone)]
@@ -20,7 +21,8 @@ impl Output for StdOut {
 
 impl Closer for StdOut {}
 
-fn create_stdout(_conf: &Value) -> Result<ExecutionType, Error> {
+#[fiddler_registration_func]
+fn create_stdout(_conf: Value) -> Result<ExecutionType, Error> {
     Ok(ExecutionType::Output(Box::new(StdOut {})))
 }
 

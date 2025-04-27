@@ -7,6 +7,7 @@ use fiddler::config::ItemType;
 use fiddler::config::{ConfigSpec, ExecutionType};
 use fiddler::Message;
 use fiddler::{Closer, Error, Output};
+use fiddler_macros::fiddler_registration_func;
 
 #[derive(Deserialize, Serialize)]
 struct ValidateSpec {
@@ -53,7 +54,8 @@ impl Closer for Validate {
     }
 }
 
-fn create_validator(conf: &Value) -> Result<ExecutionType, Error> {
+#[fiddler_registration_func]
+fn create_validator(conf: Value) -> Result<ExecutionType, Error> {
     let g: ValidateSpec = serde_yaml::from_value(conf.clone())?;
     Ok(ExecutionType::Output(Box::new(Validate {
         expected: g.expected.clone(),

@@ -5,6 +5,7 @@ use crate::Message;
 use crate::MessageBatch;
 use crate::{Closer, Error, Processor};
 use async_trait::async_trait;
+use fiddler_macros::fiddler_registration_func;
 use serde::{Deserialize, Serialize};
 use serde_yaml::Value;
 use std::mem;
@@ -73,15 +74,16 @@ impl Closer for Check {
     }
 }
 
-fn create_check(conf: &Value) -> Result<ExecutionType, Error> {
+#[fiddler_registration_func]
+fn create_check(conf: Value) -> Result<ExecutionType, Error> {
     let c: CheckConfig = serde_yaml::from_value(conf.clone())?;
     let _ = jmespath::compile(&c.condition)
         .map_err(|e| Error::ConfigFailedValidation(format!("{}", e)))?;
 
     let mut steps = Vec::new();
     for p in c.processors {
-        let ri = parse_configuration_item(ItemType::Processor, &p.extra)?;
-        let proc = ((ri.creator)(&ri.config))?;
+        let ri = parse_configuration_item(ItemType::Processor, &p.extra).await?;
+        let proc = ((ri.creator)(ri.config.clone())).await?;
         if let ExecutionType::Processor(rp) = proc {
             steps.push(rp);
         };

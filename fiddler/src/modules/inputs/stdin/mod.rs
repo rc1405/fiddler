@@ -6,6 +6,7 @@ use crate::{new_callback_chan, CallbackChan};
 use crate::{Closer, Error, Input};
 use async_std::io;
 use async_trait::async_trait;
+use fiddler_macros::fiddler_registration_func;
 use serde_yaml::Value;
 
 pub struct StdIn {}
@@ -42,7 +43,8 @@ impl Input for StdIn {
 
 impl Closer for StdIn {}
 
-fn create_stdin(_conf: &Value) -> Result<ExecutionType, Error> {
+#[fiddler_registration_func]
+fn create_stdin(_conf: Value) -> Result<ExecutionType, Error> {
     Ok(ExecutionType::Input(Box::new(StdIn {})))
 }
 

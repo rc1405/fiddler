@@ -241,6 +241,7 @@ Apache License, Version 2.0, without any additional terms or conditions.
 Add thread limit on output
 Add Metrics
 Add timestamp to event
+Add timeout to runtime.
 
 # Future Items
 Github Pages

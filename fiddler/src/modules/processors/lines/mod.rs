@@ -5,6 +5,7 @@ use crate::Message;
 use crate::MessageBatch;
 use crate::{Closer, Error, Processor};
 use async_trait::async_trait;
+use fiddler_macros::fiddler_registration_func;
 use serde_yaml::Value;
 
 #[derive(Clone)]
@@ -28,7 +29,8 @@ impl Processor for Lines {
 
 impl Closer for Lines {}
 
-fn create_lines(_conf: &Value) -> Result<ExecutionType, Error> {
+#[fiddler_registration_func]
+fn create_lines(_conf: Value) -> Result<ExecutionType, Error> {
     Ok(ExecutionType::Processor(Box::new(Lines {})))
 }
 
