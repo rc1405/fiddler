@@ -38,7 +38,6 @@ jobs:
   build-release:
     name: build-release
     needs: release-plz-release
-    if: needs.release-plz-release.outputs.released_version[0] != null
     strategy:
       fail-fast: false
       matrix:
@@ -88,6 +87,7 @@ jobs:
         fi
     - name: Upload release archive
       uses: actions/upload-release-asset@v1.0.2
+      if: needs.release-plz-release.outputs.upload_url != null
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       with:
