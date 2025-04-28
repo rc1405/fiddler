@@ -1,7 +1,15 @@
 {
     "plugins": ["cargo-workspace"],
     "packages": {
-      ".": {
+      "fiddler": {
+        "release-type": "rust",
+        "include-component-in-tag": true
+      },
+      "fiddler-cli": {
+        "release-type": "rust",
+        "include-component-in-tag": true
+      },
+      "fiddler-macros": {
         "release-type": "rust",
         "include-component-in-tag": true
       }
