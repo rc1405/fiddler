@@ -87,6 +87,7 @@ jobs:
         fi
     - name: Upload release archive
       uses: actions/upload-release-asset@v1.0.2
+      if: needs.release-plz-release.outputs.upload_url != null
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       with:
