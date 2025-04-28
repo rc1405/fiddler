@@ -1,3 +1,5 @@
 {
-  ".": "0.0.0"
+  "fiddler": "1.1.0",
+  "fiddler-cli": "1.1.0",
+  "fiddler-macros": "1.0.0"
 }
