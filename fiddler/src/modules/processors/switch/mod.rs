@@ -5,6 +5,7 @@ use crate::Message;
 use crate::MessageBatch;
 use crate::{Closer, Error, Processor};
 use async_trait::async_trait;
+use fiddler_macros::fiddler_registration_func;
 use serde_yaml::Value;
 mod check;
 
@@ -38,12 +39,13 @@ impl Closer for Switch {
     }
 }
 
-fn create_switch(conf: &Value) -> Result<ExecutionType, Error> {
+#[fiddler_registration_func]
+fn create_switch(conf: Value) -> Result<ExecutionType, Error> {
     let c: Vec<Item> = serde_yaml::from_value(conf.clone())?;
     let mut steps = Vec::new();
     for p in c {
-        let ri = parse_configuration_item(ItemType::Processor, &p.extra)?;
-        let proc = ((ri.creator)(&ri.config))?;
+        let ri = parse_configuration_item(ItemType::Processor, &p.extra).await?;
+        let proc = ((ri.creator)(ri.config)).await?;
         if let ExecutionType::Processor(rp) = proc {
             steps.push(rp);
         };

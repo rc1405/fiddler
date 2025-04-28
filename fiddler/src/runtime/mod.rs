@@ -10,7 +10,6 @@ use tracing::{debug, error, info, trace};
 
 use std::collections::HashMap;
 use std::str::FromStr;
-use std::sync::Arc;
 use std::sync::Once;
 use tokio::time::{sleep, Duration};
 use uuid::Uuid;
@@ -22,9 +21,9 @@ use crate::config::parse_configuration_item;
 use crate::config::ExecutionType;
 use crate::config::{Config, ItemType, ParsedConfig, ParsedRegisteredItem};
 
-use crate::modules::inputs;
 use crate::modules::outputs;
 use crate::modules::processors;
+use crate::modules::register_plugins;
 use crate::Status;
 
 static REGISTER: Once = Once::new();
@@ -34,6 +33,7 @@ pub struct Runtime {
     config: ParsedConfig,
     state_tx: Sender<InternalMessageState>,
     state_rx: Receiver<InternalMessageState>,
+    timeout: Option<Duration>,
 }
 
 #[derive(Clone, Serialize, Deserialize, Default)]
@@ -84,10 +84,9 @@ pub(crate) struct InternalMessage {
     pub status: MessageStatus,
 }
 
-#[derive(Clone)]
 struct MessageHandle {
     message_id: String,
-    closure: Arc<CallbackChan>,
+    closure: CallbackChan,
 }
 
 impl Runtime {
@@ -103,21 +102,19 @@ impl Runtime {
     ///    noop: {}
     ///output:
     ///  stdout: {}"#;
-    /// let env = Runtime::from_config(conf_str).unwrap();
+    /// # tokio_test::block_on(async {
+    /// let env = Runtime::from_config(conf_str).await.unwrap();
+    /// # })
     /// ```
-    pub fn from_config(config: &str) -> Result<Self, Error> {
+    pub async fn from_config(config: &str) -> Result<Self, Error> {
         REGISTER.call_once(|| {
             #[allow(clippy::unwrap_used)]
-            inputs::register_plugins().unwrap();
-            #[allow(clippy::unwrap_used)]
-            outputs::register_plugins().unwrap();
-            #[allow(clippy::unwrap_used)]
-            processors::register_plugins().unwrap();
+            register_plugins().unwrap();
         });
         trace!("plugins registered");
 
         let conf: Config = Config::from_str(config)?;
-        let parsed_conf = conf.validate()?;
+        let parsed_conf = conf.validate().await?;
 
         let (state_tx, state_rx) = bounded(0);
 
@@ -126,6 +123,7 @@ impl Runtime {
             config: parsed_conf,
             state_rx,
             state_tx,
+            timeout: None,
         })
     }
 
@@ -139,8 +137,10 @@ impl Runtime {
     /// #    noop: {}
     /// # output:
     /// #   stdout: {}"#;
-    /// # let mut env = Runtime::from_config(conf_str).unwrap();
+    /// # tokio_test::block_on(async {
+    /// # let mut env = Runtime::from_config(conf_str).await.unwrap();
     /// env.set_label(Some("MyPipeline".into())).unwrap();
+    /// # });
     /// ```
     /// or to remove a given label:
     /// ```
@@ -152,8 +152,10 @@ impl Runtime {
     /// #    noop: {}
     /// # output:
     /// #   stdout: {}"#;
-    /// # let mut env = Runtime::from_config(conf_str).unwrap();
+    /// # tokio_test::block_on(async {
+    /// # let mut env = Runtime::from_config(conf_str).await.unwrap();
     /// env.set_label(None).unwrap();
+    /// # });
     /// ```
     pub fn set_label(&mut self, label: Option<String>) -> Result<(), Error> {
         self.config.label = label;
@@ -170,9 +172,11 @@ impl Runtime {
     /// #    noop: {}
     /// # output:
     /// #   stdout: {}"#;
-    /// # let mut env = Runtime::from_config(conf_str).unwrap();
+    /// # tokio_test::block_on(async {
+    /// # let mut env = Runtime::from_config(conf_str).await.unwrap();
     /// # env.set_label(Some("MyPipeline".into())).unwrap();
     /// assert_eq!(env.get_label().unwrap(), "MyPipeline".to_string());
+    /// # });
     /// ```
     pub fn get_label(&self) -> Option<String> {
         self.config.label.clone()
@@ -190,20 +194,19 @@ impl Runtime {
     /// #    noop: {}
     /// # output:
     /// #   stdout: {}"#;
-    /// # let mut env = Runtime::from_config(conf_str).unwrap();
     /// # tokio_test::block_on(async {
-    ///
+    /// # let mut env = Runtime::from_config(conf_str).await.unwrap();
     /// use serde_yaml::Value;
     /// let conf_str = r#"file:
     ///    filename: tests/data/input.txt
     ///    codec: ToEnd"#;
     /// let parsed_input: HashMap<String, Value> = serde_yaml::from_str(conf_str).unwrap();
     ///
-    /// env.set_input(&parsed_input).unwrap()
+    /// env.set_input(&parsed_input).await.unwrap()
     /// # })
     /// ```
-    pub fn set_input(&mut self, input: &HashMap<String, Value>) -> Result<(), Error> {
-        let parsed_item = parse_configuration_item(ItemType::Input, input)?;
+    pub async fn set_input(&mut self, input: &HashMap<String, Value>) -> Result<(), Error> {
+        let parsed_item = parse_configuration_item(ItemType::Input, input).await?;
         self.config.input = parsed_item;
         Ok(())
     }
@@ -220,21 +223,23 @@ impl Runtime {
     /// #    noop: {}
     /// # output:
     /// #   stdout: {}"#;
-    /// # let mut env = Runtime::from_config(conf_str).unwrap();
+    /// # tokio_test::block_on(async {
+    /// # let mut env = Runtime::from_config(conf_str).await.unwrap();
     ///
     /// use serde_yaml::Value;
     /// let conf_str = r#"stdout: {}"#;
     /// let parsed_output: HashMap<String, Value> = serde_yaml::from_str(conf_str).unwrap();
     ///
-    /// env.set_output(&parsed_output).unwrap()
+    /// env.set_output(&parsed_output).await.unwrap()
+    /// # });
     /// ```
-    pub fn set_output(&mut self, output: &HashMap<String, Value>) -> Result<(), Error> {
-        let parsed_item = parse_configuration_item(ItemType::Output, output)?;
+    pub async fn set_output(&mut self, output: &HashMap<String, Value>) -> Result<(), Error> {
+        let parsed_item = parse_configuration_item(ItemType::Output, output).await?;
         self.config.output = parsed_item;
         Ok(())
     }
 
-    /// The function replaces the existing output configuration with the provided output.
+    /// The function sets the number of instances of processors and outputs to create.
     /// ```
     /// # use fiddler::config::{ConfigSpec, ItemType, ExecutionType};
     /// # use std::collections::HashMap;
@@ -246,19 +251,38 @@ impl Runtime {
     /// #    noop: {}
     /// # output:
     /// #   stdout: {}"#;
-    /// # let mut env = Runtime::from_config(conf_str).unwrap();
-    ///
-    /// use serde_yaml::Value;
-    /// let conf_str = r#"stdout: {}"#;
-    /// let parsed_output: HashMap<String, Value> = serde_yaml::from_str(conf_str).unwrap();
-    ///
+    /// # tokio_test::block_on(async {
+    /// # let mut env = Runtime::from_config(conf_str).await.unwrap();
     /// env.set_threads(1).unwrap()
+    /// # });
     /// ```
     pub fn set_threads(&mut self, count: usize) -> Result<(), Error> {
         self.config.num_threads = count;
         Ok(())
     }
 
+    /// The function sets the timeout, or duration to run the pipeline
+    /// ```
+    /// # use fiddler::config::{ConfigSpec, ItemType, ExecutionType};
+    /// # use std::collections::HashMap;
+    /// # use std::time::Duration;
+    /// # use fiddler::Runtime;
+    /// # let conf_str = r#"input:
+    /// #   stdin: {}
+    /// # processors:
+    /// #  - label: my_cool_mapping
+    /// #    noop: {}
+    /// # output:
+    /// #   stdout: {}"#;
+    /// # tokio_test::block_on(async {
+    /// # let mut env = Runtime::from_config(conf_str).await.unwrap();
+    /// env.set_timeout(Some(Duration::from_secs(60)))
+    /// # });
+    /// ```
+    pub fn set_timeout(&mut self, timeout: Option<Duration>) -> Result<(), Error> {
+        self.timeout = timeout;
+        Ok(())
+    }
     /// The function runs the existing data pipeline until receiving an Error::EndOfInput
     /// ```no_run
     /// # use fiddler::config::{ConfigSpec, ItemType, ExecutionType};
@@ -271,8 +295,8 @@ impl Runtime {
     /// #    noop: {}
     /// # output:
     /// #   stdout: {}"#;
-    /// # let mut env = Runtime::from_config(conf_str).unwrap();
     /// # tokio_test::block_on(async {
+    /// # let mut env = Runtime::from_config(conf_str).await.unwrap();
     /// env.run().await.unwrap();
     /// # })
     /// ```
@@ -281,6 +305,7 @@ impl Runtime {
 
         let (msg_tx, msg_rx) = bounded(0);
         let msg_state = message_handler(msg_rx, self.state_rx.clone(), self.config.num_threads);
+
         let _ = handles.spawn_blocking(move || {
             let runtime = tokio::runtime::Builder::new_multi_thread()
                 .enable_all()
@@ -298,7 +323,27 @@ impl Runtime {
 
         let processors = self.pipeline(output, &mut handles).await?;
 
-        let input = input(self.config.input.clone(), processors, msg_tx);
+        let (ks_send, ks_recv) = bounded(0);
+
+        let input = input(self.config.input.clone(), processors, msg_tx, ks_recv);
+
+        if let Some(d) = self.timeout {
+            let _ = handles.spawn_blocking(move || {
+                let runtime = tokio::runtime::Builder::new_multi_thread()
+                    .enable_all()
+                    .thread_name("timeout")
+                    .worker_threads(1)
+                    // .on_thread_start(move || set_current_thread_priority_low())
+                    .build()
+                    .expect("Creating tokio runtime");
+
+                runtime.block_on(sleep(d));
+                println!("sending kill signal");
+                #[allow(clippy::unwrap_used)]
+                ks_send.send(()).unwrap();
+                Ok(())
+            });
+        }
 
         let _ = handles.spawn_blocking(move || {
             let runtime = tokio::runtime::Builder::new_multi_thread()
@@ -374,7 +419,7 @@ impl Runtime {
         let (tx, rx) = bounded(0);
 
         for i in 0..self.config.num_threads {
-            let item = (output.creator)(&output.config)?;
+            let item = (output.creator)(output.config.clone()).await?;
             match item {
                 ExecutionType::Output(o) => {
                     // handles.spawn(outputs::run_output(rx.clone(), self.state_tx.clone(), o));
@@ -440,7 +485,7 @@ async fn message_handler(
             biased;
             Ok(msg) = new_msg.recv_async() => {
                 trace!(message_id = msg.message_id, "Received new message");
-                let closure = Arc::into_inner(msg.closure).unwrap();
+                let closure = msg.closure;
                 let i = handles.insert(msg.message_id.clone(), State {
                     instance_count: 1,
                     processed_count: 0,
@@ -580,10 +625,11 @@ async fn input(
     input: ParsedRegisteredItem,
     output: Sender<InternalMessage>,
     state_handle: Sender<MessageHandle>,
+    kill_switch: Receiver<()>,
 ) -> Result<(), Error> {
     trace!("started input");
 
-    let item = (input.creator)(&input.config)?;
+    let item = (input.creator)(input.config.clone()).await?;
 
     let mut i = match item {
         ExecutionType::Input(i) => i,
@@ -596,48 +642,57 @@ async fn input(
     debug!("input connected");
 
     loop {
-        match i.read().await {
-            Ok((msg, closure)) => {
-                let message_id: String = Uuid::new_v4().into();
+        tokio::select! {
+            biased;
+            Ok(_) = kill_switch.recv_async() => {
+                i.close().await?;
+                debug!("input closed by timeout");
+                return Ok(());
+            },
+            m = i.read() => {
+                match m {
+                    Ok((msg, closure)) => {
+                        let message_id: String = Uuid::new_v4().into();
+                        let internal_msg = InternalMessage {
+                            message: msg,
+                            message_id: message_id.clone(),
+                            status: MessageStatus::New,
+                        };
 
-                // trace!("message received from input");
-                let internal_msg = InternalMessage {
-                    message: msg,
-                    message_id: message_id.clone(),
-                    status: MessageStatus::New,
-                };
+                        state_handle
+                            .send_async(MessageHandle {
+                                message_id,
+                                closure,
+                            })
+                            .await
+                            .map_err(|e| Error::UnableToSendToChannel(format!("{}", e)))?;
 
-                state_handle
-                    .send_async(MessageHandle {
-                        message_id,
-                        closure: Arc::new(closure),
-                    })
-                    .await
-                    .unwrap();
-
-                output
-                    .send_async(internal_msg)
-                    .await
-                    .map_err(|e| Error::UnableToSendToChannel(format!("{}", e)))?;
-            }
-            Err(e) => match e {
-                Error::EndOfInput => {
-                    i.close().await?;
-                    debug!("input closed");
-                    return Ok(());
-                }
-                Error::NoInputToReturn => {
-                    sleep(Duration::from_millis(1500)).await;
-                    continue;
-                }
-                _ => {
-                    i.close().await?;
-                    debug!("input closed");
-                    error!(error = format!("{}", e), "read error from input");
-                    return Err(Error::ExecutionError(format!(
-                        "Received error from read: {}",
-                        e
-                    )));
+                        output
+                            .send_async(internal_msg)
+                            .await
+                            .map_err(|e| Error::UnableToSendToChannel(format!("{}", e)))?;
+                    }
+                    Err(e) => match e {
+                        Error::EndOfInput => {
+                            i.close().await?;
+                            debug!("input closed");
+                            return Ok(());
+                        }
+                        Error::NoInputToReturn => {
+                            sleep(Duration::from_millis(1500)).await;
+                            continue;
+                        }
+                        _ => {
+                            println!("failure");
+                            i.close().await?;
+                            debug!("input closed");
+                            error!(error = format!("{}", e), "read error from input");
+                            return Err(Error::ExecutionError(format!(
+                                "Received error from read: {}",
+                                e
+                            )));
+                        }
+                    },
                 }
             },
         }

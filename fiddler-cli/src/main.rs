@@ -66,7 +66,7 @@ async fn main() -> Result<(), Error> {
                     }
                 };
 
-                if let Err(e) = Runtime::from_config(&conf) {
+                if let Err(e) = Runtime::from_config(&conf).await {
                     failures.push(format!("failed {}: {}", c, e));
                     continue;
                 };
@@ -91,7 +91,7 @@ async fn main() -> Result<(), Error> {
                 let conf = fs::read_to_string(&c).map_err(|e| {
                     Error::ConfigurationItemNotFound(format!("cannot read {}: {}", c, e))
                 })?;
-                let env = Runtime::from_config(&conf)?;
+                let env = Runtime::from_config(&conf).await?;
                 environments.push(env);
             }
 

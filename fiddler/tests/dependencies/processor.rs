@@ -5,6 +5,7 @@ use fiddler::config::{ConfigSpec, ExecutionType};
 use fiddler::Message;
 use fiddler::MessageBatch;
 use fiddler::{Closer, Error, Processor};
+use fiddler_macros::fiddler_registration_func;
 use serde_yaml::Value;
 
 #[derive(Clone)]
@@ -24,7 +25,8 @@ impl Processor for Echo {
 #[async_trait]
 impl Closer for Echo {}
 
-fn create_echo(_conf: &Value) -> Result<ExecutionType, Error> {
+#[fiddler_registration_func]
+fn create_echo(_conf: Value) -> Result<ExecutionType, Error> {
     Ok(ExecutionType::Processor(Box::new(Echo {})))
 }
 

@@ -5,6 +5,7 @@ use crate::Message;
 use crate::MessageBatch;
 use crate::{Closer, Error, Processor};
 use async_trait::async_trait;
+use fiddler_macros::fiddler_registration_func;
 use pyo3::prelude::*;
 use pyo3::types::{PyBytes, PyDict, PyString};
 use serde::{Deserialize, Serialize};
@@ -76,7 +77,8 @@ impl Processor for PyProc {
 
 impl Closer for PyProc {}
 
-fn create_python(conf: &Value) -> Result<ExecutionType, Error> {
+#[fiddler_registration_func]
+fn create_python(conf: Value) -> Result<ExecutionType, Error> {
     let c: PyProcSpec = serde_yaml::from_value(conf.clone())?;
     let mut p = PyProc {
         code: c.code,

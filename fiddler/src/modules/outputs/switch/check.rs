@@ -4,6 +4,7 @@ use crate::config::{ConfigSpec, ExecutionType};
 use crate::Message;
 use crate::{Closer, Error, Output};
 use async_trait::async_trait;
+use fiddler_macros::fiddler_registration_func;
 use serde::{Deserialize, Serialize};
 use serde_yaml::Value;
 
@@ -58,14 +59,15 @@ impl Closer for Check {
     }
 }
 
-fn create_check(conf: &Value) -> Result<ExecutionType, Error> {
+#[fiddler_registration_func]
+fn create_check(conf: Value) -> Result<ExecutionType, Error> {
     let c: CheckConfig = serde_yaml::from_value(conf.clone())?;
     let _ = jmespath::compile(&c.condition)
         .map_err(|e| Error::ConfigFailedValidation(format!("{}", e)))?;
 
-    let ri = parse_configuration_item(ItemType::Output, &c.output.extra)?;
+    let ri = parse_configuration_item(ItemType::Output, &c.output.extra).await?;
 
-    let step = ((ri.creator)(&ri.config))?;
+    let step = ((ri.creator)(ri.config.clone())).await?;
     let out = match step {
         ExecutionType::Output(o) => o,
         _ => {
