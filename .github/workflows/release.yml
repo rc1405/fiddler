@@ -8,7 +8,7 @@ on:
       - main
 env:
   BIN_NAME: fiddler-cli
-  
+
 jobs:
   release-plz-release:
     name: release
@@ -38,6 +38,7 @@ jobs:
   build-release:
     name: build-release
     needs: release-plz-release
+    if: needs.release-plz-release.outputs.released_version[0] != null
     strategy:
       fail-fast: false
       matrix:
