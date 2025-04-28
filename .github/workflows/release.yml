@@ -6,6 +6,9 @@ on:
   push:
     branches:
       - main
+env:
+  BIN_NAME: fiddler-cli
+  
 jobs:
   release-plz-release:
     name: release
@@ -64,7 +67,7 @@ jobs:
         toolchain: ${{ matrix.rust }}
         targets: ${{ matrix.target }}
     - name: Build release binary
-      run: cargo build --target ${{ matrix.target }} --verbose --release --bin fiddler
+      run: cargo build --target ${{ matrix.target }} --verbose --release --bin fiddler-cli
     - name: Build archive
       shell: bash
       run: |
