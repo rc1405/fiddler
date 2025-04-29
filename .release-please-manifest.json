@@ -1,6 +1,0 @@
-{
-  "$schema": "https://raw.githubusercontent.com/googleapis/release-please/main/schemas/manifest.json",
-  "fiddler": "1.1.0",
-  "fiddler-cli": "1.1.0",
-  "fiddler-macros": "1.0.0"
-}

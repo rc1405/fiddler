@@ -16,7 +16,6 @@ jobs:
     environment: prd
     permissions:
       contents: write
-      pull-requests: write
     outputs:
       upload_url: ${{ steps.release-plz.fiddler-cli--upload_url}}
       released_version: ${{ steps.release-plz.fiddler-cli--version}}
@@ -29,9 +28,9 @@ jobs:
         uses: dtolnay/rust-toolchain@stable
       - name: Run release-plz
         id: release-plz
-        uses: googleapis/release-please-action@v3
+        uses: release-plz/action@v0.5
         with:
-          release-type: rust
+          command: release
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_TOKEN }}
@@ -48,10 +47,10 @@ jobs:
           os: ubuntu-latest
           rust: stable
           target: x86_64-unknown-linux-gnu
-        # - build: macos
-        #   os: macos-latest
-        #   rust: stable
-        #   target: x86_64-apple-darwin
+        - build: macos
+          os: macos-latest
+          rust: stable
+          target: x86_64-apple-darwin
         - build: win-msvc
           os: windows-2019
           rust: stable
@@ -96,3 +95,27 @@ jobs:
         asset_path: ${{ env.ASSET }}
         asset_name: ${{ env.ASSET }}
         asset_content_type: application/octet-stream
+
+  release-plz-pr:
+    name: pr
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+    concurrency:
+      group: release-plz-${{ github.ref }}
+      cancel-in-progress: false
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+      - name: Run release-plz
+        uses: release-plz/action@v0.5
+        with:
+          command: release-pr
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_TOKEN }}
