@@ -29,9 +29,9 @@ jobs:
         uses: dtolnay/rust-toolchain@stable
       - name: Run release-plz
         id: release-plz
-        uses: googleapis/release-please-action@v4
+        uses: googleapis/release-please-action@v3
         with:
-          release-type: manifest
+          release-type: rust
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_TOKEN }}
