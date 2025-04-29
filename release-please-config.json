@@ -3,27 +3,14 @@
     "cargo-workspace"
   ],
   "packages": {
-    "fiddler": {
-      "release-type": "rust",
-      "include-component-in-tag": true
-    },
-    "fiddler-cli": {
-      "release-type": "rust",
-      "include-component-in-tag": true
-    },
-    "fiddler-macros": {
-      "release-type": "rust",
-      "include-component-in-tag": true
-    },
-    ".": {
-      "changelog-path": "CHANGELOG.md",
-      "release-type": "rust",
-      "bump-minor-pre-major": false,
-      "bump-patch-for-minor-pre-major": false,
-      "draft": false,
-      "prerelease": false
-    }
+    "fiddler": {},
+    "fiddler-cli": {},
+    "fiddler-macros": {}
   },
+  "release-type": "rust",
   "separate-pull-requests": false,
+  "include-component-in-tag": true,
+  "include-v-in-tag": true,
+  "tag-separator": "-",
   "$schema": "https://raw.githubusercontent.com/googleapis/release-please/main/schemas/config.json"
 }
