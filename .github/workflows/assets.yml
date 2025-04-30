@@ -4,8 +4,9 @@ permissions:
   contents: write
 
 on:
-  release:
-    types: [published]
+  push:
+    tags:
+      - fiddler-cli-v[0-9]+.*
 
 env:
   CARGO_INCREMENTAL: 0

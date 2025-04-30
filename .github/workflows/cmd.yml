@@ -5,11 +5,13 @@ on:
     branches: [main]
     paths:
       - 'fiddler-cli/**'
+      - 'fiddler-macros/**'
       - 'fiddler/**'
       - 'Cargo.toml'
   pull_request:
     paths:
       - 'fiddler-cli/**'
+      - 'fiddler-macros/**'
       - 'fiddler/**'
       - 'Cargo.toml'
 concurrency:
