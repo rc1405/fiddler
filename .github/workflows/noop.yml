@@ -5,6 +5,7 @@ on:
   pull_request:
     paths-ignore:
       - 'fiddler-cli/**'
+      - 'fiddler-macros/**'
       - 'fiddler/**'
       - 'Cargo.toml'
 jobs:
