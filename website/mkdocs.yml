@@ -1,0 +1,20 @@
+site_name: Fiddler
+nav:
+  - Home: index.md
+  - Getting Started: getting_started.md
+  - Configuration: configuration.md
+theme: 
+  name: material
+  favicon: img/favicon.ico
+  logo: img/favicon.ico
+  # features:
+  #   - navigation.instant
+  palette:
+    scheme: slate
+    primary: light green
+
+plugins:
+  - search
+  - mike
+hooks:
+  - hooks.py
