@@ -1,0 +1,19 @@
+site_name: Fiddler
+site_url: https://rc1405.github.io/fiddler
+nav:
+  - Home: index.md
+  - Getting Started: getting_started.md
+  - Configuration: configuration.md
+theme: 
+  name: material
+  favicon: img/favicon.ico
+  logo: img/favicon.ico
+  palette:
+    scheme: slate
+    primary: light green
+
+plugins:
+  - search
+  - mike
+hooks:
+  - hooks.py

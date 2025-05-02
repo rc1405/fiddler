@@ -1,0 +1,34 @@
+name: upload assets
+
+permissions:
+  contents: write
+  pages: write
+
+on:
+  push:
+    tags:
+      - fiddler-cli-v[0-9]+.*
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  generate_website:
+    name: generate website
+    if: github.repository_owner == 'rc1405' && startsWith(github.event.release.name, 'fiddler-cli-v')
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+          cache: 'pip' # caching pip dependencies
+      - run: pip install -r requirements.txt
+        working-directory: website/
+      - run: mike deploy $(echo $FIDDLER_VERSION|sed 's/fiddler-cli-v//g')
+        env:
+            FIDDLER_VERSION: ${{ github.event.release.name }}
+        working-directory: website/

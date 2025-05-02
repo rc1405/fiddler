@@ -14,11 +14,23 @@ jobs:
     runs-on: ubuntu-latest
     name: ubuntu / nightly
     steps:
+      - name: ubuntu / nightly
+        run: echo pass
+  fmt:
+    runs-on: ubuntu-latest
+    name: stable / fmt
+    steps:
       - name: stable / fmt
         run: echo pass
+  features:
+    runs-on: ubuntu-latest
+    name: ubuntu / stable / features
+    steps:
       - name: ubuntu / stable / features
         run: echo pass
-      - name: macos-13 / stable
-        run: echo pass
+  clippy:
+    runs-on: ubuntu-latest
+    name: stable / clippy
+    steps:
       - name: stable / clippy
         run: echo pass
