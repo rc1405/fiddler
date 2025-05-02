@@ -50,7 +50,7 @@ Properties:
 Required: `false`
 
 ## Credentials
-Required IAM permissions to operate:
-* sqs:ReceiveMessage
-* sqs:DeleteMessage
-* sqs:ChangeMessageVisibility
+Required IAM permissions to operate:  
+- sqs:ReceiveMessage  
+- sqs:DeleteMessage  
+- sqs:ChangeMessageVisibility  

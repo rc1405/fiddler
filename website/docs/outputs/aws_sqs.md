@@ -46,5 +46,5 @@ Properties:
 Required: `false`
 
 ## Credentials
-Required IAM permissions to operate:
-* sqs:SendMessage
+Required IAM permissions to operate:  
+- sqs:SendMessage
