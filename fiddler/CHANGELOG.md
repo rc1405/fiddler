@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.2.1](https://github.com/rc1405/fiddler/compare/fiddler-v1.2.0...fiddler-v1.2.1) - 2025-05-03
+
+### Fixed
+
+- fixed high cpu usage when idle ([#43](https://github.com/rc1405/fiddler/pull/43))
+
 ## [1.2.0](https://github.com/rc1405/fiddler/compare/fiddler-v1.1.1...fiddler-v1.2.0) - 2025-05-03
 
 ### Added
