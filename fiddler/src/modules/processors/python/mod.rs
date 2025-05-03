@@ -98,7 +98,7 @@ properties:
   code: 
     type: string
   string:
-    type: bool
+    type: boolean
 required:
   - code";
     let conf_spec = ConfigSpec::from_schema(config)?;
