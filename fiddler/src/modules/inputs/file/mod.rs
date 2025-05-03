@@ -13,6 +13,7 @@ use serde_yaml::Value;
 use std::fs::{self, read_to_string, File};
 use std::io::{prelude::*, BufReader, SeekFrom};
 use tracing::{debug, error, trace};
+use tokio::time::{Duration, sleep};
 
 #[derive(Deserialize, Default)]
 enum CodecType {
@@ -160,10 +161,7 @@ async fn read_file(
                 let s = sync.clone();
 
                 if len == 0 {
-                    sender
-                        .send_async(Err(Error::NoInputToReturn))
-                        .await
-                        .map_err(|e| Error::UnableToSendToChannel(format!("{}", e)))?;
+                    sleep(Duration::from_secs(2)).await;
                     continue;
                 };
 

@@ -11,6 +11,9 @@ theme:
   palette:
     scheme: slate
     primary: light green
+extra:
+  version:
+    provider: mike
 
 plugins:
   - search

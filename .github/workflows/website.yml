@@ -32,13 +32,17 @@ jobs:
           cache: 'pip' # caching pip dependencies
       - run: pip install -r requirements.txt
         working-directory: website/
-      - run: mike deploy ${{ inputs.version }}
+      - run: |
+          mike deploy -p ${{ inputs.version }}
+          mike alias ${{ inputs.version }} latest -p -u
         if: ${{ github.event_name == 'workflow_dispatch' }}
         working-directory: website/
         env:
           GIT_COMMITTER_NAME: ci-bot 
           GIT_COMMITTER_EMAIL: ci-bot@fiddler-rs.dev 
-      - run: mike deploy $(echo $FIDDLER_VERSION|sed 's/fiddler-cli-v//g')
+      - run: |
+          mike deploy -p $(echo $FIDDLER_VERSION|sed 's/fiddler-cli-v//g')
+          mike alias $(echo $FIDDLER_VERSION|sed 's/fiddler-cli-v//g') latest -p -u
         if: ${{ github.event_name != 'workflow_dispatch' }}
         env:
             FIDDLER_VERSION: ${{ github.event.release.name }}
