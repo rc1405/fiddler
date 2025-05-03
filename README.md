@@ -8,81 +8,80 @@
 [doc-url]: https://docs.rs/fiddler/latest/fiddler
 
 <br>
-Fiddler is a stream processor built in rust that uses a yaml based configuration file syntax to map together inputs, processors, and outputs. 
+Fiddler is a stream processor built in rust that uses a yaml based configuration file syntax to map together inputs, processors, and outputs. Fiddler takes a module approach to inputs, processors, and outputs allowing users to take advantage of incremental releases of new modules or develop their own to run within the fiddler runtime.  Whether you are looking to utilize fiddler for it's processing capabilities through the CLI or integrate directly in your own applications, head over to our [Documentation](https://rc1405.github.io/fiddler/latest) to get started.
 
-<br>
-<br>
-Such as:
-<br>
-<br>
+# Getting Started
 
-```
-input:
-    stdin: {}
-pipeline:
-  max_in_flight: 10
-  processors:
-    - python: 
-        string: true
-        code: |
-            import json
-            msg = json.loads(root)
-            msg['Python'] = 'rocks'
-            root = json.dumps(msg)
-output:
-  switch:
-    - check:
-        condition: '\"Hello World\" > `5`'
-        output:
-          validate: 
-            expected: []
-    - stdout: {}
-```
+## Running as a CLI
 
-The main inline message manipulation is provided by Python, and requires the Python shared library.
+### Installation
 
-To install the Python shared library on Ubuntu:
-`sudo apt install python3-dev`
-To install the Python shared library on RPM based distributions (e.g. Fedora, Red Hat, SuSE), install the `python3-devel` package.
-
-Any third party packages utilized in Python will have to be installed on the OS running fiddler.  
-
-The message format in and out is simple, the source of the event is stored in the local variable named `root`; and the output taken from executing the code is expected to be named `root`.  By default `root` is bytes of the message, unless the argument `string: true` is proved, in which case `root` is converted to a string.
-<br>
-<br>
-Conditional execution of steps for processing, or selection of outputs can be obtained through the use of `check` and `switch` plugins.  For processing, it looks like:
-<br>
-```
-- switch:
-    - check: 
-        condition: '\"Hello World\" <= `5`'
-        processors:
-            - python: 
-                string: true
-                code: |
-                    import json
-                    new_string = f\"python: {root}\"
-                    root = new_string
-            - echo: {}
-    - label: my_cool_mapping
-        echo: {}
-```
-<br>
-The condition format utilized [jmespath](https://jmespath.org/specification.html) syntax for evaluation.  As such, this can only be utilized with JSON documents.
-
-# Install
 1. Grab a release for your OS [here](https://github.com/rc1405/fiddler/releases)
 1. Install with Cargo `cargo install fiddler`
+1. Build with [Cargo](https://doc.rust-lang.org/cargo/getting-started/installation.html) `cargo build --release --features all`
 
-# Run
+### Usage
+
+```
+Usage: fiddler <COMMAND>
+
+Commands:
+  lint  Data Stream processor CLI written in rust
+  run   Data Stream processor CLI written in rust
+  test  Data Stream processor CLI written in rust
+  help  Print this message or the help of the given subcommand(s)
+
+Options:
+  -h, --help  Print help
+```
+
+#### Run
+```
+Data Stream processor CLI written in rust
+
+Usage: fiddler run [OPTIONS]
+
+Options:
+  -c, --config <CONFIG>
+  -l, --log-level <LOG_LEVEL>  [default: none] [possible values: info, debug, trace, error, none]
+  -h, --help                   Print help
+  -V, --version                Print version
+```
+
 1. `fiddler run -c <path_to_config_file> [ -c ... ]`
 
-# Lint
+#### Lint
+```
+Data Stream processor CLI written in rust
+
+Usage: fiddler lint [OPTIONS]
+
+Options:
+  -c, --config <CONFIG>
+  -h, --help             Print help
+  -V, --version          Print version
+```
+
 1. `fiddler lint -c <path_to_config_file> [ -c ... ]`
 
-# Test
-Tests are expected in the format of `<filename>_test.yaml`.  I.e. if you have a configuration `input.yaml`.  The expected filename is `input_test.yaml`.  The test file syntax is as follows:
+#### Test
 ```
+Data Stream processor CLI written in rust
+
+Usage: fiddler test [OPTIONS]
+
+Options:
+  -c, --config <CONFIG>
+  -l, --log-level <LOG_LEVEL>  [default: none] [possible values: info, debug, trace, error, none]
+  -h, --help                   Print help
+  -V, --version                Print version
+```
+
+Tests within fiddler are designed to test the processing pipeline configuration.  The expected naming syntax is `<filename>_test.yaml`.  I.e. if you have a configuration `input.yaml`.  The expected filename is `input_test.yaml`.  
+
+The test file syntax is as follows:  
+
+```yml
 - name: name_of_test
   inputs:
    - list of expected input strings
@@ -90,129 +89,45 @@ Tests are expected in the format of `<filename>_test.yaml`.  I.e. if you have a 
    - list of expected output strings
 ```
 
-Tests can be run as `fiddler-cli test -c <path_to_configuration>.yaml`
+For example:  
+```yml
+- name: input_test
+  inputs:
+    - Hello World
+  expected_outputs: 
+    - Hello World
+```
 
-# Build
-Build with [Cargo](https://doc.rust-lang.org/cargo/getting-started/installation.html) `cargo build --release --features all`
+1. `fiddler-cli test -c <path_to_configuration>.yaml`
 
-# Plugins
-## Input
-### File
-```
-input:
-  file: 
-    filename: tests/data/input.txt
-    codec: ToEnd
-```
-* `filename`: `string`: path to file to be read
-* `codec`:  `string`: Possible Values: `ToEnd`: Read entire file in one message.  `Lines`: Read file line by line
+## Integration
 
-### Stdin
-```
-input:
-  stdin: {}
-```
-## Processors
-### Lines
-```
-processors:
-  - lines: {}
-```
-### NoOp
-```
-processors:
-  - noop: {}
-```
-### Python
-```
-processors:
-  - python: 
-      string: true
-      code: |
-          import json
-          msg = json.loads(root)
-          msg['Python'] = 'rocks'
-          root = json.dumps(msg)
-```
-* `string`: `bool`: whether or not the message contents are passed as a string or bytes (default)
-* `code`: `string`: python code to execute
-### Check
-```
-processors:
-  - check: 
-      condition: '\"Hello World\" <= `5`'
-      processors:
-        - python: 
-            string: true
-            code: |
-              import json
-              new_string = f\"python: {root}\"
-              root = new_string
-```
-* `condition`: `string`: jmespath expression to evaluate if processors are run
-* `processors`: `list`: list of processors to run if condition is met
-### Switch
-```
-processors:
-  - switch:
-      - check: 
-          condition: '\"Hello World\" <= `5`'
-          processors:
-            - python: 
-                string: true
-                code: |
-                  import json
-                  new_string = f\"python: {root}\"
-                  root = new_string
-            - echo: {}
-      - echo: {}
-```
-* `array`: array of processors to run, typically used with the `check` processor.  once a processor is successful, no other processors are ran
-## Output
-### StdOut
-```
-output:
-  stdout: {}
-```
-### Check
-```
-output:
-  check:
-    condition: '\"Hello World\" > `5`'
-    output:
-      stdout: {}
-```
-* `condition`: `string`: jmespath expression to evaluate if processors are run
-* `output`: `object`: output to use if check is true
-### Switch
-```
-output:
-  switch:
-    - check:
-        condition: '\"Hello World\" > `5`'
-        output:
-          validate: 
-            expected: []
-```
-* `array`: array of outputs, typically used with the `check` output.  
+### Building own CLI with Additional modules
 
-### Elasticsearch
-```
-output:
-  elasticsearch:
-    url: http://example.com:9200
-    username: user
-    password: password
-    cloud_id: some_cloud_id
-    index: example
-```
-* `url`: if not using elasticsearch cloud, specify the url of the es cluster. i.e. http://127.0.0.1:9200
-* `username`: username for authentication
-* `password`: password for authentication
-* `cloud_id`: if using elasticsearch cloud, specify the cloud_id
-* `index`: index to insert events into
+Creating your own fiddler-cli requires a binary crate with at least two dependencies, `fiddler_cmd` and `fiddler`.
 
-**Note:**  Variables can be collected from the environment, so when providing password, you may set it to `password: "{{ ElasticSearchPassword }}"` and ElasticSearchPassword will be pulled from the environment variables and provided to the configuration.
+> `cargo new my-cli --bin`  
+> `cargo add fiddler`  
+> `cargo add fiddler_cmd`  
+
+Next create your runtime, by default in `src/main.rs`
+```rust
+use fiddler_cmd::run;
+use fiddler::Error;
+use fiddler::config::{ConfigSpec, register_plugin};
+
+#[tokio::main]
+async fn main() -> Result<(), Error> {
+    // insert registration of custom modules here
+    register_plugin("mock".into(), ItemType::Input, conf_spec, create_mock_input)?;
+
+    // run the normal CLI
+    run().await
+}
+```
+
+### Integrating the runtme into your own application
+Head on over to [docs.rs](https://docs.rs/fiddler/latest/fiddler) to view the latest API reference for utilizing fiddler runtime.  
 
 # Contributing
 
@@ -231,20 +146,3 @@ come in many forms. You could:
 Note that unless you explicitly state otherwise, any contribution intentionally 
 submitted for inclusion in fiddler by you shall be licensed under the
 Apache License, Version 2.0, without any additional terms or conditions.
-
-# Known Issues
-* Cargo shows warnings on switch plugins when compiled on Windows that they are skipped when in fact they are not.
-* build.rs doesn't validate Python is present when compiled on Windows
-* Integration tests failing on windows GHA
-
-# TODO List NOW
-Add thread limit on output
-Add Metrics
-Add timestamp to event
-Add timeout to runtime.
-
-# Future Items
-Github Pages
-Add Batching Policy
-Multiple Inputs
-Metadata

@@ -52,8 +52,8 @@ struct RunArgs {
     log_level: LogLevel,
 }
 
-#[tokio::main]
-async fn main() -> Result<(), Error> {
+/// Runs the default arguments to the fiddler command
+pub async fn run() -> Result<(), Error> {
     match FiddlerCli::parse() {
         FiddlerCli::Lint(args) => {
             let mut failures: Vec<String> = Vec::new();

@@ -293,7 +293,8 @@ properties:
       - Default
       - None
 required:
-  - index";
+  - index
+  - url";
     let conf_spec = ConfigSpec::from_schema(config)?;
 
     register_plugin(

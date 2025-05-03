@@ -96,7 +96,11 @@ pub(super) fn register_python() -> Result<(), Error> {
     let config = "type: object
 properties:
   code: 
-    type: string";
+    type: string
+  string:
+    type: boolean
+required:
+  - code";
     let conf_spec = ConfigSpec::from_schema(config)?;
 
     register_plugin(
