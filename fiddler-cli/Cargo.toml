@@ -10,6 +10,14 @@ readme = "../README.md"
 [package.metadata]
 msrv = "1.74.1"
 
+[lib]
+name = "fiddler_cmd"
+path = "src/lib.rs"
+
+[[bin]]
+name = "fiddler-cli"
+path = "src/bin.rs"
+
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 

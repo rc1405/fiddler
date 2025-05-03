@@ -21,6 +21,8 @@ mod validate;
 pub use registration::register_plugin;
 pub(crate) use validate::parse_configuration_item;
 
+/// Callback provides the pinned async function that will create the module
+/// being supplied to the fiddler runtime
 pub type Callback = fn(Value) -> Pin<Box<dyn Future<Output = Result<ExecutionType, Error>> + Send>>;
 
 /// Plugin Configuration Type utilized for registration of fiddler modules

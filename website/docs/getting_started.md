@@ -89,4 +89,30 @@ For example:
 1. `fiddler-cli test -c <path_to_configuration>.yaml`
 
 ## Integration
-Head on over to [docs.rs](https://docs.rs/fiddler/latest/fiddler) to view the latest API reference for utilizing fiddler within your own applications.  
+
+### Building own CLI with Additional modules
+
+Creating your own fiddler-cli requires a binary crate with at least two dependencies, `fiddler_cmd` and `fiddler`.
+
+> `cargo new my-cli --bin`  
+> `cargo add fiddler`  
+> `cargo add fiddler_cmd`  
+
+Next create your runtime, by default in `src/main.rs`
+```rust
+use fiddler_cmd::run;
+use fiddler::Error;
+use fiddler::config::{ConfigSpec, register_plugin};
+
+#[tokio::main]
+async fn main() -> Result<(), Error> {
+    // insert registration of custom modules here
+    register_plugin("mock".into(), ItemType::Input, conf_spec, create_mock_input)?;
+
+    // run the normal CLI
+    run().await
+}
+```
+
+### Integrating the runtme into your own application
+Head on over to [docs.rs](https://docs.rs/fiddler/latest/fiddler) to view the latest API reference for utilizing fiddler runtime.  
