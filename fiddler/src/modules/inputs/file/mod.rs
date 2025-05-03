@@ -12,6 +12,7 @@ use serde::Deserialize;
 use serde_yaml::Value;
 use std::fs::{self, read_to_string, File};
 use std::io::{prelude::*, BufReader, SeekFrom};
+use tokio::time::{sleep, Duration};
 use tracing::{debug, error, trace};
 
 #[derive(Deserialize, Default)]
@@ -160,10 +161,7 @@ async fn read_file(
                 let s = sync.clone();
 
                 if len == 0 {
-                    sender
-                        .send_async(Err(Error::NoInputToReturn))
-                        .await
-                        .map_err(|e| Error::UnableToSendToChannel(format!("{}", e)))?;
+                    sleep(Duration::from_secs(2)).await;
                     continue;
                 };
 

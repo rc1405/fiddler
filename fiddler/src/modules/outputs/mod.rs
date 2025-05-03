@@ -100,7 +100,7 @@ pub(crate) async fn run_output_batch(
                 Ok(i) => internal_msg_batch.push(i),
                 Err(e) => match e {
                     TryRecvError::Disconnected => break,
-                    TryRecvError::Empty => sleep(Duration::from_nanos(25)).await,
+                    TryRecvError::Empty => sleep(Duration::from_millis(250)).await,
                 },
             }
         }
