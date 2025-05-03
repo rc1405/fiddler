@@ -1,6 +1,6 @@
 [package]
 name = "fiddler-cli"
-version = "1.1.1"
+version = "1.2.0"
 edition = "2021"
 exclude = ["tests"]
 license-file = "../LICENSE"
@@ -24,7 +24,7 @@ path = "src/bin.rs"
 [dependencies]
 async-trait = "0.1.79"
 clap = { version = "4.5.3", features = ["derive"] }
-fiddler = { version = "1.1.1", path = "../fiddler", features = ["all"] }
+fiddler = { version = "1.2.0", path = "../fiddler", features = ["all"] }
 fiddler-macros = { version = "1.0.0", path = "../fiddler-macros"}
 futures = "0.3.30"
 inline_colorization = "0.1.6"
