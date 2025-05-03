@@ -12,8 +12,8 @@ use serde::Deserialize;
 use serde_yaml::Value;
 use std::fs::{self, read_to_string, File};
 use std::io::{prelude::*, BufReader, SeekFrom};
+use tokio::time::{sleep, Duration};
 use tracing::{debug, error, trace};
-use tokio::time::{Duration, sleep};
 
 #[derive(Deserialize, Default)]
 enum CodecType {
