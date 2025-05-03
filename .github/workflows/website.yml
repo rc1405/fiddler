@@ -35,6 +35,9 @@ jobs:
       - run: mike deploy ${{ inputs.version }}
         if: ${{ github.event_name == 'workflow_dispatch' }}
         working-directory: website/
+        env:
+          GIT_COMMITTER_NAME: ci-bot 
+          GIT_COMMITTER_EMAIL: ci-bot@fiddler-rs.dev 
       - run: mike deploy $(echo $FIDDLER_VERSION|sed 's/fiddler-cli-v//g')
         if: ${{ github.event_name != 'workflow_dispatch' }}
         env:
