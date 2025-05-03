@@ -4,9 +4,13 @@ permissions:
   contents: write
 
 on:
+  workflow_dispatch:
+    inputs:
+      version:
+        required: true
   push:
     tags:
-      - fiddler-cli-v[0-9]+.*
+      - fiddler-cli-v**
 
 env:
   CARGO_INCREMENTAL: 0
@@ -24,7 +28,7 @@ defaults:
 jobs:
   upload-assets:
     name: ${{ matrix.target }}
-    if: github.repository_owner == 'rc1405' && startsWith(github.event.release.name, 'fiddler-cli-v')
+    if: github.repository_owner == 'rc1405' && (startsWith(github.event.release.name, 'fiddler-cli-v') || github.event_name == 'workflow_dispatch')
     runs-on: ${{ matrix.os }}
     strategy:
       matrix:
