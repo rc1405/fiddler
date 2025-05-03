@@ -1,13 +1,17 @@
-name: upload assets
+name: upload website
 
 permissions:
   contents: write
   pages: write
 
 on:
+  workflow_dispatch:
+    inputs:
+      version:
+        required: true
   push:
     tags:
-      - fiddler-cli-v[0-9]+.*
+      - fiddler-cli-v**
 
 defaults:
   run:
@@ -28,7 +32,11 @@ jobs:
           cache: 'pip' # caching pip dependencies
       - run: pip install -r requirements.txt
         working-directory: website/
+      - run: mike deploy ${{ inputs.version }}
+        if: ${{ github.event_name == 'workflow_dispatch' }}
+        working-directory: website/
       - run: mike deploy $(echo $FIDDLER_VERSION|sed 's/fiddler-cli-v//g')
+        if: ${{ github.event_name != 'workflow_dispatch' }}
         env:
             FIDDLER_VERSION: ${{ github.event.release.name }}
         working-directory: website/
