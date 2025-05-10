@@ -358,7 +358,7 @@ impl Runtime {
                     .expect("Creating tokio runtime");
 
                 runtime.block_on(sleep(d));
-                println!("sending kill signal");
+                trace!("sending kill signal");
                 if !ks_send.is_disconnected() {
                     #[allow(clippy::unwrap_used)]
                     ks_send.send(()).unwrap();
@@ -849,7 +849,6 @@ async fn input(
                             continue;
                         }
                         _ => {
-                            println!("failure");
                             i.close().await?;
                             debug!("input closed");
                             error!(error = format!("{}", e), "read error from input");
