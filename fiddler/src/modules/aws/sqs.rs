@@ -75,7 +75,7 @@ impl Input for AwsSqs {
                     Some(md) => {
                         let mut mp = HashMap::new();
                         let _ = md
-                            .into_iter()
+                            .iter()
                             .map(|k| mp.insert(k.0.to_string(), k.1.clone().into()));
                         mp
                     }
@@ -85,12 +85,9 @@ impl Input for AwsSqs {
                 if let Some(s) = &self.ack {
                     let sender = s.clone();
                     if let Some(message_id) = m.receipt_handle.clone() {
-                        println!("message_id: {}", message_id);
                         tokio::spawn(async move {
-                            if let Ok(status) = rx.await {
-                                if let Status::Processed = status {
-                                    sender.send_async(message_id).await.unwrap();
-                                }
+                            if let Ok(Status::Processed) = rx.await {
+                                sender.send_async(message_id).await.unwrap();
                             }
                         });
                     }
@@ -226,9 +223,9 @@ fn create_sqsout(conf: Value) -> Result<ExecutionType, Error> {
             let aws_cfg = aws_config::load_from_env().await;
             let provider = aws_cfg
                 .credentials_provider()
-                .ok_or(Error::ConfigFailedValidation(format!(
-                    "could not establish creds"
-                )))?;
+                .ok_or(Error::ConfigFailedValidation(
+                    "could not establish creds".into(),
+                ))?;
             conf = conf.credentials_provider(provider)
         }
     };

@@ -65,20 +65,36 @@ impl ElasticConfig {
         };
 
         if self.cloud_id.is_some() {
+            #[allow(clippy::unwrap_used)]
             let cloud_id = self.cloud_id.clone().unwrap();
-            let username = self.username.clone().unwrap();
-            let password = self.password.clone().unwrap();
+            let username = self
+                .username
+                .clone()
+                .ok_or(Error::ConfigFailedValidation("username is required".into()))?;
+            let password = self
+                .password
+                .clone()
+                .ok_or(Error::ConfigFailedValidation("password is required".into()))?;
             let credentials = Credentials::Basic(username, password);
             let transport = Transport::cloud(&cloud_id, credentials)
                 .map_err(|e| Error::ConfigFailedValidation(format!("{}", e)))?;
             Ok(Elasticsearch::new(transport))
         } else if self.username.is_some() {
-            let url = self.url.clone().unwrap();
+            let url = self
+                .url
+                .clone()
+                .ok_or(Error::ConfigFailedValidation("url is required".into()))?;
             let es_url =
                 Url::parse(&url).map_err(|e| Error::ConfigFailedValidation(format!("{}", e)))?;
             let connection_pool = SingleNodeConnectionPool::new(es_url);
-            let username = self.username.clone().unwrap();
-            let password = self.password.clone().unwrap();
+            let username = self
+                .username
+                .clone()
+                .ok_or(Error::ConfigFailedValidation("username is required".into()))?;
+            let password = self
+                .password
+                .clone()
+                .ok_or(Error::ConfigFailedValidation("password is required".into()))?;
             let credentials = Credentials::Basic(username, password);
             let transport = TransportBuilder::new(connection_pool)
                 .auth(credentials)
@@ -87,7 +103,10 @@ impl ElasticConfig {
                 .map_err(|e| Error::ConfigFailedValidation(format!("{}", e)))?;
             Ok(Elasticsearch::new(transport))
         } else if self.url.is_some() {
-            let url = self.url.clone().unwrap();
+            let url = self
+                .url
+                .clone()
+                .ok_or(Error::ConfigFailedValidation("url is required".into()))?;
             let es_url =
                 Url::parse(&url).map_err(|e| Error::ConfigFailedValidation(format!("{}", e)))?;
             let connection_pool = SingleNodeConnectionPool::new(es_url);

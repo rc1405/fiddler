@@ -18,8 +18,6 @@ use std::path::MAIN_SEPARATOR_STR;
 use testcontainers::{runners::AsyncRunner, ImageExt};
 #[cfg(feature = "aws")]
 use testcontainers_modules::localstack::LocalStack;
-#[cfg(feature = "aws")]
-use tracing_subscriber::filter::{EnvFilter, LevelFilter};
 
 mod dependencies;
 #[allow(unused_imports)]

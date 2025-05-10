@@ -47,7 +47,7 @@ async fn process_object(
     stream_id: String,
     sender: Sender<Result<(Message, Option<CallbackChan>), Error>>,
 ) -> Result<(), Error> {
-    println!("starting to download file: {} from {}", key, bucket);
+    debug!(key = key, bucket = bucket, "starting to download file");
     let result = s3_client
         .get_object()
         .bucket(&bucket)
@@ -55,13 +55,11 @@ async fn process_object(
         .send()
         .await;
 
-    println!("file downloaded");
     match result {
         Ok(res) => {
             if read_lines {
                 let mut l = res.body.into_async_read().lines();
                 while let Ok(Some(line)) = l.next_line().await {
-                    println!("line: {}", line);
                     sender
                         .send_async(Ok((
                             Message {
@@ -72,20 +70,24 @@ async fn process_object(
                             None,
                         )))
                         .await
-                        .map_err(|e| Error::UnableToSendToChannel(format!("{}", e)))?;
+                        .map_err(|e| Error::UnableToSendToChannel(format!("{e}")))?;
                 }
             } else {
+                let body = res
+                    .body
+                    .bytes()
+                    .ok_or(Error::InputError("Missing body of s3 object".into()))?;
                 sender
                     .send_async(Ok((
                         Message {
-                            bytes: res.body.bytes().unwrap().into(),
+                            bytes: body.into(),
                             stream_id: Some(stream_id.clone()),
                             ..Default::default()
                         },
                         None,
                     )))
                     .await
-                    .map_err(|e| Error::UnableToSendToChannel(format!("{}", e)))?;
+                    .map_err(|e| Error::UnableToSendToChannel(format!("{e}")))?;
             }
         }
         Err(e) => {
@@ -95,7 +97,7 @@ async fn process_object(
                     DisplayErrorContext(e)
                 ))))
                 .await
-                .map_err(|e| Error::InputError(format!("{}", e)))?;
+                .map_err(|e| Error::InputError(format!("{e}")))?;
         }
     };
     Ok(())
@@ -132,31 +134,23 @@ async fn list_objects(
                     debug!("received {} messages from queue", messages.len());
                     if let Some(m) = messages.pop() {
                         if let Some(raw) = m.body() {
-                            println!("{}", raw);
-
                             let test_record: HashMap<String, String> =
                                 serde_json::from_str(raw).unwrap_or(HashMap::new());
                             if let Some(r) = test_record.get("Event") {
                                 if r == "s3:TestEvent" {
                                     continue;
                                 }
-                                return Err(Error::InputError(format!("invalid message format")));
+                                return Err(Error::InputError("invalid message format".into()));
                             };
-
-                            let _ = sqs_client
-                                .change_message_visibility()
-                                .queue_url(&url)
-                                .receipt_handle(m.receipt_handle().unwrap())
-                                .set_visibility_timeout(Some(43200))
-                                .send()
-                                .await;
-
                             let message_id = match m.message_id() {
                                 Some(id) => id.into(),
                                 None => uuid::Uuid::new_v4().to_string(),
                             };
 
-                            let receipt_handle = m.receipt_handle().unwrap().to_string();
+                            let receipt_handle = m
+                                .receipt_handle()
+                                .ok_or(Error::InputError("receiptHandleNotFound".into()))?
+                                .to_string();
                             let (tx, rx) = new_callback_chan();
                             let c = sqs_client.clone();
                             let url2 = url.clone();
@@ -165,6 +159,7 @@ async fn list_objects(
                                 if let Ok(status) = rx.await {
                                     match status {
                                         Status::Processed => {
+                                            #[allow(clippy::unwrap_used)]
                                             c.delete_message()
                                                 .receipt_handle(receipt_handle)
                                                 .queue_url(&url2)
@@ -173,6 +168,7 @@ async fn list_objects(
                                                 .unwrap();
                                         }
                                         Status::Errored(_e) => {
+                                            #[allow(clippy::unwrap_used)]
                                             c.change_message_visibility()
                                                 .receipt_handle(receipt_handle)
                                                 .queue_url(&url2)
@@ -196,7 +192,7 @@ async fn list_objects(
                                     Some(tx),
                                 )))
                                 .await
-                                .map_err(|e| Error::UnableToSendToChannel(format!("{}", e)))?;
+                                .map_err(|e| Error::UnableToSendToChannel(format!("{e}")))?;
 
                             let records: S3Event = serde_json::from_str(raw)?;
                             for record in records.records {
@@ -219,12 +215,13 @@ async fn list_objects(
                                     let k = key.clone();
                                     tokio::spawn(async move {
                                         if let Ok(Status::Processed) = rx.await {
+                                            #[allow(clippy::unwrap_used)]
                                             s3.delete_object()
                                                 .bucket(b)
                                                 .key(k)
                                                 .send()
                                                 .await
-                                                .map_err(|e| DisplayErrorContext(e))
+                                                .map_err(DisplayErrorContext)
                                                 .unwrap();
                                         }
                                     });
@@ -306,7 +303,7 @@ async fn list_objects(
 
             match result {
                 Ok(objects) => {
-                    for obj in objects.contents().to_owned() {
+                    for obj in objects.contents().iter().cloned() {
                         let stream_id = uuid::Uuid::new_v4().to_string();
 
                         let (tx, rx) = new_callback_chan();
@@ -315,22 +312,20 @@ async fn list_objects(
                             Some(k) => k,
                             None => continue,
                         };
-
-                        debug!(bucket = bucket, key = key, "processing object");
-
                         if delete_after_read {
                             let s3 = s3_client.clone();
                             let b = bucket.clone();
                             let k = key.clone();
                             handles.spawn(async move {
-                                println!("deleting s3://{}/{}", b, k);
+                                debug!(bucket = b, key = k, "deleting object");
                                 if let Ok(Status::Processed) = rx.await {
+                                    #[allow(clippy::unwrap_used)]
                                     s3.delete_object()
                                         .bucket(b)
                                         .key(k)
                                         .send()
                                         .await
-                                        .map_err(|e| DisplayErrorContext(e))
+                                        .map_err(DisplayErrorContext)
                                         .unwrap();
                                 }
                             });
@@ -351,12 +346,12 @@ async fn list_objects(
                                 Some(tx),
                             )))
                             .await
-                            .map_err(|e| Error::UnableToSendToChannel(format!("{}", e)))?;
+                            .map_err(|e| Error::UnableToSendToChannel(format!("{e}")))?;
 
                         process_object(
                             s3_client.clone(),
                             bucket.clone(),
-                            key,
+                            key.clone(),
                             read_lines,
                             stream_id.clone(),
                             sender.clone(),
@@ -372,7 +367,7 @@ async fn list_objects(
                                 None,
                             )))
                             .await
-                            .map_err(|e| Error::UnableToSendToChannel(format!("{}", e)))?;
+                            .map_err(|e| Error::UnableToSendToChannel(format!("{e}")))?;
                     }
                 }
                 Err(e) => {
@@ -382,7 +377,7 @@ async fn list_objects(
                             DisplayErrorContext(e)
                         ))))
                         .await
-                        .map_err(|e| Error::InputError(format!("{}", e)))?;
+                        .map_err(|e| Error::InputError(format!("{e}")))?;
                 }
             };
 
@@ -427,9 +422,9 @@ fn create_s3in(conf: Value) -> Result<ExecutionType, Error> {
             let aws_cfg = aws_config::load_from_env().await;
             let provider = aws_cfg
                 .credentials_provider()
-                .ok_or(Error::ConfigFailedValidation(format!(
-                    "could not establish creds"
-                )))?;
+                .ok_or(Error::ConfigFailedValidation(
+                    "could not establish creds".into(),
+                ))?;
             conf = conf.credentials_provider(provider)
         }
     };
@@ -477,9 +472,9 @@ fn create_s3in(conf: Value) -> Result<ExecutionType, Error> {
                     let provider =
                         aws_cfg
                             .credentials_provider()
-                            .ok_or(Error::ConfigFailedValidation(format!(
-                                "could not establish creds"
-                            )))?;
+                            .ok_or(Error::ConfigFailedValidation(
+                                "could not establish creds".into(),
+                            ))?;
                     sqs_aws_conf = sqs_aws_conf.credentials_provider(provider)
                 }
             };
