@@ -1,0 +1,7 @@
+[[package]]
+name = "fiddler"
+version_group = "fiddler"
+
+[[package]]
+name = "fiddler-cli"
+version_group = "fiddler"
