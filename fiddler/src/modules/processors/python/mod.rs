@@ -57,6 +57,7 @@ impl Processor for PyProc {
                 Ok(vec![Message {
                     bytes: root.as_bytes().into(),
                     metadata: message.metadata.clone(),
+                    ..Default::default()
                 }])
             } else {
                 let root: Vec<u8> = locals
@@ -69,6 +70,7 @@ impl Processor for PyProc {
                 Ok(vec![Message {
                     bytes: root,
                     metadata: message.metadata.clone(),
+                    ..Default::default()
                 }])
             }
         })

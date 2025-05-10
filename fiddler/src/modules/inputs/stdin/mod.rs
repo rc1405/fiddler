@@ -13,7 +13,7 @@ pub struct StdIn {}
 
 #[async_trait]
 impl Input for StdIn {
-    async fn read(&mut self) -> Result<(Message, CallbackChan), Error> {
+    async fn read(&mut self) -> Result<(Message, Option<CallbackChan>), Error> {
         let mut buffer = String::new();
         let stdin = io::stdin();
         let _ = stdin
@@ -28,15 +28,12 @@ impl Input for StdIn {
             return Err(Error::EndOfInput);
         };
 
-        let (tx, rx) = new_callback_chan();
-        let _ = tokio::spawn(rx);
-
         Ok((
             Message {
                 bytes: buffer.into_bytes(),
                 ..Default::default()
             },
-            tx,
+            None,
         ))
     }
 }

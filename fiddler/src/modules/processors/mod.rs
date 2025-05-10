@@ -49,6 +49,8 @@ pub(crate) async fn run_processor(
                                     .send_async(InternalMessageState {
                                         message_id: msg.message_id.clone(),
                                         status: MessageStatus::New,
+                                        stream_id: msg.message.stream_id.clone(),
+                                        ..Default::default()
                                     })
                                     .await
                                     .map_err(|e| Error::UnableToSendToChannel(format!("{}", e)))?;
@@ -58,6 +60,8 @@ pub(crate) async fn run_processor(
                         for m in m.iter() {
                             let mut new_msg = msg.clone();
                             new_msg.message = m.clone();
+                            new_msg.message.stream_id = msg.message.stream_id.clone();
+
                             trace!("message processed");
                             output
                                 .send_async(new_msg)
@@ -73,6 +77,8 @@ pub(crate) async fn run_processor(
                                 .send_async(InternalMessageState {
                                     message_id: msg.message_id,
                                     status: MessageStatus::ProcessError(format!("{}", e)),
+                                    stream_id: msg.message.stream_id.clone(),
+                                    ..Default::default()
                                 })
                                 .await
                                 .map_err(|e| Error::UnableToSendToChannel(format!("{}", e)))?;

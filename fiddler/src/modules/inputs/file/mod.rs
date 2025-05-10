@@ -36,11 +36,11 @@ struct FileReaderConfig {
     position_filename: Option<String>,
 }
 
-/// stuff and things
+/// FileReader
 /// ```yaml
 /// input:
 ///   file:
-///   filename: tests{MAIN_SEPARATOR_STR}data{MAIN_SEPARATOR_STR}input.txt
+///   filename: tests/data/input.txt
 ///   codec: Lines
 /// num_threads: 1
 /// processors:
@@ -53,28 +53,25 @@ struct FileReaderConfig {
 ///     - This is the end
 /// ```
 pub struct FileReader {
-    receiver: Receiver<Result<(Message, CallbackChan), Error>>,
+    receiver: Receiver<Result<(Message, Option<CallbackChan>), Error>>,
 }
 
 async fn read_file(
     reader: ReaderType,
-    sender: Sender<Result<(Message, CallbackChan), Error>>,
+    sender: Sender<Result<(Message, Option<CallbackChan>), Error>>,
 ) -> Result<(), Error> {
     match reader {
         ReaderType::Lines(li) => {
             for line in li {
                 match line {
                     Ok(line) => {
-                        let (tx, rx) = new_callback_chan();
-                        tokio::spawn(rx);
-
                         sender
                             .send_async(Ok((
                                 Message {
                                     bytes: line.into_bytes(),
                                     ..Default::default()
                                 },
-                                tx,
+                                None,
                             )))
                             .await
                             .map_err(|e| Error::UnableToSendToChannel(format!("{}", e)))?;
@@ -108,16 +105,13 @@ async fn read_file(
                 }
             };
 
-            let (tx, rx) = new_callback_chan();
-            tokio::spawn(rx);
-
             sender
                 .send_async(Ok((
                     Message {
                         bytes: contents.into_bytes(),
                         ..Default::default()
                     },
-                    tx,
+                    None,
                 )))
                 .await
                 .map_err(|e| Error::UnableToSendToChannel(format!("{}", e)))?;
@@ -187,7 +181,7 @@ async fn read_file(
                             bytes: line.into_bytes(),
                             ..Default::default()
                         },
-                        tx,
+                        Some(tx),
                     )))
                     .await
                     .map_err(|e| Error::UnableToSendToChannel(format!("{}", e)))?;
@@ -200,7 +194,7 @@ impl Closer for FileReader {}
 
 #[async_trait]
 impl Input for FileReader {
-    async fn read(&mut self) -> Result<(Message, CallbackChan), Error> {
+    async fn read(&mut self) -> Result<(Message, Option<CallbackChan>), Error> {
         match self.receiver.recv_async().await {
             Ok(i) => i,
             Err(_e) => Err(Error::EndOfInput),

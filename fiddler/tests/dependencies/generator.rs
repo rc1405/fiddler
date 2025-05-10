@@ -16,22 +16,18 @@ pub struct Generator {
 
 #[async_trait]
 impl Input for Generator {
-    async fn read(&mut self) -> Result<(Message, CallbackChan), Error> {
+    async fn read(&mut self) -> Result<(Message, Option<CallbackChan>), Error> {
         if self.count <= 0 {
             return Err(Error::EndOfInput);
         }
 
         self.count -= 1;
-
-        let (tx, rx) = new_callback_chan();
-        let _ = tokio::spawn(rx);
-
         Ok((
             Message {
                 bytes: format!("Hello World {}", self.count).as_bytes().into(),
                 ..Default::default()
             },
-            tx,
+            None,
         ))
     }
 }
