@@ -336,7 +336,7 @@ async fn list_objects(
                             });
                         } else {
                             handles.spawn(async move {
-                                rx.await;
+                                let _ = rx.await;
                             });
                         };
 
@@ -390,7 +390,6 @@ async fn list_objects(
             return Err(Error::EndOfInput);
         }
     }
-    Ok(())
 }
 
 #[async_trait]

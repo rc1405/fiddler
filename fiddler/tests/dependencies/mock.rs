@@ -3,7 +3,7 @@ use fiddler::config::register_plugin;
 use fiddler::config::ItemType;
 use fiddler::config::{ConfigSpec, ExecutionType};
 use fiddler::Message;
-use fiddler::{new_callback_chan, CallbackChan};
+use fiddler::CallbackChan;
 use fiddler::{Closer, Error, Input};
 use fiddler_macros::fiddler_registration_func;
 use serde::{Deserialize, Serialize};

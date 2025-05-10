@@ -1,12 +1,9 @@
-use async_std::stream;
 use flume::{bounded, Receiver, Sender};
-use futures::FutureExt;
 use serde::Deserialize;
 use serde::Serialize;
 use serde_yaml::Value;
 use std::fmt;
 use std::mem;
-use tokio::sync::oneshot;
 use tokio::task::JoinSet;
 use tracing::{debug, error, info, trace};
 
@@ -390,8 +387,8 @@ impl Runtime {
 
         let mut next_tx = input;
 
-        for i in 0..processors.len() {
-            let p = processors[i].clone();
+        for (i, v) in processors.iter().enumerate() {
+            let p = v.clone();
 
             let (tx, rx) = bounded(0);
 
@@ -527,10 +524,7 @@ fn process_state(
                     state.errors.push(e.clone());
                     stream_id = state.stream_id.clone();
 
-                    let stream_closed = match state.stream_closed {
-                        Some(b) => b,
-                        None => true,
-                    };
+                    let stream_closed = state.stream_closed.unwrap_or(true);
 
                     if stream_closed
                         && (state.output_count
@@ -542,6 +536,7 @@ fn process_state(
                         if state.closure.is_some() {
                             info!(message_id = msg.message_id, "calling closure");
                             let s = None;
+                            #[allow(clippy::unwrap_used)]
                             let chan = mem::replace(&mut state.closure, s).unwrap();
                             let e = Vec::new();
                             let err = mem::replace(&mut state.errors, e);
@@ -558,18 +553,16 @@ fn process_state(
                         errors = state.processed_error_count,
                         "message fully processed"
                     );
-                    let stream_closed = match state.stream_closed {
-                        Some(b) => b,
-                        None => true,
-                    };
+                    let stream_closed = state.stream_closed.unwrap_or(true);
 
                     if stream_closed && state.output_count >= state.instance_count {
                         remove_entry = true;
                         if state.closure.is_some() {
                             info!(message_id = msg.message_id, "calling closure");
                             let s = None;
+                            #[allow(clippy::unwrap_used)]
                             let chan = mem::replace(&mut state.closure, s).unwrap();
-                            let _ = chan.send(Status::Processed).unwrap();
+                            let _ = chan.send(Status::Processed);
                         };
                     } else if stream_closed
                         && (state.output_count
@@ -581,6 +574,7 @@ fn process_state(
                         if state.closure.is_some() {
                             info!(message_id = msg.message_id, "calling closure");
                             let s = None;
+                            #[allow(clippy::unwrap_used)]
                             let chan = mem::replace(&mut state.closure, s).unwrap();
                             let e = Vec::new();
                             let err = mem::replace(&mut state.errors, e);
@@ -596,14 +590,12 @@ fn process_state(
                     if (state.output_count + state.output_error_count + state.processed_error_count)
                         >= state.instance_count
                     {
-                        remove_entry = match state.stream_closed {
-                            Some(c) => c,
-                            None => true,
-                        };
+                        remove_entry = state.stream_closed.unwrap_or(true);
 
                         if remove_entry && state.closure.is_some() {
                             info!(message_id = msg.message_id, "calling closure");
                             let s = None;
+                            #[allow(clippy::unwrap_used)]
                             let chan = mem::replace(&mut state.closure, s).unwrap();
                             let e = Vec::new();
                             let err = mem::replace(&mut state.errors, e);
@@ -628,6 +620,7 @@ fn process_state(
                         if state.closure.is_some() {
                             info!(message_id = msg.message_id, "calling closure");
                             let s = None;
+                            #[allow(clippy::unwrap_used)]
                             let chan = mem::replace(&mut state.closure, s).unwrap();
                             let _ = chan.send(Status::Processed);
                         };
@@ -640,6 +633,7 @@ fn process_state(
                         if state.closure.is_some() {
                             info!(message_id = msg.message_id, "calling closure");
                             let s = None;
+                            #[allow(clippy::unwrap_used)]
                             let chan = mem::replace(&mut state.closure, s).unwrap();
                             let e = Vec::new();
                             let err = mem::replace(&mut state.errors, e);
@@ -676,7 +670,7 @@ fn process_state(
                 let mut stream = msg.clone();
                 stream.message_id = stream_id.clone();
                 stream.stream_id = s.stream_id.clone();
-                process_state(handles, &output_ct, closed_outputs, stream)?;
+                process_state(handles, output_ct, closed_outputs, stream)?;
             }
         }
     }
@@ -734,7 +728,7 @@ async fn message_handler(
                 });
                 if i.is_some() {
                     error!(message_id = msg.message_id, "Received duplicate message");
-                    return Err(Error::ExecutionError(format!("Duplicate Message ID Error")))
+                    return Err(Error::ExecutionError("Duplicate Message ID Error".into()))
                 };
 
                 if let Some(s) = &msg.stream_id {
@@ -813,17 +807,13 @@ async fn input(
                             MessageType::EndStream(_) => true,
                             MessageType::Default => false,
                         };
-
                         state_handle
                             .send_async(MessageHandle {
                                 message_id: message_id.clone(),
                                 closure,
                                 stream_id: msg.stream_id.clone(),
                                 is_stream,
-                                stream_complete: match &message_type {
-                                    MessageType::EndStream(_) => true,
-                                    _ => false,
-                                }
+                                stream_complete: matches!(&message_type, MessageType::EndStream(_))
                             })
                             .await
                             .map_err(|e| Error::UnableToSendToChannel(format!("{}", e)))?;

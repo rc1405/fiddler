@@ -190,7 +190,7 @@ fn create_sqsin(conf: Value) -> Result<ExecutionType, Error> {
                         )
                     }
                 }
-                Err(e) => {
+                Err(_e) => {
                     debug!("channel closed, exiting...");
                     return;
                 }
