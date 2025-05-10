@@ -25,6 +25,24 @@ pub struct BatchingPolicy {
     size: Option<usize>,
 }
 
+/// MessageType is utilized by plugins to identiy which type of message are they sending
+/// to the runtime.  [MessageType::Default] is utilized for processing data that will be
+/// sent to their configured outputs.  [MessageType::BeginStream] and [MessageType::EndStream]
+/// will not be processed by the pipeline but are utilized to logically group messages
+/// together under a shared callback function.
+#[derive(Serialize, Deserialize, Default, Clone, Debug)]
+pub enum MessageType {
+    #[default]
+    /// Default message to be processed
+    Default,
+    /// Received from Input modules that indicates the start of an event stream with a shared callback
+    /// This event is used for tracking state only and will not be processed
+    BeginStream(String),
+    /// Received from Input modules that indicates the end of an event stream with a shared callback
+    /// This event is used for tracking state only and will not be processed
+    EndStream(String),
+}
+
 /// Message is the uniform struct utilized within all modules of fiddler.
 /// /// ```
 /// # use fiddler:Message;
@@ -41,6 +59,15 @@ pub struct Message {
     pub bytes: Vec<u8>,
     /// metadata about the message
     pub metadata: HashMap<String, Value>,
+    /// Specified message types.  If [MessageType::Parent] is provided, no processing of the event
+    /// will take place, but the callback will be called when all child messages
+    /// have been processed.  This gives modules the ability to tier callback actions.  Such as a
+    /// module that receives a file from queue and then processes all the lines in said file.
+    /// Each line will be it's own [Message]; where the parent callback will delete the message
+    /// once all lines are processed
+    pub message_type: MessageType,
+    /// [Optional] Specifies the stream_id of the associated stream of messages with a shared callback
+    pub stream_id: Option<String>,
 }
 
 /// Type alias for Vec<[crate::Message]>, a grouping of Messages being produced
@@ -80,7 +107,7 @@ pub trait Closer {
 pub trait Input: Closer {
     /// Read single message from the input module and expected return a tuple
     /// containing the [crate::Message] and a [crate::CallbackChan] for reporting status back.
-    async fn read(&mut self) -> Result<(Message, CallbackChan), Error>;
+    async fn read(&mut self) -> Result<(Message, Option<CallbackChan>), Error>;
 }
 
 /// BatchInput module trait to insert one to may [crate::Message] into the pipeline.
@@ -89,7 +116,7 @@ pub trait Input: Closer {
 pub trait InputBatch: Closer {
     /// Read multiple messages from the input module and expected return a tuple
     /// containing the [crate::MessageBatch] and a [crate::CallbackChan] for reporting status back.
-    fn read_batch(&mut self) -> Result<(MessageBatch, CallbackChan), Error>;
+    fn read_batch(&mut self) -> Result<(MessageBatch, Option<CallbackChan>), Error>;
 }
 
 /// Output module trait to write a single [crate::Message] to the output

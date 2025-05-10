@@ -6,20 +6,20 @@ use crate::Status;
 use crate::{new_callback_chan, CallbackChan};
 use crate::{Closer, Error, Input, Output};
 use async_trait::async_trait;
-use aws_sdk_sqs::{client::Client, config};
+use aws_sdk_sqs::{client::Client, config, error::DisplayErrorContext};
 use fiddler_macros::fiddler_registration_func;
 use flume::{bounded, Sender};
 use serde::Deserialize;
 use serde_yaml::Value;
 use std::collections::HashMap;
-use tracing::error;
+use tracing::{debug, error};
 
 #[derive(Deserialize, Default, Clone)]
-struct SqsConfig {
-    queue_url: String,
-    endpoint_url: Option<String>,
-    credentials: Option<super::Credentials>,
-    region: Option<String>,
+pub(super) struct SqsConfig {
+    pub queue_url: String,
+    pub endpoint_url: Option<String>,
+    pub credentials: Option<super::Credentials>,
+    pub region: Option<String>,
 }
 
 /// AWS Simple Queue Service (SQS)
@@ -51,7 +51,7 @@ pub struct AwsSqs {
 
 #[async_trait]
 impl Input for AwsSqs {
-    async fn read(&mut self) -> Result<(Message, CallbackChan), Error> {
+    async fn read(&mut self) -> Result<(Message, Option<CallbackChan>), Error> {
         let msg = self
             .client
             .receive_message()
@@ -60,7 +60,7 @@ impl Input for AwsSqs {
             .wait_time_seconds(10)
             .send()
             .await
-            .map_err(|e| Error::InputError(format!("{}", e)))?;
+            .map_err(|e| Error::InputError(format!("{}", DisplayErrorContext(e))))?;
 
         let mut messages: Vec<aws_sdk_sqs::types::Message> = msg.messages().into();
         match messages.pop() {
@@ -75,7 +75,7 @@ impl Input for AwsSqs {
                     Some(md) => {
                         let mut mp = HashMap::new();
                         let _ = md
-                            .into_iter()
+                            .iter()
                             .map(|k| mp.insert(k.0.to_string(), k.1.clone().into()));
                         mp
                     }
@@ -85,12 +85,9 @@ impl Input for AwsSqs {
                 if let Some(s) = &self.ack {
                     let sender = s.clone();
                     if let Some(message_id) = m.receipt_handle.clone() {
-                        println!("message_id: {}", message_id);
                         tokio::spawn(async move {
-                            if let Ok(status) = rx.await {
-                                if let Status::Processed = status {
-                                    sender.send_async(message_id).await.unwrap();
-                                }
+                            if let Ok(Status::Processed) = rx.await {
+                                sender.send_async(message_id).await.unwrap();
                             }
                         });
                     }
@@ -100,8 +97,9 @@ impl Input for AwsSqs {
                     Message {
                         bytes: body.into(),
                         metadata,
+                        ..Default::default()
                     },
-                    tx,
+                    Some(tx),
                 ));
             }
             None => return Err(Error::NoInputToReturn),
@@ -121,7 +119,7 @@ impl Output for AwsSqs {
             .message_body(msg)
             .send()
             .await
-            .map_err(|e| Error::OutputError(format!("{}", e)))?;
+            .map_err(|e| Error::OutputError(format!("{}", DisplayErrorContext(e))))?;
 
         Ok(())
     }
@@ -189,8 +187,8 @@ fn create_sqsin(conf: Value) -> Result<ExecutionType, Error> {
                         )
                     }
                 }
-                Err(e) => {
-                    error!(error = format!("{}", e), "error receiving message_ids");
+                Err(_e) => {
+                    debug!("channel closed, exiting...");
                     return;
                 }
             }
@@ -225,9 +223,9 @@ fn create_sqsout(conf: Value) -> Result<ExecutionType, Error> {
             let aws_cfg = aws_config::load_from_env().await;
             let provider = aws_cfg
                 .credentials_provider()
-                .ok_or(Error::ConfigFailedValidation(format!(
-                    "could not establish creds"
-                )))?;
+                .ok_or(Error::ConfigFailedValidation(
+                    "could not establish creds".into(),
+                ))?;
             conf = conf.credentials_provider(provider)
         }
     };
@@ -254,6 +252,20 @@ properties:
   queue_url: 
     type: string
   endpoint_url:
+    type: string
+  credentials:
+    type: object
+    properties:
+      access_key_id:
+        type: string
+      secret_access_key:
+        type: string
+      session_token:
+        type: string
+    required:
+      - access_key_id
+      - secret_access_key
+  region:
     type: string
 required:
   - queue_url";

@@ -1,3 +1,5 @@
+use std::ffi::CString;
+
 use crate::config::register_plugin;
 use crate::config::ItemType;
 use crate::config::{ConfigSpec, ExecutionType};
@@ -27,23 +29,26 @@ pub struct PyProc {
 impl Processor for PyProc {
     async fn process(&self, message: Message) -> Result<MessageBatch, Error> {
         Python::with_gil(|py| {
-            let locals = PyDict::new_bound(py);
+            let locals = PyDict::new(py);
             if self.use_string {
                 let raw_string = String::from_utf8(message.bytes)
                     .map_err(|e| Error::ProcessingError(format!("{}", e)))?;
-                let python_string = PyString::new_bound(py, &raw_string);
+                let python_string = PyString::new(py, &raw_string);
                 locals
                     .set_item("root", python_string)
                     .map_err(|e| Error::ProcessingError(format!("{}", e)))?;
             } else {
                 let raw_bytes = message.bytes.as_slice();
-                let python_bytes = PyBytes::new_bound(py, raw_bytes);
+                let python_bytes = PyBytes::new(py, raw_bytes);
                 locals
                     .set_item("root", python_bytes)
                     .map_err(|e| Error::ProcessingError(format!("{}", e)))?;
             };
 
-            py.run_bound(&self.code.clone(), None, Some(&locals))
+            let code = CString::new(self.code.clone())
+                .map_err(|e| Error::ProcessingError(format!("{}", e)))?;
+
+            py.run(&code, None, Some(&locals))
                 .map_err(|e| Error::ProcessingError(format!("{}", e)))?;
 
             if self.use_string {
@@ -57,6 +62,7 @@ impl Processor for PyProc {
                 Ok(vec![Message {
                     bytes: root.as_bytes().into(),
                     metadata: message.metadata.clone(),
+                    ..Default::default()
                 }])
             } else {
                 let root: Vec<u8> = locals
@@ -69,6 +75,7 @@ impl Processor for PyProc {
                 Ok(vec![Message {
                     bytes: root,
                     metadata: message.metadata.clone(),
+                    ..Default::default()
                 }])
             }
         })

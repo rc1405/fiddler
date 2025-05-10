@@ -2,8 +2,8 @@ use async_trait::async_trait;
 use fiddler::config::register_plugin;
 use fiddler::config::ItemType;
 use fiddler::config::{ConfigSpec, ExecutionType};
+use fiddler::CallbackChan;
 use fiddler::Message;
-use fiddler::{new_callback_chan, CallbackChan};
 use fiddler::{Closer, Error, Input};
 use fiddler_macros::fiddler_registration_func;
 use serde::{Deserialize, Serialize};
@@ -16,15 +16,12 @@ pub struct JsonGenerator {
 
 #[async_trait]
 impl Input for JsonGenerator {
-    async fn read(&mut self) -> Result<(Message, CallbackChan), Error> {
+    async fn read(&mut self) -> Result<(Message, Option<CallbackChan>), Error> {
         if self.count <= 0 {
             return Err(Error::EndOfInput);
         };
 
         self.count -= 1;
-
-        let (tx, rx) = new_callback_chan();
-        let _ = tokio::spawn(rx);
 
         Ok((
             Message {
@@ -33,7 +30,7 @@ impl Input for JsonGenerator {
                     .into(),
                 ..Default::default()
             },
-            tx,
+            None,
         ))
     }
 }

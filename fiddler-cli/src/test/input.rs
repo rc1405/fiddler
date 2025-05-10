@@ -20,17 +20,14 @@ pub struct MockInput {
 
 #[async_trait]
 impl Input for MockInput {
-    async fn read(&mut self) -> Result<(Message, CallbackChan), Error> {
-        let (tx, rx) = new_callback_chan();
-        let _ = tokio::spawn(rx);
-
+    async fn read(&mut self) -> Result<(Message, Option<CallbackChan>), Error> {
         match self.input.pop() {
             Some(i) => Ok((
                 Message {
                     bytes: i.as_bytes().into(),
                     ..Default::default()
                 },
-                tx,
+                None,
             )),
             None => Err(Error::EndOfInput),
         }

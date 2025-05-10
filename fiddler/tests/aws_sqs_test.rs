@@ -12,8 +12,6 @@ use fiddler::Runtime;
 use testcontainers::{runners::AsyncRunner, ImageExt};
 #[cfg(feature = "aws")]
 use testcontainers_modules::localstack::LocalStack;
-#[cfg(feature = "aws")]
-use tracing_subscriber::filter::{EnvFilter, LevelFilter};
 
 #[cfg(feature = "aws")]
 #[cfg_attr(feature = "aws", tokio::test)]
@@ -54,24 +52,6 @@ async fn fiddler_aws_sqs_test() {
         .send()
         .await
         .unwrap();
-    let _ = client
-        .send_message()
-        .queue_url(in_queue_url)
-        .message_body("Testing Message to send to SQS")
-        .send()
-        .await
-        .unwrap();
-
-    let result2 = client
-        .receive_message()
-        .max_number_of_messages(1)
-        .queue_url(in_queue_url)
-        .wait_time_seconds(10)
-        .send()
-        .await
-        .unwrap();
-
-    println!("{}", result2.messages()[0].clone().body.unwrap());
 
     let out_queue = client
         .create_queue()
@@ -104,27 +84,10 @@ output:
         in_queue_url, endpoint_url, out_queue_url, endpoint_url
     );
 
-    println!("{}", config);
-
-    let filter = EnvFilter::builder()
-        .with_default_directive(LevelFilter::OFF.into())
-        .from_env()
-        .unwrap()
-        .add_directive(format!("fiddler={}", LevelFilter::DEBUG).parse().unwrap());
-
-    tracing_subscriber::fmt()
-        .with_env_filter(filter)
-        .compact()
-        .json()
-        .init();
-
     let mut env = Runtime::from_config(&config).await.unwrap();
     env.set_timeout(Some(tokio::time::Duration::from_secs(5)))
         .unwrap();
-    println!("starting pipeline");
     env.run().await.unwrap();
-
-    println!("made it past running the pipeline");
 
     let result = client
         .receive_message()

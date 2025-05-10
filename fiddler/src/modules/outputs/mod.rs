@@ -38,6 +38,8 @@ pub(crate) async fn run_output(
                             .send_async(InternalMessageState {
                                 message_id: msg.message_id,
                                 status: MessageStatus::Output,
+                                stream_id: msg.message.stream_id.clone(),
+                                ..Default::default()
                             })
                             .await
                             .map_err(|e| Error::UnableToSendToChannel(format!("{}", e)))?;
@@ -52,6 +54,8 @@ pub(crate) async fn run_output(
                                 .send_async(InternalMessageState {
                                     message_id: msg.message_id,
                                     status: MessageStatus::OutputError(format!("{}", e)),
+                                    stream_id: msg.message.stream_id.clone(),
+                                    ..Default::default()
                                 })
                                 .await
                                 .map_err(|e| Error::UnableToSendToChannel(format!("{}", e)))?;
@@ -67,6 +71,7 @@ pub(crate) async fn run_output(
                         .send_async(InternalMessageState {
                             message_id: "end of the line".into(),
                             status: MessageStatus::Shutdown,
+                            ..Default::default()
                         })
                         .await
                         .map_err(|e| Error::UnableToSendToChannel(format!("{}", e)))?;
@@ -119,6 +124,8 @@ pub(crate) async fn run_output_batch(
                             .send_async(InternalMessageState {
                                 message_id: msg.message_id,
                                 status: MessageStatus::Output,
+                                stream_id: msg.message.stream_id.clone(),
+                                ..Default::default()
                             })
                             .await
                             .map_err(|e| Error::UnableToSendToChannel(format!("{}", e)))?;
@@ -134,6 +141,8 @@ pub(crate) async fn run_output_batch(
                                 .send_async(InternalMessageState {
                                     message_id: msg.message_id,
                                     status: MessageStatus::OutputError(format!("{}", e)),
+                                    stream_id: msg.message.stream_id.clone(),
+                                    ..Default::default()
                                 })
                                 .await
                                 .map_err(|e| Error::UnableToSendToChannel(format!("{}", e)))?;
@@ -151,6 +160,7 @@ pub(crate) async fn run_output_batch(
         .send_async(InternalMessageState {
             message_id: "end of the line".into(),
             status: MessageStatus::Shutdown,
+            ..Default::default()
         })
         .await
     {

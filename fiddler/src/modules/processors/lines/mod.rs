@@ -21,6 +21,7 @@ impl Processor for Lines {
             .map(|msg| Message {
                 bytes: msg.as_bytes().into(),
                 metadata: message.metadata.clone(),
+                ..Default::default()
             })
             .collect();
         Ok(output)
