@@ -66,7 +66,7 @@ pub struct Message {
     /// Each line will be it's own [Message]; where the parent callback will delete the message
     /// once all lines are processed
     pub message_type: MessageType,
-    /// [Optional] Specifies the parentID
+    /// [Optional] Specifies the stream_id of the associated stream of messages with a shared callback
     pub stream_id: Option<String>,
 }
 
