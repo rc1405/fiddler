@@ -26,8 +26,8 @@ pub struct BatchingPolicy {
 }
 
 /// MessageType is utilized by plugins to identiy which type of message are they sending
-/// to the runtime.  [MessageType::Default] is utilized for processing data that will be 
-/// sent to their configured outputs.  [MessageType::BeginStream] and [MessageType::EndStream] 
+/// to the runtime.  [MessageType::Default] is utilized for processing data that will be
+/// sent to their configured outputs.  [MessageType::BeginStream] and [MessageType::EndStream]
 /// will not be processed by the pipeline but are utilized to logically group messages
 /// together under a shared callback function.
 #[derive(Serialize, Deserialize, Default, Clone, Debug)]

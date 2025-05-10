@@ -1,8 +1,8 @@
 use crate::config::register_plugin;
 use crate::config::ItemType;
 use crate::config::{ConfigSpec, ExecutionType};
-use crate::Message;
 use crate::CallbackChan;
+use crate::Message;
 use crate::{Closer, Error, Input};
 use async_std::io;
 use async_trait::async_trait;
