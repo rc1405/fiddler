@@ -65,7 +65,7 @@ jobs:
         with:
           bin: fiddler-cli
           target: ${{ matrix.target }}
-          tar: all
+          tar: unix
           zip: windows
           token: ${{ secrets.GITHUB_TOKEN }}
           ref: refs/tags/fiddler-cli-v${{ inputs.version }}
