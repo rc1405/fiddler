@@ -77,3 +77,4 @@ jobs:
           tar: all
           zip: windows
           token: ${{ secrets.GITHUB_TOKEN }}
+          ref: refs/tags/fiddler-cli-v${{ inputs.version }}
