@@ -9,10 +9,12 @@ on:
     inputs:
       version:
         required: true
-  push:
-    tags:
-      - fiddler-cli-v**
-
+        type: string
+  workflow_call:
+    inputs:
+      version:
+        required: true
+        type: string
 defaults:
   run:
     shell: bash
@@ -20,12 +22,13 @@ defaults:
 jobs:
   generate_website:
     name: generate website
-    if: github.repository_owner == 'rc1405' && (startsWith(github.event.release.name, 'fiddler-cli-v') || github.event_name == 'workflow_dispatch')
     runs-on: ubuntu-latest
     timeout-minutes: 60
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
+        with:
+          ref: fiddler-cli-v${{ inputs.version }}
       - run: git fetch origin gh-pages --depth=1
       - uses: actions/setup-python@v5
         with:
