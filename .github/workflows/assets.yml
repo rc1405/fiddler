@@ -20,7 +20,6 @@ env:
   CARGO_NET_RETRY: 10
   CARGO_TERM_COLOR: always
   RUST_BACKTRACE: 1
-  RUSTFLAGS: -D warnings
   RUSTUP_MAX_RETRIES: 10
 
 defaults:
@@ -72,7 +71,7 @@ jobs:
       - run: echo "RUSTFLAGS=${RUSTFLAGS} -C target-feature=+crt-static" >> "${GITHUB_ENV}"
         if: endsWith(matrix.target, 'windows-msvc')
       - run: |
-          sudo DEBIAN_FRONTEND=noninteractive apt-get -y install python3 python3-dev  pkg-config libssl-dev
+          sudo DEBIAN_FRONTEND=noninteractive apt-get -y install python3 python3-dev pkg-config libssl-dev
         if: startsWith(matrix.os, 'ubuntu')
       - uses: taiki-e/upload-rust-binary-action@v1
         with:
