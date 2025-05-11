@@ -8,10 +8,12 @@ on:
     inputs:
       version:
         required: true
-  push:
-    tags:
-      - fiddler-cli-v**
-
+        type: string
+  workflow_call:
+    inputs:
+      version:
+        required: true
+        type: string
 env:
   CARGO_INCREMENTAL: 0
   CARGO_NET_GIT_FETCH_WITH_CLI: true
@@ -28,7 +30,6 @@ defaults:
 jobs:
   upload-assets:
     name: ${{ matrix.target }}
-    if: github.repository_owner == 'rc1405' && (startsWith(github.event.release.name, 'fiddler-cli-v') || github.event_name == 'workflow_dispatch')
     runs-on: ${{ matrix.os }}
     strategy:
       matrix:
@@ -55,6 +56,8 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
+        with:
+          ref: fiddler-cli-v${{ inputs.version }}
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
       - uses: taiki-e/setup-cross-toolchain-action@v1
