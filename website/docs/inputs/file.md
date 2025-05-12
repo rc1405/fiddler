@@ -1,13 +1,21 @@
 # file
 Receive messages from an AWS SQS Queue
 
-```yml
-input:
-    file:
-        filename: path_to_file
-        codec: Lines
-        position_filename: path_to_position_file
-```
+=== "Required"
+    ```yml
+    input:
+        file:
+            filename: path_to_file
+    ```
+
+=== "Full"
+    ```yml
+    input:
+        file:
+            filename: path_to_file
+            codec: Tail
+            position_filename: path_to_position_file
+    ```
 
 ## Fields
 ### `filename`

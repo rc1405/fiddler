@@ -1,20 +1,22 @@
 # switch
 Switch accepts an array of valid processors and is expected to be utlized with the `check` output.  Switch will attempt each provided processor; while failing to the next provided the error is returned is `ConditionalCheckfailed`.  Other encountered errors will be surfaced.
 
-```yml
-processors:
-  - switch: []
-```
+=== "Required"
+  ```yml
+  processors:
+    - switch: []
+  ```
 
 ## `check`
-```yml
-processors:
-  - switch:
-      - check:
-          condition: '\"Hello World\" > `5`'
-          processros: 
-            - noop: {}"
-```
+=== "Required"
+  ```yml
+  processors:
+    - switch:
+        - check:
+            condition: '\"Hello World\" > `5`'
+            processors: 
+              - noop: {}"
+  ```
 
 ### Fields
 #### `condition`

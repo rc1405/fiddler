@@ -21,3 +21,8 @@ plugins:
       version_selector: true
 hooks:
   - hooks.py
+
+markdown_extensions:
+  - pymdownx.superfences
+  - pymdownx.tabbed:
+      alternate_style: true

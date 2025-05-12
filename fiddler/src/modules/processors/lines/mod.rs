@@ -50,4 +50,29 @@ mod test {
     fn register_plugin() {
         register_lines().unwrap()
     }
+
+    #[tokio::test]
+    async fn split_lines() {
+        let input_str = "Hello
+world";
+        let msg = Message {
+            bytes: input_str.as_bytes().into(),
+            ..Default::default()
+        };
+        let processor = Lines {};
+        let output = processor.process(msg).await.unwrap();
+        assert_eq!(
+            output,
+            vec![
+                Message {
+                    bytes: "Hello".as_bytes().into(),
+                    ..Default::default()
+                },
+                Message {
+                    bytes: "world".as_bytes().into(),
+                    ..Default::default()
+                }
+            ]
+        )
+    }
 }

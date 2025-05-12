@@ -41,6 +41,8 @@ tracing = "0.1.40"
 uuid = { version = "1.11.0", features = ["v4"]}
 chrono = { version = "0.4.40", features = ["serde"] }
 flume = { version = "0.11.1", features = ["async"] }
+flate2 = "1.1.1"
+base64 = "0.22.1"
 
 [build-dependencies]
 fs_extra = "1.3.0"

@@ -1,7 +1,8 @@
 # drop
 Discard messages sent to this output
 
-```yml
-output:
-    drop: {}
-```
+=== "Required"
+    ```yml
+    output:
+        drop: {}
+    ```

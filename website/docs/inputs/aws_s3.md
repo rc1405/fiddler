@@ -1,33 +1,42 @@
 # aws_s3
 Process data from a S3 Bucket
 
-```yml
-input:
-    aws_s3:
-        bucket: "my-bucket"
-        prefix: "myprefix/"
-        queue:
-            queue_url: "https://some_queue_url"
-            endpoint_url: "https://some_unique_endpoint"
+=== "Required"
+    ```yml
+    input:
+        aws_s3:
+            bucket: "my-bucket"
+    ```
+
+=== "Full"
+    ```yml
+    input:
+        aws_s3:
+            bucket: "my-bucket"
+            prefix: "myprefix/"
+            queue:
+                queue_url: "https://some_queue_url"
+                endpoint_url: "https://some_unique_endpoint"
+                credentials:
+                    access_key_id: "AccessKey"
+                    secret_access_key: "SecretKey"
+                    session_token: "SessionToken"
+                region: "us-west-2"
             credentials:
                 access_key_id: "AccessKey"
                 secret_access_key: "SecretKey"
                 session_token: "SessionToken"
-            region: "us-west-2"
-        credentials:
-            access_key_id: "AccessKey"
-            secret_access_key: "SecretKey"
-            session_token: "SessionToken"
-        delete_after_read: false
-        endpoint_url: "https://some_unique_endpoint"
-        read_lines: true
-        force_path_style_urls: false
-        region: us-east-1
-```
+            delete_after_read: false
+            endpoint_url: "https://some_unique_endpoint"
+            read_lines: true
+            force_path_style_urls: false
+            region: us-east-1
+    ```
 
 
 ## Metadata
-All SQS Message attributes are inserted into metadata of the message
+**`s3_bucket`**: S3 Bucket of the object
+**`s3_key`**: S3 Key
 
 ## Fields
 ### `bucket`

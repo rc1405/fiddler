@@ -57,6 +57,9 @@ async fn process_object(
 
     match result {
         Ok(res) => {
+            let mut metadata: HashMap<String, serde_yaml::Value> = HashMap::new();
+            let _ = metadata.insert("s3_bucket".into(), bucket.clone().into());
+            let _ = metadata.insert("s3_key".into(), key.clone().into());
             if read_lines {
                 let mut l = res.body.into_async_read().lines();
                 while let Ok(Some(line)) = l.next_line().await {
@@ -65,6 +68,7 @@ async fn process_object(
                             Message {
                                 bytes: line.into_bytes(),
                                 stream_id: Some(stream_id.clone()),
+                                metadata: metadata.clone(),
                                 ..Default::default()
                             },
                             None,
@@ -82,6 +86,7 @@ async fn process_object(
                         Message {
                             bytes: body.into(),
                             stream_id: Some(stream_id.clone()),
+                            metadata: metadata.clone(),
                             ..Default::default()
                         },
                         None,

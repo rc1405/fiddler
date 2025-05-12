@@ -30,7 +30,7 @@ pub struct BatchingPolicy {
 /// sent to their configured outputs.  [MessageType::BeginStream] and [MessageType::EndStream]
 /// will not be processed by the pipeline but are utilized to logically group messages
 /// together under a shared callback function.
-#[derive(Serialize, Deserialize, Default, Clone, Debug)]
+#[derive(Serialize, Deserialize, Default, Clone, Debug, PartialEq)]
 pub enum MessageType {
     #[default]
     /// Default message to be processed
@@ -44,16 +44,16 @@ pub enum MessageType {
 }
 
 /// Message is the uniform struct utilized within all modules of fiddler.
-/// /// ```
-/// # use fiddler:Message;
+/// ```
+/// # use fiddler::Message;
 /// # use std::collections::HashMap;
 /// let content = "This is a message being processed";
 /// let message = Message{
-///     bytes: content.as_bytes(),
-///     metadata: HashMap::new(),
-/// }
+///     bytes: content.as_bytes().into(),
+///     ..Default::default()
+/// };
 /// ```
-#[derive(Clone, Debug, Default, Serialize, Deserialize)]
+#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq)]
 pub struct Message {
     /// raw bytes of of the message to be collected, processed, and sent
     pub bytes: Vec<u8>,

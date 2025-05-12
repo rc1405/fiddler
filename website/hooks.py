@@ -22,6 +22,7 @@ def on_config(config, **kwargs):
         os.path.join(docs_dir, "index.md"),
         os.path.join(docs_dir, "getting_started.md"),
         os.path.join(docs_dir, "configuration.md"),
+        os.path.join(docs_dir, "development.md"),
     ]
 
     nav_items.extend(create_nav(docs_dir, docs_dir, excluded=excluded))
