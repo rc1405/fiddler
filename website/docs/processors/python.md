@@ -1,16 +1,24 @@
 # python
 Python is the primary source of inline message manipulation provided by Fiddler.  Any third party packages utilized in Python will have to be installed on the OS running fiddler.  
+=== "Required"
+    ```yml
+    processors:
+        - python:
+            code: |
+                new_string = \"python rules\"
+                root = new_string
+    ```
+=== "Full"
+    ```yml
+    processors:
+        - python:
+            string: true
+            code: |
+                import json
+                new_string = f\"python: {root}\"
+                root = new_string
+    ```
 
-```yml
-processors:
-    - python:
-        string: true
-        code: |
-            import json
-            new_string = f\"python: {root}\"
-            root = new_string
-
-```
 ## Fields
 ### `string`
 Indicate whether or not fiddler should convert the message to a string before invoking the python code.    

@@ -384,3 +384,30 @@ output:
     let env = Runtime::from_config(config).await.unwrap();
     env.run().await.unwrap();
 }
+
+#[tokio::test]
+async fn decompression() {
+    let config = "input:
+  mock_input: 
+    input:
+      - H4sIAAAAAAAC//NIzcnJVwjPL8pJAQBWsRdKCwAAAA==
+num_threads: 1
+processors:
+  - decode: {}
+  - decompress: {}
+output:
+  validate: 
+    expected: 
+      - 'Hello World'";
+
+    REGISTER.call_once(|| {
+        mock::register_mock_input().unwrap();
+        jsongenerator::register_json_generator().unwrap();
+        generator::register_generator().unwrap();
+        processor::register_echo().unwrap();
+        output::register_validate().unwrap();
+    });
+
+    let env = Runtime::from_config(config).await.unwrap();
+    env.run().await.unwrap();
+}

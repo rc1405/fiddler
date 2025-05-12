@@ -1,17 +1,25 @@
 # aws_sqs
 Receive messages from an AWS SQS Queue
 
-```yml
-input:
-    aws_sqs:
-        queue_url: "https://some_queue_url"
-        endpoint_url: "https://some_unique_endpoint"
-        credentials:
-            access_key_id: "AccessKey"
-            secret_access_key: "SecretKey"
-            session_token: "SessionToken"
-        region: "us-west-2"
-```
+=== "Required"
+    ```yml
+    input:
+        aws_sqs:
+            queue_url: "https://some_queue_url"
+    ```
+
+=== "Full"
+    ```yml
+    input:
+        aws_sqs:
+            queue_url: "https://some_queue_url"
+            endpoint_url: "https://some_unique_endpoint"
+            credentials:
+                access_key_id: "AccessKey"
+                secret_access_key: "SecretKey"
+                session_token: "SessionToken"
+            region: "us-west-2"
+    ```
 
 
 ## Metadata

@@ -1,20 +1,22 @@
 # switch
 Switch accepts an array of valid outputs and is expected to be utlized with the `check` output.  Switch will attempt each provided output; while failing to the next provided the error is returned is `ConditionalCheckfailed`.  Other encountered errors will be surfaced.
 
-```yml
-output:
-  switch: []
-```
+=== "Required"
+  ```yml
+  output:
+    switch: []
+  ```
 
 ## `check`
-```yml
-output:
-  switch:
-    - check:
-        condition: '\"Hello World\" > `5`'
-        output: 
-          stdout: {}"
-```
+=== "Required"
+  ```yml
+  output:
+    switch:
+      - check:
+          condition: '\"Hello World\" > `5`'
+          output: 
+            stdout: {}"
+  ```
 
 ### Fields
 #### `condition`

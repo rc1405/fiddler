@@ -1,16 +1,25 @@
 # elasticsearch
 Receive messages from an AWS SQS Queue
 
-```yml
-output:
-    elasticsearch:
-        url: https://127.0.0.1:9200
-        username: elastic
-        password: changeme
-        cloud_id: someId
-        index: my_index
-        cert_validation: Default
-```
+=== "Required"
+    ```yml
+    output:
+        elasticsearch:
+            url: https://127.0.0.1:9200
+            index: my_index
+    ```
+
+=== "Full"
+    ```yml
+    output:
+        elasticsearch:
+            url: https://127.0.0.1:9200
+            username: elastic
+            password: changeme
+            cloud_id: someId
+            index: my_index
+            cert_validation: Default
+    ```
 ## Fields
 ### `url`
 Elasticsearch URL to utilize  

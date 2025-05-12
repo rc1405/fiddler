@@ -1,7 +1,8 @@
 # stdout
 Emit process messages to stdout
 
-```yml
-output:
-    stdout: {}
-```
+=== "Required"
+    ```yml
+    output:
+        stdout: {}
+    ```
