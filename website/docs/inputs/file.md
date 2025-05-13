@@ -1,5 +1,5 @@
 # file
-Receive messages from an AWS SQS Queue
+Read file off of the local filesystem
 
 === "Required"
     ```yml

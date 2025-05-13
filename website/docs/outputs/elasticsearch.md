@@ -1,5 +1,5 @@
 # elasticsearch
-Receive messages from an AWS SQS Queue
+Send events to elasticsearch
 
 === "Required"
     ```yml
