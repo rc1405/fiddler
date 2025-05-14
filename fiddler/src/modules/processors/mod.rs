@@ -1,6 +1,7 @@
 use crate::Error;
 pub mod compression;
 pub mod decode;
+pub mod exception;
 pub mod lines;
 pub mod noop;
 #[cfg(feature = "python")]
@@ -22,6 +23,7 @@ pub(crate) fn register_plugins() -> Result<(), Error> {
     switch::register_switch()?;
     compression::register_compress()?;
     decode::register_decode()?;
+    exception::register_try()?;
     Ok(())
 }
 

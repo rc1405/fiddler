@@ -8,13 +8,6 @@
 permissions:
   contents: read
 on:
-  push:
-    branches: [main]
-    paths:
-      - 'fiddler-cli/**'
-      - 'fiddler-macros/**'
-      - 'fiddler/**'
-      - 'Cargo.toml'
   pull_request:
     paths:
       - 'fiddler-cli/**'

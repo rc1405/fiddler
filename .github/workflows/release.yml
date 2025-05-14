@@ -19,7 +19,6 @@ jobs:
     permissions:
       contents: write
     outputs:
-      releases_created: ${{ steps.release-plz.outputs.releases_created  }}
       releases: ${{ steps.release-plz.outputs.releases }}
     steps:
       - name: Checkout repository
@@ -39,14 +38,14 @@ jobs:
   release-website:
     name: generate website
     needs: release-plz-release
-    if: needs.release-plz-release.releases_created  
+    if: needs.release-plz-release.releases[0]  
     uses: ./.github/workflows/website.yml
     with:
       version: ${{ needs.release-plz-release.releases[0].version}}
   release-binaries:
     name: generate binaries
     needs: release-plz-release
-    if: needs.release-plz-release.releases_created  
+    if: needs.release-plz-release.releases[0]  
     uses: ./.github/workflows/assets.yml
     with:
       version: ${{ needs.release-plz-release.releases[0].version}}
