@@ -11,13 +11,6 @@ permissions:
 # the new branch. Restricting the push trigger to the main branch ensures that the PR only gets
 # built once.
 on:
-  push:
-    branches: [main]
-    paths:
-      - 'fiddler-cli/**'
-      - 'fiddler-macros/**'
-      - 'fiddler/**'
-      - 'Cargo.toml'
   pull_request:
     paths:
       - 'fiddler-cli/**'

@@ -411,3 +411,36 @@ output:
     let env = Runtime::from_config(config).await.unwrap();
     env.run().await.unwrap();
 }
+
+#[tokio::test]
+async fn processor_try_catch() {
+    let config = "input:
+  mock_input: 
+    input:
+      - SGVsbG8gV29ybGQ=
+      - H4sIAAAAAAAC//NIzcnJVwjPL8pJAQBWsRdKCwAAAA==
+num_threads: 1
+processors:
+  - decode: {}
+  - try:
+      processor:
+        decompress: {}
+      catch:
+        - noop: {}
+output:
+  validate: 
+    expected: 
+      - 'Hello World'
+      - 'Hello World'";
+
+    REGISTER.call_once(|| {
+        mock::register_mock_input().unwrap();
+        jsongenerator::register_json_generator().unwrap();
+        generator::register_generator().unwrap();
+        processor::register_echo().unwrap();
+        output::register_validate().unwrap();
+    });
+
+    let env = Runtime::from_config(config).await.unwrap();
+    env.run().await.unwrap();
+}
