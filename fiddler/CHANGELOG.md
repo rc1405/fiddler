@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.2.0](https://github.com/rc1405/fiddler/compare/fiddler-v2.1.0...fiddler-v2.2.0) - 2025-05-14
+
+### Added
+
+- added try processor ([#54](https://github.com/rc1405/fiddler/pull/54))
+
 ## [2.1.0](https://github.com/rc1405/fiddler/compare/fiddler-v2.0.0...fiddler-v2.1.0) - 2025-05-12
 
 ### Added
