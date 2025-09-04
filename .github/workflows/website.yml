@@ -30,7 +30,7 @@ jobs:
         with:
           ref: fiddler-cli-v${{ inputs.version }}
       - run: git fetch origin gh-pages --depth=1
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v6
         with:
           python-version: '3.13'
           cache: 'pip' # caching pip dependencies
