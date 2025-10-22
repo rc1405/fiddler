@@ -51,7 +51,7 @@ pkg-config = "0.3.30"
 
 [dev-dependencies]
 testcontainers = { version = "0.23.3"}
-testcontainers-modules = { version = "0.11.6", features = ["elastic_search", "localstack"]}
+testcontainers-modules = { version = "0.13.0", features = ["elastic_search", "localstack"]}
 tokio-test = "0.4.4"
 aws-smithy-types = { version = "1.3.1", features = ["rt-tokio"] }
 
