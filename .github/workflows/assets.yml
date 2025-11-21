@@ -43,7 +43,7 @@ jobs:
     timeout-minutes: 60
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           ref: fiddler-cli-v${{ inputs.version }}
       - name: Install Rust toolchain
