@@ -4,8 +4,9 @@ use serde::Serialize;
 use serde_yaml::Value;
 use std::fmt;
 use std::mem;
+use std::time::Instant;
 use tokio::task::JoinSet;
-use tracing::{debug, error, info, trace};
+use tracing::{debug, error, info, trace, warn};
 
 use std::collections::HashMap;
 use std::str::FromStr;
@@ -15,6 +16,12 @@ use uuid::Uuid;
 
 /// Backoff duration when no input is available (in milliseconds)
 const NO_INPUT_BACKOFF_MS: u64 = 1500;
+
+/// Timeout for stale message entries in the state tracker (1 hour)
+const STALE_MESSAGE_TIMEOUT_SECS: u64 = 3600;
+
+/// Interval for cleaning up stale entries (5 minutes)
+const STALE_CLEANUP_INTERVAL_SECS: u64 = 300;
 
 use super::CallbackChan;
 use super::Error;
@@ -495,203 +502,220 @@ struct State {
     errors: Vec<String>,
     stream_id: Option<String>,
     stream_closed: Option<bool>,
+    /// Timestamp when this state was created, used for stale entry cleanup
+    created_at: Instant,
 }
 
+/// Process state updates iteratively to avoid stack overflow with deeply nested streams
 fn process_state(
     handles: &mut HashMap<String, State>,
     output_ct: &usize,
     closed_outputs: &mut usize,
-    msg: InternalMessageState,
+    initial_msg: InternalMessageState,
 ) -> Result<(), Error> {
-    // trace!(state = msg.status.to_string(), message_id = msg.message_id, "Received message state");
+    // Use a stack for iterative processing instead of recursion
+    let mut pending_messages = vec![initial_msg];
+    let mut entries_to_remove = Vec::new();
 
-    let mut remove_entry = false;
-    let mut stream_id = None;
+    while let Some(msg) = pending_messages.pop() {
+        let mut remove_entry = false;
+        let mut stream_id = None;
 
-    match handles.get_mut(&msg.message_id) {
-        None => {
-            if let MessageStatus::Shutdown = &msg.status {
-                *closed_outputs += 1;
-                if closed_outputs == output_ct {
-                    info!("exiting message handler");
-                    return Err(Error::EndOfInput);
-                }
-            } else {
-                return Err(Error::ExecutionError(format!(
-                    "Message ID {} does not exist",
-                    msg.message_id
-                )));
-            };
-        }
-        Some(state) => {
-            match &msg.status {
-                MessageStatus::New => {
-                    state.instance_count += 1;
-                    stream_id = state.stream_id.clone();
-                }
-                MessageStatus::Processed => {
-                    state.processed_count += 1;
-                    stream_id = state.stream_id.clone();
-                }
-                MessageStatus::ProcessError(e) => {
-                    state.processed_error_count += 1;
-                    state.errors.push(e.clone());
-                    stream_id = state.stream_id.clone();
-
-                    let stream_closed = state.stream_closed.unwrap_or(true);
-
-                    if stream_closed
-                        && (state.output_count
-                            + state.output_error_count
-                            + state.processed_error_count)
-                            >= state.instance_count
-                    {
-                        remove_entry = true;
-                        if state.closure.is_some() {
-                            info!(message_id = msg.message_id, "calling closure");
-                            let s = None;
-                            #[allow(clippy::unwrap_used)]
-                            let chan = mem::replace(&mut state.closure, s).unwrap();
-                            let e = Vec::new();
-                            let err = mem::replace(&mut state.errors, e);
-                            let _ = chan.send(Status::Errored(err));
-                        };
-                    }
-                }
-                MessageStatus::Output => {
-                    state.output_count += 1;
-                    stream_id = state.stream_id.clone();
-
-                    debug!(
-                        message_id = msg.message_id,
-                        errors = state.processed_error_count,
-                        "message fully processed"
-                    );
-                    let stream_closed = state.stream_closed.unwrap_or(true);
-
-                    if stream_closed && state.output_count >= state.instance_count {
-                        remove_entry = true;
-                        if state.closure.is_some() {
-                            info!(message_id = msg.message_id, "calling closure");
-                            let s = None;
-                            #[allow(clippy::unwrap_used)]
-                            let chan = mem::replace(&mut state.closure, s).unwrap();
-                            let _ = chan.send(Status::Processed);
-                        };
-                    } else if stream_closed
-                        && (state.output_count
-                            + state.output_error_count
-                            + state.processed_error_count)
-                            >= state.instance_count
-                    {
-                        remove_entry = true;
-                        if state.closure.is_some() {
-                            info!(message_id = msg.message_id, "calling closure");
-                            let s = None;
-                            #[allow(clippy::unwrap_used)]
-                            let chan = mem::replace(&mut state.closure, s).unwrap();
-                            let e = Vec::new();
-                            let err = mem::replace(&mut state.errors, e);
-                            let _ = chan.send(Status::Errored(err));
-                        };
-                    }
-                }
-                MessageStatus::OutputError(e) => {
-                    state.output_error_count += 1;
-                    state.errors.push(e.clone());
-                    stream_id = state.stream_id.clone();
-
-                    if (state.output_count + state.output_error_count + state.processed_error_count)
-                        >= state.instance_count
-                    {
-                        remove_entry = state.stream_closed.unwrap_or(true);
-
-                        if remove_entry && state.closure.is_some() {
-                            info!(message_id = msg.message_id, "calling closure");
-                            let s = None;
-                            #[allow(clippy::unwrap_used)]
-                            let chan = mem::replace(&mut state.closure, s).unwrap();
-                            let e = Vec::new();
-                            let err = mem::replace(&mut state.errors, e);
-                            let _ = chan.send(Status::Errored(err));
-                        };
-                    }
-                }
-                MessageStatus::Shutdown => {
+        match handles.get_mut(&msg.message_id) {
+            None => {
+                if let MessageStatus::Shutdown = &msg.status {
                     *closed_outputs += 1;
                     if closed_outputs == output_ct {
-                        debug!("exiting message handler");
+                        info!("exiting message handler");
                         return Err(Error::EndOfInput);
                     }
-                }
-                MessageStatus::StreamComplete => {
-                    state.stream_closed = Some(true);
-                    state.output_count += 1;
+                } else {
+                    return Err(Error::ExecutionError(format!(
+                        "Message ID {} does not exist",
+                        msg.message_id
+                    )));
+                };
+            }
+            Some(state) => {
+                match &msg.status {
+                    MessageStatus::New => {
+                        state.instance_count += 1;
+                        stream_id = state.stream_id.clone();
+                    }
+                    MessageStatus::Processed => {
+                        state.processed_count += 1;
+                        stream_id = state.stream_id.clone();
+                    }
+                    MessageStatus::ProcessError(e) => {
+                        state.processed_error_count += 1;
+                        state.errors.push(e.clone());
+                        stream_id = state.stream_id.clone();
 
-                    stream_id = state.stream_id.clone();
-                    if state.output_count >= state.instance_count {
-                        remove_entry = true;
-                        if state.closure.is_some() {
-                            info!(message_id = msg.message_id, "calling closure");
-                            let s = None;
-                            #[allow(clippy::unwrap_used)]
-                            let chan = mem::replace(&mut state.closure, s).unwrap();
-                            let _ = chan.send(Status::Processed);
-                        };
-                    } else if (state.output_count
-                        + state.output_error_count
-                        + state.processed_error_count)
-                        >= state.instance_count
-                    {
-                        remove_entry = true;
-                        if state.closure.is_some() {
-                            info!(message_id = msg.message_id, "calling closure");
-                            let s = None;
-                            #[allow(clippy::unwrap_used)]
-                            let chan = mem::replace(&mut state.closure, s).unwrap();
-                            let e = Vec::new();
-                            let err = mem::replace(&mut state.errors, e);
-                            let _ = chan.send(Status::Errored(err));
-                        };
-                    };
-                }
-            };
+                        let stream_closed = state.stream_closed.unwrap_or(true);
 
-            info!(
-                instance_count = state.instance_count,
-                processed_count = state.processed_count,
-                processed_error_count = state.processed_error_count,
-                output_count = state.output_count,
-                output_error_count = state.output_error_count,
-                stream_id = state.stream_id,
-                stream_closed = state.stream_closed,
-                state = msg.status.to_string(),
-                message_id = msg.message_id,
-                "Received message state"
-            );
+                        if stream_closed
+                            && (state.output_count
+                                + state.output_error_count
+                                + state.processed_error_count)
+                                >= state.instance_count
+                        {
+                            remove_entry = true;
+                            if state.closure.is_some() {
+                                info!(message_id = msg.message_id, "calling closure");
+                                let s = None;
+                                #[allow(clippy::unwrap_used)]
+                                let chan = mem::replace(&mut state.closure, s).unwrap();
+                                let e = Vec::new();
+                                let err = mem::replace(&mut state.errors, e);
+                                let _ = chan.send(Status::Errored(err));
+                            };
+                        }
+                    }
+                    MessageStatus::Output => {
+                        state.output_count += 1;
+                        stream_id = state.stream_id.clone();
+
+                        debug!(
+                            message_id = msg.message_id,
+                            errors = state.processed_error_count,
+                            "message fully processed"
+                        );
+                        let stream_closed = state.stream_closed.unwrap_or(true);
+
+                        if stream_closed && state.output_count >= state.instance_count {
+                            remove_entry = true;
+                            if state.closure.is_some() {
+                                info!(message_id = msg.message_id, "calling closure");
+                                let s = None;
+                                #[allow(clippy::unwrap_used)]
+                                let chan = mem::replace(&mut state.closure, s).unwrap();
+                                let _ = chan.send(Status::Processed);
+                            };
+                        } else if stream_closed
+                            && (state.output_count
+                                + state.output_error_count
+                                + state.processed_error_count)
+                                >= state.instance_count
+                        {
+                            remove_entry = true;
+                            if state.closure.is_some() {
+                                info!(message_id = msg.message_id, "calling closure");
+                                let s = None;
+                                #[allow(clippy::unwrap_used)]
+                                let chan = mem::replace(&mut state.closure, s).unwrap();
+                                let e = Vec::new();
+                                let err = mem::replace(&mut state.errors, e);
+                                let _ = chan.send(Status::Errored(err));
+                            };
+                        }
+                    }
+                    MessageStatus::OutputError(e) => {
+                        state.output_error_count += 1;
+                        state.errors.push(e.clone());
+                        stream_id = state.stream_id.clone();
+
+                        if (state.output_count
+                            + state.output_error_count
+                            + state.processed_error_count)
+                            >= state.instance_count
+                        {
+                            remove_entry = state.stream_closed.unwrap_or(true);
+
+                            if remove_entry && state.closure.is_some() {
+                                info!(message_id = msg.message_id, "calling closure");
+                                let s = None;
+                                #[allow(clippy::unwrap_used)]
+                                let chan = mem::replace(&mut state.closure, s).unwrap();
+                                let e = Vec::new();
+                                let err = mem::replace(&mut state.errors, e);
+                                let _ = chan.send(Status::Errored(err));
+                            };
+                        }
+                    }
+                    MessageStatus::Shutdown => {
+                        *closed_outputs += 1;
+                        if closed_outputs == output_ct {
+                            debug!("exiting message handler");
+                            return Err(Error::EndOfInput);
+                        }
+                    }
+                    MessageStatus::StreamComplete => {
+                        state.stream_closed = Some(true);
+                        state.output_count += 1;
+
+                        stream_id = state.stream_id.clone();
+                        if state.output_count >= state.instance_count {
+                            remove_entry = true;
+                            if state.closure.is_some() {
+                                info!(message_id = msg.message_id, "calling closure");
+                                let s = None;
+                                #[allow(clippy::unwrap_used)]
+                                let chan = mem::replace(&mut state.closure, s).unwrap();
+                                let _ = chan.send(Status::Processed);
+                            };
+                        } else if (state.output_count
+                            + state.output_error_count
+                            + state.processed_error_count)
+                            >= state.instance_count
+                        {
+                            remove_entry = true;
+                            if state.closure.is_some() {
+                                info!(message_id = msg.message_id, "calling closure");
+                                let s = None;
+                                #[allow(clippy::unwrap_used)]
+                                let chan = mem::replace(&mut state.closure, s).unwrap();
+                                let e = Vec::new();
+                                let err = mem::replace(&mut state.errors, e);
+                                let _ = chan.send(Status::Errored(err));
+                            };
+                        };
+                    }
+                };
+
+                info!(
+                    instance_count = state.instance_count,
+                    processed_count = state.processed_count,
+                    processed_error_count = state.processed_error_count,
+                    output_count = state.output_count,
+                    output_error_count = state.output_error_count,
+                    stream_id = state.stream_id,
+                    stream_closed = state.stream_closed,
+                    state = msg.status.to_string(),
+                    message_id = msg.message_id,
+                    "Received message state"
+                );
+            }
+        };
+
+        // Queue stream state update instead of recursive call
+        if let Some(sid) = stream_id {
+            match handles.get(&sid) {
+                None => {
+                    return Err(Error::ExecutionError(format!(
+                        "StreamID {} does not exist (Message ID {})",
+                        sid, msg.message_id
+                    )))
+                }
+                Some(s) => {
+                    pending_messages.push(InternalMessageState {
+                        message_id: sid,
+                        status: msg.status.clone(),
+                        stream_id: s.stream_id.clone(),
+                        is_stream: true,
+                    });
+                }
+            }
         }
-    };
 
-    if let Some(stream_id) = stream_id {
-        match handles.get(&stream_id) {
-            None => {
-                return Err(Error::ExecutionError(format!(
-                    "StreamID {} does not exist (Message ID {})",
-                    stream_id, msg.message_id
-                )))
-            }
-            Some(s) => {
-                let mut stream = msg.clone();
-                stream.message_id = stream_id.clone();
-                stream.stream_id = s.stream_id.clone();
-                process_state(handles, output_ct, closed_outputs, stream)?;
-            }
+        if remove_entry {
+            trace!(message_id = msg.message_id, "Marking message for removal from state");
+            entries_to_remove.push(msg.message_id);
         }
     }
 
-    if remove_entry {
-        trace!(message_id = msg.message_id, "Removing message from state");
-        let _ = handles.remove(&msg.message_id);
+    // Remove entries after processing to avoid borrow conflicts
+    for message_id in entries_to_remove {
+        let _ = handles.remove(&message_id);
     }
 
     Ok(())
@@ -704,8 +728,36 @@ async fn message_handler(
 ) -> Result<(), Error> {
     let mut handles: HashMap<String, State> = HashMap::new();
     let mut closed_outputs = 0;
+    let mut last_cleanup = Instant::now();
+    let stale_timeout = std::time::Duration::from_secs(STALE_MESSAGE_TIMEOUT_SECS);
+    let cleanup_interval = std::time::Duration::from_secs(STALE_CLEANUP_INTERVAL_SECS);
 
     loop {
+        // Periodically clean up stale entries to prevent memory leaks
+        if last_cleanup.elapsed() >= cleanup_interval {
+            let before_count = handles.len();
+            handles.retain(|message_id, state| {
+                let is_stale = state.created_at.elapsed() >= stale_timeout;
+                if is_stale {
+                    warn!(
+                        message_id = message_id,
+                        age_secs = state.created_at.elapsed().as_secs(),
+                        "Removing stale message state entry"
+                    );
+                }
+                !is_stale
+            });
+            let removed = before_count - handles.len();
+            if removed > 0 {
+                info!(
+                    removed_count = removed,
+                    remaining_count = handles.len(),
+                    "Cleaned up stale message state entries"
+                );
+            }
+            last_cleanup = Instant::now();
+        }
+
         tokio::select! {
             biased;
             Ok(msg) = new_msg.recv_async() => {
@@ -739,6 +791,7 @@ async fn message_handler(
                         true => Some(false),
                         false => None,
                     },
+                    created_at: Instant::now(),
                 });
                 if i.is_some() {
                     error!(message_id = msg.message_id, "Received duplicate message");
@@ -771,7 +824,10 @@ async fn message_handler(
         }
     }
 
-    // add counter and metrics dump how many processed // errored // etc
+    info!(
+        total_tracked = handles.len(),
+        "Message handler shutdown complete"
+    );
     Ok(())
 }
 

@@ -50,15 +50,20 @@ pub(crate) async fn run_processor(
         match input.try_recv() {
             Ok(msg) => {
                 trace!("received processing message");
-                match p.process(msg.message.clone()).await {
+                let stream_id = msg.message.stream_id.clone();
+                let message_id = msg.message_id.clone();
+                let status = msg.status.clone();
+
+                match p.process(msg.message).await {
                     Ok(m) => {
-                        if m.len() > 1 {
-                            for _ in 0..(m.len() - 1) {
+                        let msg_count = m.len();
+                        if msg_count > 1 {
+                            for _ in 0..(msg_count - 1) {
                                 state_tx
                                     .send_async(InternalMessageState {
-                                        message_id: msg.message_id.clone(),
+                                        message_id: message_id.clone(),
                                         status: MessageStatus::New,
-                                        stream_id: msg.message.stream_id.clone(),
+                                        stream_id: stream_id.clone(),
                                         ..Default::default()
                                     })
                                     .await
@@ -66,10 +71,15 @@ pub(crate) async fn run_processor(
                             }
                         }
 
-                        for m in m.iter() {
-                            let mut new_msg = msg.clone();
-                            new_msg.message = m.clone();
-                            new_msg.message.stream_id = msg.message.stream_id.clone();
+                        for message in m.into_iter() {
+                            let new_msg = InternalMessage {
+                                message_id: message_id.clone(),
+                                status: status.clone(),
+                                message: crate::Message {
+                                    stream_id: stream_id.clone(),
+                                    ..message
+                                },
+                            };
 
                             trace!("message processed");
                             output
@@ -84,9 +94,9 @@ pub(crate) async fn run_processor(
 
                             state_tx
                                 .send_async(InternalMessageState {
-                                    message_id: msg.message_id,
+                                    message_id,
                                     status: MessageStatus::ProcessError(format!("{e}")),
-                                    stream_id: msg.message.stream_id.clone(),
+                                    stream_id,
                                     ..Default::default()
                                 })
                                 .await
