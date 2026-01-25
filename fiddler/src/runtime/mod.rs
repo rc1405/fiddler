@@ -88,7 +88,7 @@ impl MessageMetrics {
     /// Records metrics to the configured metrics backend.
     ///
     /// If no metrics backend is configured, this is a no-op.
-    pub fn record(&self, metrics_backend: &dyn Metrics, in_flight: usize) {
+    pub fn record(&self, metrics_backend: &mut dyn Metrics, in_flight: usize) {
         metrics_backend.record(MetricEntry {
             total_received: self.total_received,
             total_completed: self.total_completed,
@@ -766,7 +766,7 @@ async fn message_handler(
     new_msg: Receiver<MessageHandle>,
     msg_status: Receiver<InternalMessageState>,
     output_ct: usize,
-    metrics_backend: Box<dyn Metrics>,
+    mut metrics_backend: Box<dyn Metrics>,
 ) -> Result<(), Error> {
     let mut handles: HashMap<String, State> = HashMap::new();
     let mut closed_outputs = 0;
@@ -802,7 +802,7 @@ async fn message_handler(
             last_cleanup = Instant::now();
 
             // Record metrics to configured backend
-            metrics.record(metrics_backend.as_ref(), handles.len());
+            metrics.record(metrics_backend.as_mut(), handles.len());
         }
 
         tokio::select! {
@@ -819,7 +819,7 @@ async fn message_handler(
                     }, &mut metrics) {
                         match e {
                             Error::EndOfInput => {
-                                log_shutdown_metrics(&metrics, handles.len(), metrics_backend.as_ref());
+                                log_shutdown_metrics(&metrics, handles.len(), metrics_backend.as_mut());
                                 return Ok(());
                             }
                             _ => return Err(e),
@@ -866,7 +866,7 @@ async fn message_handler(
                     }, &mut metrics) {
                         match e {
                             Error::EndOfInput => {
-                                log_shutdown_metrics(&metrics, handles.len(), metrics_backend.as_ref());
+                                log_shutdown_metrics(&metrics, handles.len(), metrics_backend.as_mut());
                                 return Ok(());
                             }
                         _ => return Err(e),
@@ -878,7 +878,7 @@ async fn message_handler(
                 if let Err(e) = process_state(&mut handles, &output_ct, &mut closed_outputs, msg, &mut metrics) {
                     match e {
                         Error::EndOfInput => {
-                            log_shutdown_metrics(&metrics, handles.len(), metrics_backend.as_ref());
+                            log_shutdown_metrics(&metrics, handles.len(), metrics_backend.as_mut());
                             return Ok(());
                         }
                         _ => return Err(e),
@@ -889,12 +889,16 @@ async fn message_handler(
         }
     }
 
-    log_shutdown_metrics(&metrics, handles.len(), metrics_backend.as_ref());
+    log_shutdown_metrics(&metrics, handles.len(), metrics_backend.as_mut());
     Ok(())
 }
 
 /// Logs comprehensive shutdown metrics for observability.
-fn log_shutdown_metrics(metrics: &MessageMetrics, in_flight: usize, metrics_backend: &dyn Metrics) {
+fn log_shutdown_metrics(
+    metrics: &MessageMetrics,
+    in_flight: usize,
+    metrics_backend: &mut dyn Metrics,
+) {
     // Record final metrics to configured backend
     metrics.record(metrics_backend, in_flight);
 
@@ -1109,9 +1113,9 @@ mod tests {
     fn test_message_metrics_record_with_noop_backend() {
         use crate::modules::metrics::NoOpMetrics;
         // Should work with no-op metrics backend
-        let mut metrics = MessageMetrics::new();
+        let metrics = MessageMetrics::new();
         let mut backend = NoOpMetrics::new();
-        metrics.record(&backend, 10);
+        metrics.record(&mut backend, 10);
         // No assertion needed - just verify it doesn't panic
     }
 }

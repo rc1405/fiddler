@@ -82,7 +82,7 @@ impl Default for PrometheusMetrics {
 
 #[async_trait]
 impl Metrics for PrometheusMetrics {
-    fn record(&self, metric: MetricEntry) {
+    fn record(&mut self, metric: MetricEntry) {
         counter!("fiddler_messages_received_total").absolute(metric.total_received);
         counter!("fiddler_messages_completed_total").absolute(metric.total_completed);
         counter!("fiddler_messages_process_errors_total").absolute(metric.total_process_errors);

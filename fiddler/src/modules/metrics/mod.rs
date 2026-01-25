@@ -51,7 +51,7 @@ impl NoOpMetrics {
 
 #[async_trait]
 impl Metrics for NoOpMetrics {
-    fn record(&self, _metric: MetricEntry) {
+    fn record(&mut self, _metric: MetricEntry) {
         // No-op: metrics are disabled
     }
 }

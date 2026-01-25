@@ -204,7 +204,7 @@ pub trait Processor: Closer {
 /// metrics from the fiddler runtime. The trait is designed to be lightweight
 /// and non-blocking to avoid impacting pipeline performance.
 #[async_trait]
-pub trait Metrics: Send {
+pub trait Metrics: Closer + Send {
     /// Records current metrics values to the backend.
     ///
     /// This method is called periodically by the runtime to update metrics.
@@ -213,7 +213,7 @@ pub trait Metrics: Send {
     /// # Arguments
     ///
     /// * `metric` - MetricEntry struct with details about metrics to be published
-    fn record(&self, metric: MetricEntry);
+    fn record(&mut self, metric: MetricEntry);
 }
 
 /// Enum to capture errors occurred through the pipeline.
