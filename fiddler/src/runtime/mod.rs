@@ -24,6 +24,92 @@ const STALE_MESSAGE_TIMEOUT_SECS: u64 = 3600;
 /// Interval for cleaning up stale entries (5 minutes)
 const STALE_CLEANUP_INTERVAL_SECS: u64 = 300;
 
+/// Tracks message processing statistics for observability.
+///
+/// This struct maintains counters for various message processing events
+/// to enable monitoring and debugging of the pipeline.
+#[derive(Debug, Default)]
+pub struct MessageMetrics {
+    /// Total messages received from input
+    pub total_received: u64,
+    /// Messages successfully processed through all outputs
+    pub total_completed: u64,
+    /// Messages that encountered processing errors
+    pub total_process_errors: u64,
+    /// Messages that encountered output errors
+    pub total_output_errors: u64,
+    /// Streams started
+    pub streams_started: u64,
+    /// Streams completed
+    pub streams_completed: u64,
+    /// Duplicate messages rejected
+    pub duplicates_rejected: u64,
+    /// Stale entries cleaned up
+    pub stale_entries_removed: u64,
+    /// Timestamp when metrics collection started
+    started_at: Option<Instant>,
+}
+
+impl MessageMetrics {
+    /// Creates a new MessageMetrics instance with the current timestamp.
+    pub fn new() -> Self {
+        Self {
+            started_at: Some(Instant::now()),
+            ..Default::default()
+        }
+    }
+
+    /// Returns the duration since metrics collection started.
+    pub fn elapsed(&self) -> std::time::Duration {
+        self.started_at
+            .map(|t| t.elapsed())
+            .unwrap_or_default()
+    }
+
+    /// Returns the throughput in messages per second.
+    pub fn throughput_per_sec(&self) -> f64 {
+        let elapsed = self.elapsed().as_secs_f64();
+        if elapsed > 0.0 {
+            self.total_completed as f64 / elapsed
+        } else {
+            0.0
+        }
+    }
+
+    /// Returns the error rate as a percentage.
+    pub fn error_rate(&self) -> f64 {
+        let total = self.total_completed + self.total_process_errors + self.total_output_errors;
+        if total > 0 {
+            ((self.total_process_errors + self.total_output_errors) as f64 / total as f64) * 100.0
+        } else {
+            0.0
+        }
+    }
+
+    /// Records metrics to prometheus gauges/counters when the feature is enabled.
+    #[cfg(feature = "prometheus")]
+    pub fn record_to_prometheus(&self, in_flight: usize) {
+        use metrics::{counter, gauge};
+
+        counter!("fiddler_messages_received_total").absolute(self.total_received);
+        counter!("fiddler_messages_completed_total").absolute(self.total_completed);
+        counter!("fiddler_messages_process_errors_total").absolute(self.total_process_errors);
+        counter!("fiddler_messages_output_errors_total").absolute(self.total_output_errors);
+        counter!("fiddler_streams_started_total").absolute(self.streams_started);
+        counter!("fiddler_streams_completed_total").absolute(self.streams_completed);
+        counter!("fiddler_duplicates_rejected_total").absolute(self.duplicates_rejected);
+        counter!("fiddler_stale_entries_removed_total").absolute(self.stale_entries_removed);
+        gauge!("fiddler_messages_in_flight").set(in_flight as f64);
+        gauge!("fiddler_throughput_per_second").set(self.throughput_per_sec());
+    }
+
+    /// No-op when prometheus feature is not enabled.
+    #[cfg(not(feature = "prometheus"))]
+    pub fn record_to_prometheus(&self, _in_flight: usize) {
+        // Prometheus metrics disabled
+    }
+}
+
 /// Creates a new single-threaded tokio runtime with the given thread name.
 /// This helper reduces code duplication across the codebase.
 fn create_runtime(thread_name: impl Into<String>) -> Result<tokio::runtime::Runtime, Error> {
@@ -481,6 +567,7 @@ fn process_state(
     output_ct: &usize,
     closed_outputs: &mut usize,
     initial_msg: InternalMessageState,
+    metrics: &mut MessageMetrics,
 ) -> Result<(), Error> {
     // Use a stack for iterative processing instead of recursion
     let mut pending_messages = vec![initial_msg];
@@ -489,6 +576,7 @@ fn process_state(
     while let Some(msg) = pending_messages.pop() {
         let mut remove_entry = false;
         let mut stream_id = None;
+        let mut message_completed_successfully = false;
 
         match handles.get_mut(&msg.message_id) {
             None => {
@@ -519,6 +607,7 @@ fn process_state(
                         state.processed_error_count += 1;
                         state.errors.push(e.clone());
                         stream_id = state.stream_id.clone();
+                        metrics.total_process_errors += 1;
 
                         let stream_closed = state.stream_closed.unwrap_or(true);
 
@@ -549,6 +638,7 @@ fn process_state(
 
                         if stream_closed && state.output_count >= state.instance_count {
                             remove_entry = true;
+                            message_completed_successfully = true;
                             if let Some(chan) = state.closure.take() {
                                 info!(message_id = msg.message_id, "calling closure");
                                 let _ = chan.send(Status::Processed);
@@ -571,6 +661,7 @@ fn process_state(
                         state.output_error_count += 1;
                         state.errors.push(e.clone());
                         stream_id = state.stream_id.clone();
+                        metrics.total_output_errors += 1;
 
                         if (state.output_count
                             + state.output_error_count
@@ -602,6 +693,7 @@ fn process_state(
                         stream_id = state.stream_id.clone();
                         if state.output_count >= state.instance_count {
                             remove_entry = true;
+                            message_completed_successfully = true;
                             if let Some(chan) = state.closure.take() {
                                 info!(message_id = msg.message_id, "calling closure");
                                 let _ = chan.send(Status::Processed);
@@ -659,6 +751,10 @@ fn process_state(
         if remove_entry {
             trace!(message_id = msg.message_id, "Marking message for removal from state");
             entries_to_remove.push(msg.message_id);
+            // Track completed messages (only count non-stream messages to avoid double counting)
+            if message_completed_successfully && !msg.is_stream {
+                metrics.total_completed += 1;
+            }
         }
     }
 
@@ -680,6 +776,7 @@ async fn message_handler(
     let mut last_cleanup = Instant::now();
     let stale_timeout = std::time::Duration::from_secs(STALE_MESSAGE_TIMEOUT_SECS);
     let cleanup_interval = std::time::Duration::from_secs(STALE_CLEANUP_INTERVAL_SECS);
+    let mut metrics = MessageMetrics::new();
 
     loop {
         // Periodically clean up stale entries to prevent memory leaks
@@ -698,6 +795,7 @@ async fn message_handler(
             });
             let removed = before_count - handles.len();
             if removed > 0 {
+                metrics.stale_entries_removed += removed as u64;
                 info!(
                     removed_count = removed,
                     remaining_count = handles.len(),
@@ -705,6 +803,9 @@ async fn message_handler(
                 );
             }
             last_cleanup = Instant::now();
+
+            // Record metrics to prometheus if enabled
+            metrics.record_to_prometheus(handles.len());
         }
 
         tokio::select! {
@@ -712,19 +813,29 @@ async fn message_handler(
             Ok(msg) = new_msg.recv_async() => {
                 trace!(message_id = msg.message_id, "Received new message");
                 if msg.is_stream && msg.stream_complete {
+                    metrics.streams_completed += 1;
                     if let Err(e) = process_state(&mut handles, &output_ct, &mut closed_outputs, InternalMessageState {
                         message_id: msg.message_id.clone(),
                         status: MessageStatus::StreamComplete,
                         stream_id: msg.stream_id.clone(),
                         is_stream: true
-                    }) {
+                    }, &mut metrics) {
                         match e {
-                            Error::EndOfInput => return Ok(()),
+                            Error::EndOfInput => {
+                                log_shutdown_metrics(&metrics, handles.len());
+                                return Ok(());
+                            }
                             _ => return Err(e),
                         }
                     }
                     continue
                 };
+
+                // Track new message received
+                metrics.total_received += 1;
+                if msg.is_stream {
+                    metrics.streams_started += 1;
+                }
 
                 let closure = msg.closure;
                 match handles.entry(msg.message_id.clone()) {
@@ -743,6 +854,7 @@ async fn message_handler(
                         });
                     }
                     Entry::Occupied(_) => {
+                        metrics.duplicates_rejected += 1;
                         error!(message_id = msg.message_id, "Received duplicate message");
                         return Err(Error::ExecutionError("Duplicate Message ID Error".into()));
                     }
@@ -754,18 +866,24 @@ async fn message_handler(
                         status: MessageStatus::New,
                         stream_id: None,
                         is_stream: true,
-                    }) {
+                    }, &mut metrics) {
                         match e {
-                            Error::EndOfInput => return Ok(()),
+                            Error::EndOfInput => {
+                                log_shutdown_metrics(&metrics, handles.len());
+                                return Ok(());
+                            }
                         _ => return Err(e),
                         }
                     };
                 }
             },
             Ok(msg) = msg_status.recv_async() => {
-                if let Err(e) = process_state(&mut handles, &output_ct, &mut closed_outputs, msg) {
+                if let Err(e) = process_state(&mut handles, &output_ct, &mut closed_outputs, msg, &mut metrics) {
                     match e {
-                        Error::EndOfInput => return Ok(()),
+                        Error::EndOfInput => {
+                            log_shutdown_metrics(&metrics, handles.len());
+                            return Ok(());
+                        }
                         _ => return Err(e),
                     };
                 };
@@ -774,11 +892,30 @@ async fn message_handler(
         }
     }
 
+    log_shutdown_metrics(&metrics, handles.len());
+    Ok(())
+}
+
+/// Logs comprehensive shutdown metrics for observability.
+fn log_shutdown_metrics(metrics: &MessageMetrics, in_flight: usize) {
+    // Record final metrics to prometheus if enabled
+    metrics.record_to_prometheus(in_flight);
+
     info!(
-        total_tracked = handles.len(),
+        total_received = metrics.total_received,
+        total_completed = metrics.total_completed,
+        total_process_errors = metrics.total_process_errors,
+        total_output_errors = metrics.total_output_errors,
+        streams_started = metrics.streams_started,
+        streams_completed = metrics.streams_completed,
+        duplicates_rejected = metrics.duplicates_rejected,
+        stale_entries_removed = metrics.stale_entries_removed,
+        duration_secs = metrics.elapsed().as_secs(),
+        throughput_per_sec = format!("{:.2}", metrics.throughput_per_sec()),
+        error_rate_percent = format!("{:.2}", metrics.error_rate()),
+        remaining_in_flight = in_flight,
         "Message handler shutdown complete"
     );
-    Ok(())
 }
 
 async fn input(
@@ -881,5 +1018,101 @@ async fn input(
                 }
             },
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_message_metrics_new() {
+        let metrics = MessageMetrics::new();
+        assert_eq!(metrics.total_received, 0);
+        assert_eq!(metrics.total_completed, 0);
+        assert_eq!(metrics.total_process_errors, 0);
+        assert_eq!(metrics.total_output_errors, 0);
+        assert_eq!(metrics.streams_started, 0);
+        assert_eq!(metrics.streams_completed, 0);
+        assert_eq!(metrics.duplicates_rejected, 0);
+        assert_eq!(metrics.stale_entries_removed, 0);
+        assert!(metrics.started_at.is_some());
+    }
+
+    #[test]
+    fn test_message_metrics_default() {
+        let metrics = MessageMetrics::default();
+        assert_eq!(metrics.total_received, 0);
+        assert!(metrics.started_at.is_none());
+    }
+
+    #[test]
+    fn test_message_metrics_elapsed() {
+        let metrics = MessageMetrics::new();
+        std::thread::sleep(std::time::Duration::from_millis(10));
+        let elapsed = metrics.elapsed();
+        assert!(elapsed.as_millis() >= 10);
+    }
+
+    #[test]
+    fn test_message_metrics_elapsed_without_start() {
+        let metrics = MessageMetrics::default();
+        let elapsed = metrics.elapsed();
+        assert_eq!(elapsed, std::time::Duration::default());
+    }
+
+    #[test]
+    fn test_message_metrics_throughput_per_sec() {
+        let mut metrics = MessageMetrics::new();
+        metrics.total_completed = 100;
+        // Throughput depends on elapsed time, just verify it returns a value
+        let throughput = metrics.throughput_per_sec();
+        assert!(throughput >= 0.0);
+    }
+
+    #[test]
+    fn test_message_metrics_throughput_zero_elapsed() {
+        let mut metrics = MessageMetrics::default();
+        metrics.total_completed = 100;
+        // With no start time, elapsed is 0, so throughput should be 0
+        let throughput = metrics.throughput_per_sec();
+        assert_eq!(throughput, 0.0);
+    }
+
+    #[test]
+    fn test_message_metrics_error_rate_no_messages() {
+        let metrics = MessageMetrics::new();
+        let error_rate = metrics.error_rate();
+        assert_eq!(error_rate, 0.0);
+    }
+
+    #[test]
+    fn test_message_metrics_error_rate_with_errors() {
+        let mut metrics = MessageMetrics::new();
+        metrics.total_completed = 90;
+        metrics.total_process_errors = 5;
+        metrics.total_output_errors = 5;
+        let error_rate = metrics.error_rate();
+        // 10 errors out of 100 total = 10%
+        assert!((error_rate - 10.0).abs() < 0.01);
+    }
+
+    #[test]
+    fn test_message_metrics_error_rate_all_errors() {
+        let mut metrics = MessageMetrics::new();
+        metrics.total_completed = 0;
+        metrics.total_process_errors = 50;
+        metrics.total_output_errors = 50;
+        let error_rate = metrics.error_rate();
+        // 100 errors out of 100 total = 100%
+        assert!((error_rate - 100.0).abs() < 0.01);
+    }
+
+    #[test]
+    fn test_message_metrics_record_to_prometheus_noop() {
+        // When prometheus feature is disabled, this should be a no-op
+        let metrics = MessageMetrics::new();
+        metrics.record_to_prometheus(10);
+        // No assertion needed - just verify it doesn't panic
     }
 }
