@@ -27,15 +27,14 @@ impl Processor for Try {
             Ok(m) => Ok(m),
             Err(e) => {
                 debug!("caught error {e}");
-                let mut messages = vec![message.clone()];
+                let mut messages = vec![message];
                 for p in &self.catch {
                     let mut new_messages = Vec::new();
-                    while let Some(m) = messages.pop() {
-                        new_messages = messages.clone();
-                        let m = p.process(m.clone()).await?;
-                        new_messages.extend(m);
+                    for m in messages.drain(..) {
+                        let processed = p.process(m).await?;
+                        new_messages.extend(processed);
                     }
-                    let _ = std::mem::replace(&mut messages, new_messages);
+                    messages = new_messages;
                 }
                 Ok(messages)
             }

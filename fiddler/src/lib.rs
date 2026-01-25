@@ -18,10 +18,22 @@ pub(crate) mod modules;
 mod runtime;
 
 /// BatchingPolicy defines common configuration items for used in batching operations
-/// such as OutputBatch modules
+/// such as OutputBatch modules.
+///
+/// # Example Configuration
+///
+/// ```yaml
+/// output:
+///   elasticsearch:
+///     batch:
+///       duration: 10s
+///       size: 500
+/// ```
 #[derive(Deserialize, Default, Clone)]
 pub struct BatchingPolicy {
+    /// Maximum duration to wait before flushing a batch
     duration: Option<Duration>,
+    /// Maximum number of messages in a batch before flushing
     size: Option<usize>,
 }
 
@@ -72,6 +84,36 @@ pub struct Message {
 
 /// Type alias for Vec<[crate::Message]>, a grouping of Messages being produced
 pub type MessageBatch = Vec<Message>;
+
+/// MetricEntry is the uniform struct utilized within metrics modules of fiddler.
+/// ```
+/// # use fiddler::MetricEntry;
+/// let content = "This is a message being processed";
+/// let metric = MetricEntry::default();
+/// ```
+#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq)]
+pub struct MetricEntry {
+    /// * `total_received` - Total messages received from input
+    pub total_received: u64,
+    /// * `total_completed` - Messages successfully processed through all outputs
+    pub total_completed: u64,
+    /// * `total_process_errors` - Messages that encountered processing errors
+    pub total_process_errors: u64,
+    /// * `total_output_errors` - Messages that encountered output errors  
+    pub total_output_errors: u64,
+    /// * `streams_started` - Number of streams started
+    pub streams_started: u64,
+    /// * `streams_completed` - Number of streams completed
+    pub streams_completed: u64,
+    /// * `duplicates_rejected` - Duplicate messages rejected
+    pub duplicates_rejected: u64,
+    /// * `stale_entries_removed` - Stale entries cleaned up
+    pub stale_entries_removed: u64,
+    /// * `in_flight` - Current number of messages being processed
+    pub in_flight: usize,
+    /// * `throughput_per_sec` - Current throughput in messages per second
+    pub throughput_per_sec: f64,
+}
 
 /// Acknowledgement channel utilized to send feedback to input module on the successful
 /// or unsuccessful processing of event emited by input.
@@ -156,84 +198,117 @@ pub trait Processor: Closer {
     async fn process(&self, message: Message) -> Result<MessageBatch, Error>;
 }
 
-/// Enum to capture errors occured through the pipeline
+/// Trait for metrics backends.
+///
+/// Implementations of this trait are responsible for recording and exposing
+/// metrics from the fiddler runtime. The trait is designed to be lightweight
+/// and non-blocking to avoid impacting pipeline performance.
+#[async_trait]
+pub trait Metrics: Closer + Send {
+    /// Records current metrics values to the backend.
+    ///
+    /// This method is called periodically by the runtime to update metrics.
+    /// Implementations should be fast and non-blocking.
+    ///
+    /// # Arguments
+    ///
+    /// * `metric` - MetricEntry struct with details about metrics to be published
+    fn record(&mut self, metric: MetricEntry);
+}
+
+/// Enum to capture errors occurred through the pipeline.
+///
+/// Uses `thiserror` for ergonomic error handling with proper `std::error::Error` implementation.
+/// Errors that wrap other errors use `#[source]` or `#[from]` for proper error chaining.
 #[derive(Debug, Error)]
 pub enum Error {
-    /// Yaml parsing errors found within the declarative language proved
-    #[error("UnableToSerializeObject: {0}")]
-    UnableToSerializeYamlObject(#[from] serde_yaml::Error),
+    /// Yaml parsing errors found within the declarative language provided
+    #[error("Unable to serialize YAML object")]
+    UnableToSerializeYamlObject(
+        #[from]
+        #[source]
+        serde_yaml::Error,
+    ),
 
     /// JSON serialization is primarily utilized as a preparser to passing the declarative
-    /// language to the given module by utilizing jsonschema to validate the input.  This is unlikely
+    /// language to the given module by utilizing jsonschema to validate the input. This is unlikely
     /// to occur in practice since the yaml configuration object is converted to json for this step.
-    #[error("UnableToSerializeObject: {0}")]
-    UnableToSerializeJsonObject(#[from] serde_json::Error),
+    #[error("Unable to serialize JSON object")]
+    UnableToSerializeJsonObject(
+        #[from]
+        #[source]
+        serde_json::Error,
+    ),
 
     /// Validation errors discovered by the jsonschema evaluation of the declarative configuration language
     /// provided to a given module
-    #[error("ValidationError: {0}")]
+    #[error("Validation error: {0}")]
     Validation(String),
 
     /// Error with the processing pipeline due to a failure of internal libraries or utilized modules
-    #[error("ExecutionError: {0}")]
+    #[error("Execution error: {0}")]
     ExecutionError(String),
 
-    /// EndOfInput is a error enum variant to indicate that the input module has finished and will not
-    /// receive additional input.  This error triggers a graceful shutdown of the processing pipeline
-    #[error("EndOfInput")]
+    /// EndOfInput is an error enum variant to indicate that the input module has finished and will not
+    /// receive additional input. This error triggers a graceful shutdown of the processing pipeline
+    #[error("End of input reached")]
     EndOfInput,
 
     /// Unable to secure internal mutex lock
-    #[error("InternalServerError")]
+    #[error("Internal server error: unable to secure lock")]
     UnableToSecureLock,
 
     /// A plugin of the same category (input, processing, output) has already been provided
-    #[error("DuplicateRegisteredName: {0}")]
+    #[error("Duplicate registered name: {0}")]
     DuplicateRegisteredName(String),
 
-    /// The provided jsonschema configuration for a module in incorrect
-    #[error("InvalidValidationSchema: {0}")]
+    /// The provided jsonschema configuration for a module is incorrect
+    #[error("Invalid validation schema: {0}")]
     InvalidValidationSchema(String),
 
     /// Configuration provided to a module is invalid
-    #[error("ConfigurationValidationFailed: {0}")]
+    #[error("Configuration validation failed: {0}")]
     ConfigFailedValidation(String),
 
     /// Module is not registered with the runtime.
-    #[error("ConfigurationItemNotFound: {0}")]
+    #[error("Configuration item not found: {0}")]
     ConfigurationItemNotFound(String),
 
     /// Not yet implemented functionality
-    #[error("NotYetImplemented")]
+    #[error("Not yet implemented")]
     NotYetImplemented,
 
     /// Failure to send to an internal channel processing [crate::Message]s
-    #[error("PipelineProcessingError: {0}")]
+    #[error("Pipeline processing error: {0}")]
     UnableToSendToChannel(String),
 
     /// Failure to receive from internal raw channel
-    #[error("ChannelRecvError: {0}")]
-    RecvChannelError(#[from] flume::RecvError),
+    #[error("Channel receive error")]
+    RecvChannelError(
+        #[from]
+        #[source]
+        flume::RecvError,
+    ),
 
-    /// Processing module failed with an unrecoverable error.  Processing of [crate::Message] is stopped and
+    /// Processing module failed with an unrecoverable error. Processing of [crate::Message] is stopped and
     /// [crate::Status] is returned to the input module once all messages in this lineage have been processed
-    #[error("ProcessorFailure: {0}")]
+    #[error("Processor failure: {0}")]
     ProcessingError(String),
 
     /// Conditional check has failed for [crate::Message], such as use with [crate::modules::processors::switch]
     /// conditions
-    #[error("ConditionalCheckfailed")]
+    #[error("Conditional check failed")]
     ConditionalCheckfailed,
 
     /// Error encountered while calling [crate::Input::read] on an input module
-    #[error("InputError: {0}")]
+    #[error("Input error: {0}")]
     InputError(String),
 
     /// Error encountered while calling [crate::Output::write] or [crate::OutputBatch::write_batch] on an output module
-    #[error("OutputError: {0}")]
+    #[error("Output error: {0}")]
     OutputError(String),
 
     /// Error returned by input module to indicate there are no messages to process
-    #[error("NoInputToReturn")]
+    #[error("No input to return")]
     NoInputToReturn,
 }

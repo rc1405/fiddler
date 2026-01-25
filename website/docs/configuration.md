@@ -5,6 +5,8 @@
 ```yml
 label: Label for Pipeline
 num_threads: 3
+metrics:
+  prometheus: {}
 input:
   label: standard in
   stdin: {}
@@ -14,33 +16,38 @@ processors:
     lines: {}
 output:
   label: standard out
-  std: out
+  stdout: {}
 ```
 
 ### Fields
 #### `label`
-Descriptive label for the component.  (Pipeline, Input, Processor, Output)    
-Type: `string`  
-Required: `false`  
+Descriptive label for the component.  (Pipeline, Input, Processor, Output)
+Type: `string`
+Required: `false`
 
 #### `num_threads`
-Number of processor and output threads to spawn in the pipeline  
-Type: `int`  
-Required: `false` [Default: number of CPUs]  
+Number of processor and output threads to spawn in the pipeline
+Type: `int`
+Required: `false` [Default: number of CPUs]
+
+#### `metrics`
+Optional metrics configuration for observability.  See [Metrics](./metrics/About.md)
+Type: `object`
+Required: `false`
 
 #### `input`
-Valid input configuration.  See [Inputs](./inputs/About.md)  
-Type: `object`  
-Required: `true`  
+Valid input configuration.  See [Inputs](./inputs/About.md)
+Type: `object`
+Required: `true`
 
 #### `processors`
-An Array of processors to perform manipulation of messages.  See [Processors](./processors/About.md)  
-Type: `array`  
-Required: `true`  
+An Array of processors to perform manipulation of messages.  See [Processors](./processors/About.md)
+Type: `array`
+Required: `true`
 
 #### `output`
-Valid output configuration.  See [Outputs](./outputs/About.md)  
-Type: `string`  
+Valid output configuration.  See [Outputs](./outputs/About.md)
+Type: `object`
 Required: `true`  
 
 ## Environmental Variables

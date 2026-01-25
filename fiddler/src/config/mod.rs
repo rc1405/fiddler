@@ -7,13 +7,13 @@ use std::collections::HashMap;
 use std::env;
 use std::fmt;
 use std::str::FromStr;
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 use tracing::{debug, error, trace};
 
 use core::future::Future;
 use std::pin::Pin;
 
-use super::{Error, Input, Output, Processor};
+use super::{Error, Input, Metrics, Output, Processor};
 use crate::{InputBatch, OutputBatch};
 
 mod registration;
@@ -38,6 +38,8 @@ pub enum ItemType {
     OutputBatch,
     /// [crate::Processor] trait enum variant
     Processor,
+    /// [crate::Metrics] backend enum variant
+    Metrics,
 }
 
 impl fmt::Display for ItemType {
@@ -48,6 +50,7 @@ impl fmt::Display for ItemType {
             ItemType::Output => "output",
             ItemType::OutputBatch => "output",
             ItemType::Processor => "processors",
+            ItemType::Metrics => "metrics",
         };
         write!(f, "{}", msg)
     }
@@ -65,6 +68,8 @@ pub enum ExecutionType {
     OutputBatch(Box<dyn OutputBatch + Send + Sync>),
     /// [crate::Processor] trait enum variant
     Processor(Box<dyn Processor + Send + Sync>),
+    /// Metrics backend enum variant
+    Metrics(Box<dyn Metrics + Send + Sync>),
 }
 
 static ENV: Lazy<Mutex<HashMap<ItemType, HashMap<String, RegisteredItem>>>> = Lazy::new(|| {
@@ -79,6 +84,8 @@ static ENV: Lazy<Mutex<HashMap<ItemType, HashMap<String, RegisteredItem>>>> = La
     m.insert(ItemType::OutputBatch, HashMap::new());
     #[allow(unused_results)]
     m.insert(ItemType::Processor, HashMap::new());
+    #[allow(unused_results)]
+    m.insert(ItemType::Metrics, HashMap::new());
     Mutex::new(m)
 });
 
@@ -105,6 +112,27 @@ pub(crate) struct Item {
     pub extra: HashMap<String, Value>,
 }
 
+/// Metrics configuration for observability.
+///
+/// Uses the same dynamic configuration pattern as inputs/processors/outputs,
+/// allowing any registered metrics backend to be configured.
+///
+/// # Example Configuration
+///
+/// ```yaml
+/// metrics:
+///   prometheus: {}
+/// ```
+#[derive(Debug, Deserialize, Serialize, Clone, Default)]
+pub struct MetricsConfig {
+    /// Optional label for the metrics configuration
+    pub label: Option<String>,
+
+    /// Dynamic configuration for the metrics backend
+    #[serde(flatten)]
+    pub extra: HashMap<String, Value>,
+}
+
 /// Unparsed fiddler configuration
 #[derive(Debug, Deserialize, Serialize)]
 pub struct Config {
@@ -112,6 +140,8 @@ pub struct Config {
     pub label: Option<String>,
     /// Number of threads to use for Processors and Outputs
     pub num_threads: Option<usize>,
+    /// Optional metrics configuration for observability
+    pub metrics: Option<MetricsConfig>,
     /// Input configuration following [crate::Input] or [crate::InputBatch] traits
     #[allow(private_interfaces)]
     pub input: Item,
@@ -200,6 +230,7 @@ impl Config {
         trace!("Num threads are {}", num_threads);
 
         let label = self.label.clone();
+        let metrics = self.metrics.clone();
         debug!("configuration is valid");
 
         Ok(ParsedConfig {
@@ -207,6 +238,7 @@ impl Config {
             input,
             processors,
             num_threads,
+            metrics,
             output,
         })
     }
@@ -219,6 +251,8 @@ pub struct ParsedConfig {
     pub label: Option<String>,
     /// Number of threads to use for Processors and Outputs
     pub num_threads: usize,
+    /// Optional metrics configuration for observability
+    pub metrics: Option<MetricsConfig>,
     /// Input configuration following [crate::Input] or [crate::InputBatch] traits
     #[allow(private_interfaces)]
     pub input: ParsedRegisteredItem,
@@ -231,16 +265,27 @@ pub struct ParsedConfig {
 }
 
 /// Plugin configuration validation snippet
-#[derive(Debug)]
+///
+/// Uses `Arc` internally to make cloning cheap without re-parsing the schema.
 pub struct ConfigSpec {
     raw_schema: String,
-    schema: JSONSchema,
+    schema: Arc<JSONSchema>,
+}
+
+impl std::fmt::Debug for ConfigSpec {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("ConfigSpec")
+            .field("raw_schema", &self.raw_schema)
+            .finish()
+    }
 }
 
 impl Clone for ConfigSpec {
     fn clone(&self) -> Self {
-        #[allow(clippy::unwrap_used)]
-        ConfigSpec::from_schema(&self.raw_schema).unwrap()
+        ConfigSpec {
+            raw_schema: self.raw_schema.clone(),
+            schema: Arc::clone(&self.schema),
+        }
     }
 }
 
@@ -274,14 +319,14 @@ impl ConfigSpec {
 
         let schema: JSONSchema = match JSONSchema::options().with_draft(Draft::Draft7).compile(&f) {
             Ok(js) => js,
-            Err(e) => return Err(Error::InvalidValidationSchema(format!("{}", e))),
+            Err(e) => return Err(Error::InvalidValidationSchema(format!("{e}"))),
         };
 
         trace!("json schema is valid");
 
         Ok(ConfigSpec {
             raw_schema: conf.into(),
-            schema,
+            schema: Arc::new(schema),
         })
     }
 

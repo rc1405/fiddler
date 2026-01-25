@@ -2,24 +2,142 @@ use flume::{bounded, Receiver, Sender};
 use serde::Deserialize;
 use serde::Serialize;
 use serde_yaml::Value;
+use std::collections::hash_map::Entry;
 use std::fmt;
-use std::mem;
+use std::future::Future;
+use std::time::Instant;
 use tokio::task::JoinSet;
-use tracing::{debug, error, info, trace};
+use tracing::{debug, error, info, trace, warn};
 
+use crate::MetricEntry;
 use std::collections::HashMap;
 use std::str::FromStr;
 use std::sync::Once;
 use tokio::time::{sleep, Duration};
 use uuid::Uuid;
 
+/// Backoff duration when no input is available (in milliseconds)
+const NO_INPUT_BACKOFF_MS: u64 = 1500;
+
+/// Timeout for stale message entries in the state tracker (1 hour)
+const STALE_MESSAGE_TIMEOUT_SECS: u64 = 3600;
+
+/// Interval for cleaning up stale entries (5 minutes)
+const STALE_CLEANUP_INTERVAL_SECS: u64 = 300;
+
+/// Tracks message processing statistics for observability.
+///
+/// This struct maintains counters for various message processing events
+/// to enable monitoring and debugging of the pipeline.
+#[derive(Debug, Default)]
+pub struct MessageMetrics {
+    /// Total messages received from input
+    pub total_received: u64,
+    /// Messages successfully processed through all outputs
+    pub total_completed: u64,
+    /// Messages that encountered processing errors
+    pub total_process_errors: u64,
+    /// Messages that encountered output errors
+    pub total_output_errors: u64,
+    /// Streams started
+    pub streams_started: u64,
+    /// Streams completed
+    pub streams_completed: u64,
+    /// Duplicate messages rejected
+    pub duplicates_rejected: u64,
+    /// Stale entries cleaned up
+    pub stale_entries_removed: u64,
+    /// Timestamp when metrics collection started
+    started_at: Option<Instant>,
+}
+
+impl MessageMetrics {
+    /// Creates a new MessageMetrics instance with the current timestamp.
+    pub fn new() -> Self {
+        Self {
+            started_at: Some(Instant::now()),
+            ..Default::default()
+        }
+    }
+
+    /// Returns the duration since metrics collection started.
+    pub fn elapsed(&self) -> std::time::Duration {
+        self.started_at.map(|t| t.elapsed()).unwrap_or_default()
+    }
+
+    /// Returns the throughput in messages per second.
+    pub fn throughput_per_sec(&self) -> f64 {
+        let elapsed = self.elapsed().as_secs_f64();
+        if elapsed > 0.0 {
+            self.total_completed as f64 / elapsed
+        } else {
+            0.0
+        }
+    }
+
+    /// Returns the error rate as a percentage.
+    pub fn error_rate(&self) -> f64 {
+        let total = self.total_completed + self.total_process_errors + self.total_output_errors;
+        if total > 0 {
+            ((self.total_process_errors + self.total_output_errors) as f64 / total as f64) * 100.0
+        } else {
+            0.0
+        }
+    }
+
+    /// Records metrics to the configured metrics backend.
+    ///
+    /// If no metrics backend is configured, this is a no-op.
+    pub fn record(&self, metrics_backend: &mut dyn Metrics, in_flight: usize) {
+        metrics_backend.record(MetricEntry {
+            total_received: self.total_received,
+            total_completed: self.total_completed,
+            total_process_errors: self.total_process_errors,
+            total_output_errors: self.total_output_errors,
+            streams_started: self.streams_started,
+            streams_completed: self.streams_completed,
+            duplicates_rejected: self.duplicates_rejected,
+            stale_entries_removed: self.stale_entries_removed,
+            in_flight: in_flight,
+            throughput_per_sec: self.throughput_per_sec(),
+        });
+    }
+}
+
+/// Creates a new single-threaded tokio runtime with the given thread name.
+/// This helper reduces code duplication across the codebase.
+fn create_runtime(thread_name: impl Into<String>) -> Result<tokio::runtime::Runtime, Error> {
+    tokio::runtime::Builder::new_multi_thread()
+        .enable_all()
+        .thread_name(thread_name)
+        .worker_threads(1)
+        .build()
+        .map_err(|e| Error::ExecutionError(format!("Failed to create tokio runtime: {e}")))
+}
+
+/// Spawns a blocking task that creates its own runtime and runs the given future.
+fn spawn_runtime_task<F>(
+    handles: &mut JoinSet<Result<(), Error>>,
+    thread_name: impl Into<String> + Send + 'static,
+    task: F,
+) where
+    F: Future<Output = Result<(), Error>> + Send + 'static,
+{
+    handles.spawn_blocking(move || {
+        let runtime = create_runtime(thread_name)?;
+        runtime.block_on(task)
+    });
+}
+
 use super::CallbackChan;
 use super::Error;
 use super::Message;
+use super::Metrics;
 use crate::config::parse_configuration_item;
 use crate::config::ExecutionType;
 use crate::config::{Config, ItemType, ParsedConfig, ParsedRegisteredItem};
 
+use crate::modules::metrics::create_metrics;
 use crate::modules::outputs;
 use crate::modules::processors;
 use crate::modules::register_plugins;
@@ -60,17 +178,6 @@ impl fmt::Display for MessageStatus {
             MessageStatus::StreamComplete => write!(f, "StreamComplete"),
         }
     }
-}
-
-#[derive(Clone, Serialize, Deserialize, Default)]
-pub(crate) enum ProcessingState {
-    #[default]
-    InputComplete,
-    ProcessorSubscribe((usize, String)),
-    ProcessorComplete(usize),
-    PipelineComplete,
-    OutputSubscribe(String),
-    OutputComplete,
 }
 
 #[derive(Clone, Serialize, Deserialize, Default)]
@@ -310,19 +417,18 @@ impl Runtime {
     pub async fn run(&self) -> Result<(), Error> {
         let mut handles = JoinSet::new();
 
-        let (msg_tx, msg_rx) = bounded(0);
-        let msg_state = message_handler(msg_rx, self.state_rx.clone(), self.config.num_threads);
+        // Create metrics backend based on configuration
+        let metrics_backend = create_metrics(self.config.metrics.as_ref()).await?;
 
-        let _ = handles.spawn_blocking(move || {
-            let runtime = tokio::runtime::Builder::new_multi_thread()
-                .enable_all()
-                .thread_name("state")
-                .worker_threads(1)
-                // .on_thread_start(move || set_current_thread_priority_low())
-                .build()
-                .expect("Creating tokio runtime");
-            runtime.block_on(msg_state)
-        });
+        let (msg_tx, msg_rx) = bounded(0);
+        let msg_state = message_handler(
+            msg_rx,
+            self.state_rx.clone(),
+            self.config.num_threads,
+            metrics_backend,
+        );
+
+        spawn_runtime_task(&mut handles, "state", msg_state);
 
         let output = self
             .output(self.config.output.clone(), &mut handles)
@@ -334,41 +440,26 @@ impl Runtime {
 
         let input = input(self.config.input.clone(), processors, msg_tx, ks_recv);
 
-        let _ = handles.spawn_blocking(move || {
-            let runtime = tokio::runtime::Builder::new_multi_thread()
-                .enable_all()
-                .thread_name("input")
-                .worker_threads(1)
-                // .on_thread_start(move || set_current_thread_priority_low())
-                .build()
-                .expect("Creating tokio runtime");
-            runtime.block_on(input)
-        });
+        spawn_runtime_task(&mut handles, "input", input);
 
         info!(label = self.config.label, "pipeline started");
 
         if let Some(d) = self.timeout {
-            let _ = handles.spawn_blocking(move || {
-                let runtime = tokio::runtime::Builder::new_multi_thread()
-                    .enable_all()
-                    .thread_name("timeout")
-                    .worker_threads(1)
-                    // .on_thread_start(move || set_current_thread_priority_low())
-                    .build()
-                    .expect("Creating tokio runtime");
-
+            handles.spawn_blocking(move || {
+                let runtime = create_runtime("timeout")?;
                 runtime.block_on(sleep(d));
                 trace!("sending kill signal");
                 if !ks_send.is_disconnected() {
-                    #[allow(clippy::unwrap_used)]
-                    ks_send.send(()).unwrap();
+                    if let Err(e) = ks_send.send(()) {
+                        debug!(error = ?e, "Failed to send kill signal, receiver may have been dropped");
+                    }
                 }
                 Ok(())
             });
         }
 
         while let Some(res) = handles.join_next().await {
-            res.map_err(|e| Error::ProcessingError(format!("{}", e)))??;
+            res.map_err(|e| Error::ProcessingError(format!("{e}")))??;
         }
 
         info!("pipeline finished");
@@ -393,23 +484,13 @@ impl Runtime {
             let (tx, rx) = bounded(0);
 
             for n in 0..self.config.num_threads {
-                // tokio::spawn(processors::run_processor(p.clone(), next_tx.clone(), rx.clone(), self.state_tx.clone()));
                 let proc = processors::run_processor(
                     p.clone(),
                     next_tx.clone(),
                     rx.clone(),
                     self.state_tx.clone(),
                 );
-                let _ = handles.spawn_blocking(move || {
-                    let runtime = tokio::runtime::Builder::new_multi_thread()
-                        .enable_all()
-                        .thread_name(format!("processor{}-{}", i, n))
-                        .worker_threads(1)
-                        // .on_thread_start(move || set_current_thread_priority_low())
-                        .build()
-                        .expect("Creating tokio runtime");
-                    runtime.block_on(proc)
-                });
+                spawn_runtime_task(handles, format!("processor{i}-{n}"), proc);
             }
 
             next_tx = tx;
@@ -431,34 +512,22 @@ impl Runtime {
             let item = (output.creator)(output.config.clone()).await?;
             match item {
                 ExecutionType::Output(o) => {
-                    // handles.spawn(outputs::run_output(rx.clone(), self.state_tx.clone(), o));
                     let state_tx = self.state_tx.clone();
                     let new_rx = rx.clone();
-                    let _ = handles.spawn_blocking(move || {
-                        let runtime = tokio::runtime::Builder::new_multi_thread()
-                            .enable_all()
-                            .thread_name(format!("output{}", i))
-                            .worker_threads(1)
-                            // .on_thread_start(move || set_current_thread_priority_low())
-                            .build()
-                            .expect("Creating tokio runtime");
-                        runtime.block_on(outputs::run_output(new_rx, state_tx, o))
-                    });
+                    spawn_runtime_task(
+                        handles,
+                        format!("output{i}"),
+                        outputs::run_output(new_rx, state_tx, o),
+                    );
                 }
                 ExecutionType::OutputBatch(o) => {
-                    // handles.spawn(outputs::run_output_batch(rx.clone(), self.state_tx.clone(), o))
                     let state_tx = self.state_tx.clone();
                     let new_rx = rx.clone();
-                    let _ = handles.spawn_blocking(move || {
-                        let runtime = tokio::runtime::Builder::new_multi_thread()
-                            .enable_all()
-                            .thread_name(format!("output{}", i))
-                            .worker_threads(1)
-                            // .on_thread_start(move || set_current_thread_priority_low())
-                            .build()
-                            .expect("Creating tokio runtime");
-                        runtime.block_on(outputs::run_output_batch(new_rx, state_tx, o))
-                    });
+                    spawn_runtime_task(
+                        handles,
+                        format!("output{i}"),
+                        outputs::run_output_batch(new_rx, state_tx, o),
+                    );
                 }
                 _ => {
                     error!("invalid execution type for output");
@@ -481,203 +550,213 @@ struct State {
     errors: Vec<String>,
     stream_id: Option<String>,
     stream_closed: Option<bool>,
+    /// Timestamp when this state was created, used for stale entry cleanup
+    created_at: Instant,
 }
 
+/// Process state updates iteratively to avoid stack overflow with deeply nested streams
 fn process_state(
     handles: &mut HashMap<String, State>,
     output_ct: &usize,
     closed_outputs: &mut usize,
-    msg: InternalMessageState,
+    initial_msg: InternalMessageState,
+    metrics: &mut MessageMetrics,
 ) -> Result<(), Error> {
-    // trace!(state = msg.status.to_string(), message_id = msg.message_id, "Received message state");
+    // Use a stack for iterative processing instead of recursion
+    let mut pending_messages = vec![initial_msg];
+    let mut entries_to_remove = Vec::new();
 
-    let mut remove_entry = false;
-    let mut stream_id = None;
+    while let Some(msg) = pending_messages.pop() {
+        let mut remove_entry = false;
+        let mut stream_id = None;
+        let mut message_completed_successfully = false;
 
-    match handles.get_mut(&msg.message_id) {
-        None => {
-            if let MessageStatus::Shutdown = &msg.status {
-                *closed_outputs += 1;
-                if closed_outputs == output_ct {
-                    info!("exiting message handler");
-                    return Err(Error::EndOfInput);
-                }
-            } else {
-                return Err(Error::ExecutionError(format!(
-                    "Message ID {} does not exist",
-                    msg.message_id
-                )));
-            };
-        }
-        Some(state) => {
-            match &msg.status {
-                MessageStatus::New => {
-                    state.instance_count += 1;
-                    stream_id = state.stream_id.clone();
-                }
-                MessageStatus::Processed => {
-                    state.processed_count += 1;
-                    stream_id = state.stream_id.clone();
-                }
-                MessageStatus::ProcessError(e) => {
-                    state.processed_error_count += 1;
-                    state.errors.push(e.clone());
-                    stream_id = state.stream_id.clone();
-
-                    let stream_closed = state.stream_closed.unwrap_or(true);
-
-                    if stream_closed
-                        && (state.output_count
-                            + state.output_error_count
-                            + state.processed_error_count)
-                            >= state.instance_count
-                    {
-                        remove_entry = true;
-                        if state.closure.is_some() {
-                            info!(message_id = msg.message_id, "calling closure");
-                            let s = None;
-                            #[allow(clippy::unwrap_used)]
-                            let chan = mem::replace(&mut state.closure, s).unwrap();
-                            let e = Vec::new();
-                            let err = mem::replace(&mut state.errors, e);
-                            let _ = chan.send(Status::Errored(err));
-                        };
-                    }
-                }
-                MessageStatus::Output => {
-                    state.output_count += 1;
-                    stream_id = state.stream_id.clone();
-
-                    debug!(
-                        message_id = msg.message_id,
-                        errors = state.processed_error_count,
-                        "message fully processed"
-                    );
-                    let stream_closed = state.stream_closed.unwrap_or(true);
-
-                    if stream_closed && state.output_count >= state.instance_count {
-                        remove_entry = true;
-                        if state.closure.is_some() {
-                            info!(message_id = msg.message_id, "calling closure");
-                            let s = None;
-                            #[allow(clippy::unwrap_used)]
-                            let chan = mem::replace(&mut state.closure, s).unwrap();
-                            let _ = chan.send(Status::Processed);
-                        };
-                    } else if stream_closed
-                        && (state.output_count
-                            + state.output_error_count
-                            + state.processed_error_count)
-                            >= state.instance_count
-                    {
-                        remove_entry = true;
-                        if state.closure.is_some() {
-                            info!(message_id = msg.message_id, "calling closure");
-                            let s = None;
-                            #[allow(clippy::unwrap_used)]
-                            let chan = mem::replace(&mut state.closure, s).unwrap();
-                            let e = Vec::new();
-                            let err = mem::replace(&mut state.errors, e);
-                            let _ = chan.send(Status::Errored(err));
-                        };
-                    }
-                }
-                MessageStatus::OutputError(e) => {
-                    state.output_error_count += 1;
-                    state.errors.push(e.clone());
-                    stream_id = state.stream_id.clone();
-
-                    if (state.output_count + state.output_error_count + state.processed_error_count)
-                        >= state.instance_count
-                    {
-                        remove_entry = state.stream_closed.unwrap_or(true);
-
-                        if remove_entry && state.closure.is_some() {
-                            info!(message_id = msg.message_id, "calling closure");
-                            let s = None;
-                            #[allow(clippy::unwrap_used)]
-                            let chan = mem::replace(&mut state.closure, s).unwrap();
-                            let e = Vec::new();
-                            let err = mem::replace(&mut state.errors, e);
-                            let _ = chan.send(Status::Errored(err));
-                        };
-                    }
-                }
-                MessageStatus::Shutdown => {
+        match handles.get_mut(&msg.message_id) {
+            None => {
+                if let MessageStatus::Shutdown = &msg.status {
                     *closed_outputs += 1;
                     if closed_outputs == output_ct {
-                        debug!("exiting message handler");
+                        info!("exiting message handler");
                         return Err(Error::EndOfInput);
                     }
-                }
-                MessageStatus::StreamComplete => {
-                    state.stream_closed = Some(true);
-                    state.output_count += 1;
-
-                    stream_id = state.stream_id.clone();
-                    if state.output_count >= state.instance_count {
-                        remove_entry = true;
-                        if state.closure.is_some() {
-                            info!(message_id = msg.message_id, "calling closure");
-                            let s = None;
-                            #[allow(clippy::unwrap_used)]
-                            let chan = mem::replace(&mut state.closure, s).unwrap();
-                            let _ = chan.send(Status::Processed);
-                        };
-                    } else if (state.output_count
-                        + state.output_error_count
-                        + state.processed_error_count)
-                        >= state.instance_count
-                    {
-                        remove_entry = true;
-                        if state.closure.is_some() {
-                            info!(message_id = msg.message_id, "calling closure");
-                            let s = None;
-                            #[allow(clippy::unwrap_used)]
-                            let chan = mem::replace(&mut state.closure, s).unwrap();
-                            let e = Vec::new();
-                            let err = mem::replace(&mut state.errors, e);
-                            let _ = chan.send(Status::Errored(err));
-                        };
-                    };
-                }
-            };
-
-            info!(
-                instance_count = state.instance_count,
-                processed_count = state.processed_count,
-                processed_error_count = state.processed_error_count,
-                output_count = state.output_count,
-                output_error_count = state.output_error_count,
-                stream_id = state.stream_id,
-                stream_closed = state.stream_closed,
-                state = msg.status.to_string(),
-                message_id = msg.message_id,
-                "Received message state"
-            );
-        }
-    };
-
-    if let Some(stream_id) = stream_id {
-        match handles.get(&stream_id) {
-            None => {
-                return Err(Error::ExecutionError(format!(
-                    "StreamID {} does not exist (Message ID {})",
-                    stream_id, msg.message_id
-                )))
+                } else {
+                    return Err(Error::ExecutionError(format!(
+                        "Message ID {} does not exist",
+                        msg.message_id
+                    )));
+                };
             }
-            Some(s) => {
-                let mut stream = msg.clone();
-                stream.message_id = stream_id.clone();
-                stream.stream_id = s.stream_id.clone();
-                process_state(handles, output_ct, closed_outputs, stream)?;
+            Some(state) => {
+                match &msg.status {
+                    MessageStatus::New => {
+                        state.instance_count += 1;
+                        stream_id = state.stream_id.clone();
+                    }
+                    MessageStatus::Processed => {
+                        state.processed_count += 1;
+                        stream_id = state.stream_id.clone();
+                    }
+                    MessageStatus::ProcessError(e) => {
+                        state.processed_error_count += 1;
+                        state.errors.push(e.clone());
+                        stream_id = state.stream_id.clone();
+                        metrics.total_process_errors += 1;
+
+                        let stream_closed = state.stream_closed.unwrap_or(true);
+
+                        if stream_closed
+                            && (state.output_count
+                                + state.output_error_count
+                                + state.processed_error_count)
+                                >= state.instance_count
+                        {
+                            remove_entry = true;
+                            if let Some(chan) = state.closure.take() {
+                                info!(message_id = msg.message_id, "calling closure");
+                                let err = std::mem::take(&mut state.errors);
+                                let _ = chan.send(Status::Errored(err));
+                            }
+                        }
+                    }
+                    MessageStatus::Output => {
+                        state.output_count += 1;
+                        stream_id = state.stream_id.clone();
+
+                        debug!(
+                            message_id = msg.message_id,
+                            errors = state.processed_error_count,
+                            "message fully processed"
+                        );
+                        let stream_closed = state.stream_closed.unwrap_or(true);
+
+                        if stream_closed && state.output_count >= state.instance_count {
+                            remove_entry = true;
+                            message_completed_successfully = true;
+                            if let Some(chan) = state.closure.take() {
+                                info!(message_id = msg.message_id, "calling closure");
+                                let _ = chan.send(Status::Processed);
+                            }
+                        } else if stream_closed
+                            && (state.output_count
+                                + state.output_error_count
+                                + state.processed_error_count)
+                                >= state.instance_count
+                        {
+                            remove_entry = true;
+                            if let Some(chan) = state.closure.take() {
+                                info!(message_id = msg.message_id, "calling closure");
+                                let err = std::mem::take(&mut state.errors);
+                                let _ = chan.send(Status::Errored(err));
+                            }
+                        }
+                    }
+                    MessageStatus::OutputError(e) => {
+                        state.output_error_count += 1;
+                        state.errors.push(e.clone());
+                        stream_id = state.stream_id.clone();
+                        metrics.total_output_errors += 1;
+
+                        if (state.output_count
+                            + state.output_error_count
+                            + state.processed_error_count)
+                            >= state.instance_count
+                        {
+                            remove_entry = state.stream_closed.unwrap_or(true);
+
+                            if remove_entry {
+                                if let Some(chan) = state.closure.take() {
+                                    info!(message_id = msg.message_id, "calling closure");
+                                    let err = std::mem::take(&mut state.errors);
+                                    let _ = chan.send(Status::Errored(err));
+                                }
+                            }
+                        }
+                    }
+                    MessageStatus::Shutdown => {
+                        *closed_outputs += 1;
+                        if closed_outputs == output_ct {
+                            debug!("exiting message handler");
+                            return Err(Error::EndOfInput);
+                        }
+                    }
+                    MessageStatus::StreamComplete => {
+                        state.stream_closed = Some(true);
+                        state.output_count += 1;
+
+                        stream_id = state.stream_id.clone();
+                        if state.output_count >= state.instance_count {
+                            remove_entry = true;
+                            message_completed_successfully = true;
+                            if let Some(chan) = state.closure.take() {
+                                info!(message_id = msg.message_id, "calling closure");
+                                let _ = chan.send(Status::Processed);
+                            }
+                        } else if (state.output_count
+                            + state.output_error_count
+                            + state.processed_error_count)
+                            >= state.instance_count
+                        {
+                            remove_entry = true;
+                            if let Some(chan) = state.closure.take() {
+                                info!(message_id = msg.message_id, "calling closure");
+                                let err = std::mem::take(&mut state.errors);
+                                let _ = chan.send(Status::Errored(err));
+                            }
+                        };
+                    }
+                };
+
+                info!(
+                    instance_count = state.instance_count,
+                    processed_count = state.processed_count,
+                    processed_error_count = state.processed_error_count,
+                    output_count = state.output_count,
+                    output_error_count = state.output_error_count,
+                    stream_id = state.stream_id,
+                    stream_closed = state.stream_closed,
+                    state = msg.status.to_string(),
+                    message_id = msg.message_id,
+                    "Received message state"
+                );
+            }
+        };
+
+        // Queue stream state update instead of recursive call
+        if let Some(sid) = stream_id {
+            match handles.get(&sid) {
+                None => {
+                    return Err(Error::ExecutionError(format!(
+                        "StreamID {} does not exist (Message ID {})",
+                        sid, msg.message_id
+                    )))
+                }
+                Some(s) => {
+                    pending_messages.push(InternalMessageState {
+                        message_id: sid,
+                        status: msg.status.clone(),
+                        stream_id: s.stream_id.clone(),
+                        is_stream: true,
+                    });
+                }
+            }
+        }
+
+        if remove_entry {
+            trace!(
+                message_id = msg.message_id,
+                "Marking message for removal from state"
+            );
+            entries_to_remove.push(msg.message_id);
+            // Track completed messages (only count non-stream messages to avoid double counting)
+            if message_completed_successfully && !msg.is_stream {
+                metrics.total_completed += 1;
             }
         }
     }
 
-    if remove_entry {
-        trace!(message_id = msg.message_id, "Removing message from state");
-        let _ = handles.remove(&msg.message_id);
+    // Remove entries after processing to avoid borrow conflicts
+    for message_id in entries_to_remove {
+        let _ = handles.remove(&message_id);
     }
 
     Ok(())
@@ -687,49 +766,96 @@ async fn message_handler(
     new_msg: Receiver<MessageHandle>,
     msg_status: Receiver<InternalMessageState>,
     output_ct: usize,
+    mut metrics_backend: Box<dyn Metrics>,
 ) -> Result<(), Error> {
     let mut handles: HashMap<String, State> = HashMap::new();
     let mut closed_outputs = 0;
+    let mut last_cleanup = Instant::now();
+    let stale_timeout = std::time::Duration::from_secs(STALE_MESSAGE_TIMEOUT_SECS);
+    let cleanup_interval = std::time::Duration::from_secs(STALE_CLEANUP_INTERVAL_SECS);
+    let mut metrics = MessageMetrics::new();
 
     loop {
+        // Periodically clean up stale entries to prevent memory leaks
+        if last_cleanup.elapsed() >= cleanup_interval {
+            let before_count = handles.len();
+            handles.retain(|message_id, state| {
+                let is_stale = state.created_at.elapsed() >= stale_timeout;
+                if is_stale {
+                    warn!(
+                        message_id = message_id,
+                        age_secs = state.created_at.elapsed().as_secs(),
+                        "Removing stale message state entry"
+                    );
+                }
+                !is_stale
+            });
+            let removed = before_count - handles.len();
+            if removed > 0 {
+                metrics.stale_entries_removed += removed as u64;
+                info!(
+                    removed_count = removed,
+                    remaining_count = handles.len(),
+                    "Cleaned up stale message state entries"
+                );
+            }
+            last_cleanup = Instant::now();
+
+            // Record metrics to configured backend
+            metrics.record(metrics_backend.as_mut(), handles.len());
+        }
+
         tokio::select! {
             biased;
             Ok(msg) = new_msg.recv_async() => {
                 trace!(message_id = msg.message_id, "Received new message");
                 if msg.is_stream && msg.stream_complete {
+                    metrics.streams_completed += 1;
                     if let Err(e) = process_state(&mut handles, &output_ct, &mut closed_outputs, InternalMessageState {
                         message_id: msg.message_id.clone(),
                         status: MessageStatus::StreamComplete,
                         stream_id: msg.stream_id.clone(),
                         is_stream: true
-                    }) {
+                    }, &mut metrics) {
                         match e {
-                            Error::EndOfInput => return Ok(()),
+                            Error::EndOfInput => {
+                                log_shutdown_metrics(&metrics, handles.len(), metrics_backend.as_mut());
+                                return Ok(());
+                            }
                             _ => return Err(e),
                         }
                     }
                     continue
                 };
 
+                // Track new message received
+                metrics.total_received += 1;
+                if msg.is_stream {
+                    metrics.streams_started += 1;
+                }
+
                 let closure = msg.closure;
-                let i = handles.insert(msg.message_id.clone(), State {
-                    instance_count: 1,
-                    processed_count: 0,
-                    processed_error_count: 0,
-                    output_count: 0,
-                    output_error_count: 0,
-                    closure,
-                    errors: Vec::new(),
-                    stream_id: msg.stream_id.clone(),
-                    stream_closed: match msg.is_stream {
-                        true => Some(false),
-                        false => None,
-                    },
-                });
-                if i.is_some() {
-                    error!(message_id = msg.message_id, "Received duplicate message");
-                    return Err(Error::ExecutionError("Duplicate Message ID Error".into()))
-                };
+                match handles.entry(msg.message_id.clone()) {
+                    Entry::Vacant(entry) => {
+                        entry.insert(State {
+                            instance_count: 1,
+                            processed_count: 0,
+                            processed_error_count: 0,
+                            output_count: 0,
+                            output_error_count: 0,
+                            closure,
+                            errors: Vec::new(),
+                            stream_id: msg.stream_id.clone(),
+                            stream_closed: if msg.is_stream { Some(false) } else { None },
+                            created_at: Instant::now(),
+                        });
+                    }
+                    Entry::Occupied(_) => {
+                        metrics.duplicates_rejected += 1;
+                        error!(message_id = msg.message_id, "Received duplicate message");
+                        return Err(Error::ExecutionError("Duplicate Message ID Error".into()));
+                    }
+                }
 
                 if let Some(s) = &msg.stream_id {
                     if let Err(e) = process_state(&mut handles, &output_ct, &mut closed_outputs, InternalMessageState{
@@ -737,18 +863,24 @@ async fn message_handler(
                         status: MessageStatus::New,
                         stream_id: None,
                         is_stream: true,
-                    }) {
+                    }, &mut metrics) {
                         match e {
-                            Error::EndOfInput => return Ok(()),
+                            Error::EndOfInput => {
+                                log_shutdown_metrics(&metrics, handles.len(), metrics_backend.as_mut());
+                                return Ok(());
+                            }
                         _ => return Err(e),
                         }
                     };
                 }
             },
             Ok(msg) = msg_status.recv_async() => {
-                if let Err(e) = process_state(&mut handles, &output_ct, &mut closed_outputs, msg) {
+                if let Err(e) = process_state(&mut handles, &output_ct, &mut closed_outputs, msg, &mut metrics) {
                     match e {
-                        Error::EndOfInput => return Ok(()),
+                        Error::EndOfInput => {
+                            log_shutdown_metrics(&metrics, handles.len(), metrics_backend.as_mut());
+                            return Ok(());
+                        }
                         _ => return Err(e),
                     };
                 };
@@ -757,8 +889,34 @@ async fn message_handler(
         }
     }
 
-    // add counter and metrics dump how many processed // errored // etc
+    log_shutdown_metrics(&metrics, handles.len(), metrics_backend.as_mut());
     Ok(())
+}
+
+/// Logs comprehensive shutdown metrics for observability.
+fn log_shutdown_metrics(
+    metrics: &MessageMetrics,
+    in_flight: usize,
+    metrics_backend: &mut dyn Metrics,
+) {
+    // Record final metrics to configured backend
+    metrics.record(metrics_backend, in_flight);
+
+    info!(
+        total_received = metrics.total_received,
+        total_completed = metrics.total_completed,
+        total_process_errors = metrics.total_process_errors,
+        total_output_errors = metrics.total_output_errors,
+        streams_started = metrics.streams_started,
+        streams_completed = metrics.streams_completed,
+        duplicates_rejected = metrics.duplicates_rejected,
+        stale_entries_removed = metrics.stale_entries_removed,
+        duration_secs = metrics.elapsed().as_secs(),
+        throughput_per_sec = format!("{:.2}", metrics.throughput_per_sec()),
+        error_rate_percent = format!("{:.2}", metrics.error_rate()),
+        remaining_in_flight = in_flight,
+        "Message handler shutdown complete"
+    );
 }
 
 async fn input(
@@ -816,7 +974,7 @@ async fn input(
                                 stream_complete: matches!(&message_type, MessageType::EndStream(_))
                             })
                             .await
-                            .map_err(|e| Error::UnableToSendToChannel(format!("{}", e)))?;
+                            .map_err(|e| Error::UnableToSendToChannel(format!("{e}")))?;
 
                         // if message.type != registration forward down the pipeline
                         // new input send main event with type parent or whatever with a callback
@@ -834,7 +992,7 @@ async fn input(
                             output
                                 .send_async(internal_msg)
                                 .await
-                                .map_err(|e| Error::UnableToSendToChannel(format!("{}", e)))?;
+                                .map_err(|e| Error::UnableToSendToChannel(format!("{e}")))?;
                         }
 
                     }
@@ -845,7 +1003,7 @@ async fn input(
                             return Ok(());
                         }
                         Error::NoInputToReturn => {
-                            sleep(Duration::from_millis(1500)).await;
+                            sleep(Duration::from_millis(NO_INPUT_BACKOFF_MS)).await;
                             continue;
                         }
                         _ => {
@@ -861,5 +1019,103 @@ async fn input(
                 }
             },
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_message_metrics_new() {
+        let metrics = MessageMetrics::new();
+        assert_eq!(metrics.total_received, 0);
+        assert_eq!(metrics.total_completed, 0);
+        assert_eq!(metrics.total_process_errors, 0);
+        assert_eq!(metrics.total_output_errors, 0);
+        assert_eq!(metrics.streams_started, 0);
+        assert_eq!(metrics.streams_completed, 0);
+        assert_eq!(metrics.duplicates_rejected, 0);
+        assert_eq!(metrics.stale_entries_removed, 0);
+        assert!(metrics.started_at.is_some());
+    }
+
+    #[test]
+    fn test_message_metrics_default() {
+        let metrics = MessageMetrics::default();
+        assert_eq!(metrics.total_received, 0);
+        assert!(metrics.started_at.is_none());
+    }
+
+    #[test]
+    fn test_message_metrics_elapsed() {
+        let metrics = MessageMetrics::new();
+        std::thread::sleep(std::time::Duration::from_millis(10));
+        let elapsed = metrics.elapsed();
+        assert!(elapsed.as_millis() >= 10);
+    }
+
+    #[test]
+    fn test_message_metrics_elapsed_without_start() {
+        let metrics = MessageMetrics::default();
+        let elapsed = metrics.elapsed();
+        assert_eq!(elapsed, std::time::Duration::default());
+    }
+
+    #[test]
+    fn test_message_metrics_throughput_per_sec() {
+        let mut metrics = MessageMetrics::new();
+        metrics.total_completed = 100;
+        // Throughput depends on elapsed time, just verify it returns a value
+        let throughput = metrics.throughput_per_sec();
+        assert!(throughput >= 0.0);
+    }
+
+    #[test]
+    fn test_message_metrics_throughput_zero_elapsed() {
+        let mut metrics = MessageMetrics::default();
+        metrics.total_completed = 100;
+        // With no start time, elapsed is 0, so throughput should be 0
+        let throughput = metrics.throughput_per_sec();
+        assert_eq!(throughput, 0.0);
+    }
+
+    #[test]
+    fn test_message_metrics_error_rate_no_messages() {
+        let metrics = MessageMetrics::new();
+        let error_rate = metrics.error_rate();
+        assert_eq!(error_rate, 0.0);
+    }
+
+    #[test]
+    fn test_message_metrics_error_rate_with_errors() {
+        let mut metrics = MessageMetrics::new();
+        metrics.total_completed = 90;
+        metrics.total_process_errors = 5;
+        metrics.total_output_errors = 5;
+        let error_rate = metrics.error_rate();
+        // 10 errors out of 100 total = 10%
+        assert!((error_rate - 10.0).abs() < 0.01);
+    }
+
+    #[test]
+    fn test_message_metrics_error_rate_all_errors() {
+        let mut metrics = MessageMetrics::new();
+        metrics.total_completed = 0;
+        metrics.total_process_errors = 50;
+        metrics.total_output_errors = 50;
+        let error_rate = metrics.error_rate();
+        // 100 errors out of 100 total = 100%
+        assert!((error_rate - 100.0).abs() < 0.01);
+    }
+
+    #[test]
+    fn test_message_metrics_record_with_noop_backend() {
+        use crate::modules::metrics::NoOpMetrics;
+        // Should work with no-op metrics backend
+        let metrics = MessageMetrics::new();
+        let mut backend = NoOpMetrics::new();
+        metrics.record(&mut backend, 10);
+        // No assertion needed - just verify it doesn't panic
     }
 }

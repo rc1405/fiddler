@@ -9,6 +9,9 @@ use async_trait::async_trait;
 use fiddler_macros::fiddler_registration_func;
 use serde_yaml::Value;
 
+/// Command to exit stdin input mode
+const STDIN_EXIT_COMMAND: &str = "exit()";
+
 pub struct StdIn {}
 
 #[async_trait]
@@ -24,7 +27,7 @@ impl Input for StdIn {
         // remove new line character
         let _ = buffer.pop();
 
-        if buffer == *"exit()" {
+        if buffer == STDIN_EXIT_COMMAND {
             return Err(Error::EndOfInput);
         };
 

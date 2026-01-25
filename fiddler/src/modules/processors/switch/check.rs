@@ -8,7 +8,6 @@ use async_trait::async_trait;
 use fiddler_macros::fiddler_registration_func;
 use serde::{Deserialize, Serialize};
 use serde_yaml::Value;
-use std::mem;
 
 #[derive(Deserialize, Serialize)]
 struct CheckConfig {
@@ -28,14 +27,14 @@ fn perform_check(condition: &str, json_str: String) -> Result<(), Error> {
     runtime.register_builtin_functions();
     let expr = runtime
         .compile(condition)
-        .map_err(|e| Error::ProcessingError(format!("{}", e)))?;
+        .map_err(|e| Error::ProcessingError(format!("{e}")))?;
     // convert to string if this is nothing.
     let data = jmespath::Variable::from_json(&json_str)
-        .map_err(|e| Error::ProcessingError(e.to_string()))?;
+        .map_err(|e| Error::ProcessingError(format!("{e}")))?;
 
     let result = expr
         .search(data)
-        .map_err(|e| Error::ProcessingError(format!("{}", e)))?;
+        .map_err(|e| Error::ProcessingError(format!("{e}")))?;
     if !result.as_boolean().unwrap_or(false) {
         return Err(Error::ConditionalCheckfailed);
     };
@@ -46,19 +45,18 @@ fn perform_check(condition: &str, json_str: String) -> Result<(), Error> {
 impl Processor for Check {
     async fn process(&self, message: Message) -> Result<MessageBatch, Error> {
         let mut messages = vec![message.clone()];
-        let json_str = String::from_utf8(message.bytes)
-            .map_err(|e| Error::ProcessingError(format!("{}", e)))?;
+        let json_str =
+            String::from_utf8(message.bytes).map_err(|e| Error::ProcessingError(format!("{e}")))?;
 
         perform_check(&self.condition, json_str)?;
 
         for p in &self.processors {
             let mut new_messages = Vec::new();
-            while let Some(m) = messages.pop() {
-                new_messages = messages.clone();
-                let m = p.process(m.clone()).await?;
-                new_messages.extend(m);
+            for m in messages.drain(..) {
+                let processed = p.process(m).await?;
+                new_messages.extend(processed);
             }
-            let _ = mem::replace(&mut messages, new_messages);
+            messages = new_messages;
         }
         Ok(messages)
     }
@@ -78,7 +76,7 @@ impl Closer for Check {
 fn create_check(conf: Value) -> Result<ExecutionType, Error> {
     let c: CheckConfig = serde_yaml::from_value(conf.clone())?;
     let _ = jmespath::compile(&c.condition)
-        .map_err(|e| Error::ConfigFailedValidation(format!("{}", e)))?;
+        .map_err(|e| Error::ConfigFailedValidation(format!("{e}")))?;
 
     let mut steps = Vec::new();
     for p in c.processors {

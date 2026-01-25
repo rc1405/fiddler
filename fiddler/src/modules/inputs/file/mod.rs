@@ -12,8 +12,15 @@ use serde::Deserialize;
 use serde_yaml::Value;
 use std::fs::{self, read_to_string, File};
 use std::io::{prelude::*, BufReader, SeekFrom};
+use std::path::Path;
 use tokio::time::{sleep, Duration};
-use tracing::{debug, error, trace};
+use tracing::{debug, error, trace, warn};
+
+/// Maximum number of consecutive file not found errors before giving up
+const MAX_FILE_NOT_FOUND_RETRIES: u32 = 5;
+
+/// Duration to wait when file is not found before retrying
+const FILE_NOT_FOUND_RETRY_DELAY_SECS: u64 = 5;
 
 #[derive(Deserialize, Default)]
 enum CodecType {
@@ -74,13 +81,13 @@ async fn read_file(
                                 None,
                             )))
                             .await
-                            .map_err(|e| Error::UnableToSendToChannel(format!("{}", e)))?;
+                            .map_err(|e| Error::UnableToSendToChannel(format!("{e}")))?;
                     }
                     Err(e) => {
                         sender
-                            .send_async(Err(Error::InputError(format!("{}", e))))
+                            .send_async(Err(Error::InputError(format!("{e}"))))
                             .await
-                            .map_err(|e| Error::UnableToSendToChannel(format!("{}", e)))?;
+                            .map_err(|e| Error::UnableToSendToChannel(format!("{e}")))?;
                         return Ok(());
                     }
                 }
@@ -89,7 +96,7 @@ async fn read_file(
             sender
                 .send_async(Err(Error::EndOfInput))
                 .await
-                .map_err(|e| Error::UnableToSendToChannel(format!("{}", e)))?;
+                .map_err(|e| Error::UnableToSendToChannel(format!("{e}")))?;
             return Ok(());
         }
         ReaderType::ToEnd(mut f) => {
@@ -98,9 +105,9 @@ async fn read_file(
                 Ok(_) => {}
                 Err(e) => {
                     sender
-                        .send_async(Err(Error::InputError(format!("{}", e))))
+                        .send_async(Err(Error::InputError(format!("{e}"))))
                         .await
-                        .map_err(|e| Error::UnableToSendToChannel(format!("{}", e)))?;
+                        .map_err(|e| Error::UnableToSendToChannel(format!("{e}")))?;
                     return Ok(());
                 }
             };
@@ -114,12 +121,12 @@ async fn read_file(
                     None,
                 )))
                 .await
-                .map_err(|e| Error::UnableToSendToChannel(format!("{}", e)))?;
+                .map_err(|e| Error::UnableToSendToChannel(format!("{e}")))?;
 
             sender
                 .send_async(Err(Error::EndOfInput))
                 .await
-                .map_err(|e| Error::UnableToSendToChannel(format!("{}", e)))?;
+                .map_err(|e| Error::UnableToSendToChannel(format!("{e}")))?;
 
             return Ok(());
         }
@@ -127,6 +134,7 @@ async fn read_file(
             let mut file = File::open(&filename)
                 .map_err(|e| Error::InputError(format!("{}: {}", filename, e)))?;
             let mut current_pos = pos;
+            let mut file_not_found_count: u32 = 0;
 
             let metadata = file
                 .metadata()
@@ -135,7 +143,7 @@ async fn read_file(
                 current_pos = 0;
                 sync.send_async(current_pos)
                     .await
-                    .map_err(|e| Error::UnableToSendToChannel(format!("{}", e)))?;
+                    .map_err(|e| Error::UnableToSendToChannel(format!("{e}")))?;
             };
 
             let _ = file
@@ -145,6 +153,38 @@ async fn read_file(
             let mut reader = BufReader::new(file);
 
             loop {
+                // Check if file still exists before attempting to read
+                if !Path::new(&filename).exists() {
+                    file_not_found_count += 1;
+                    warn!(
+                        filename = filename,
+                        retry_count = file_not_found_count,
+                        max_retries = MAX_FILE_NOT_FOUND_RETRIES,
+                        "File no longer exists, waiting for it to reappear"
+                    );
+
+                    if file_not_found_count >= MAX_FILE_NOT_FOUND_RETRIES {
+                        error!(
+                            filename = filename,
+                            "File not found after max retries, stopping tail"
+                        );
+                        sender
+                            .send_async(Err(Error::InputError(format!(
+                                "File no longer exists after {} retries: {}",
+                                MAX_FILE_NOT_FOUND_RETRIES, filename
+                            ))))
+                            .await
+                            .map_err(|e| Error::UnableToSendToChannel(format!("{e}")))?;
+                        return Ok(());
+                    }
+
+                    sleep(Duration::from_secs(FILE_NOT_FOUND_RETRY_DELAY_SECS)).await;
+                    continue;
+                }
+
+                // Reset counter when file is found
+                file_not_found_count = 0;
+
                 let mut line = String::new();
                 let len = reader
                     .read_line(&mut line)
@@ -170,8 +210,9 @@ async fn read_file(
                 let (tx, rx) = new_callback_chan();
                 tokio::spawn(async move {
                     if let Ok(Status::Processed) = rx.await {
-                        #[allow(clippy::unwrap_used)]
-                        s.send_async(current_pos).await.unwrap();
+                        if let Err(e) = s.send_async(current_pos).await {
+                            debug!(error = %e, "Failed to send position update, channel may be closed");
+                        }
                     };
                 });
 
@@ -184,7 +225,7 @@ async fn read_file(
                         Some(tx),
                     )))
                     .await
-                    .map_err(|e| Error::UnableToSendToChannel(format!("{}", e)))?;
+                    .map_err(|e| Error::UnableToSendToChannel(format!("{e}")))?;
             }
         }
     }
@@ -265,14 +306,14 @@ fn create_file(conf: Value) -> Result<ExecutionType, Error> {
                         Ok(_) = timer.recv_async() => {
                             if current_position != last_known_position {
                                 trace!("writing position to disk");
-                                #[allow(clippy::unwrap_used)]
-                                fs::write(
+                                if let Err(e) = fs::write(
                                     position_file_name.clone(),
                                     format!("{current_position}"),
-                                )
-                                    .map_err(|e| Error::InputError(format!("{}: {}", filename, e)))
-                                    .unwrap();
-                                last_known_position = current_position;
+                                ) {
+                                    error!(error = %e, filename = %filename, "Failed to write position file");
+                                } else {
+                                    last_known_position = current_position;
+                                }
                             }
                         },
                         m = receiver.recv_async() => {
@@ -281,14 +322,14 @@ fn create_file(conf: Value) -> Result<ExecutionType, Error> {
                                     if msg == 0 {
                                         current_position = 0;
                                         trace!("writing position to disk");
-                                        #[allow(clippy::unwrap_used)]
-                                        fs::write(
+                                        if let Err(e) = fs::write(
                                             position_file_name.clone(),
                                             format!("{current_position}"),
-                                        )
-                                            .map_err(|e| Error::InputError(format!("{}: {}", filename, e)))
-                                            .unwrap();
-                                        last_known_position = current_position;
+                                        ) {
+                                            error!(error = %e, filename = %filename, "Failed to write position file");
+                                        } else {
+                                            last_known_position = current_position;
+                                        }
                                     };
 
                                     if msg > current_position {
@@ -296,7 +337,7 @@ fn create_file(conf: Value) -> Result<ExecutionType, Error> {
                                     };
                                 }
                                 Err(e) => {
-                                    error!(error = format!("{}", e), "closing file state handler");
+                                    error!(error = %e, "closing file state handler");
                                     return;
                                 }
                             }
@@ -318,9 +359,8 @@ fn create_file(conf: Value) -> Result<ExecutionType, Error> {
             .worker_threads(1)
             // .on_thread_start(move || set_current_thread_priority_low())
             .build()
-            .expect("Creating tokio runtime");
-        #[allow(clippy::unwrap_used)]
-        runtime.block_on(read_file(inner, sender)).unwrap()
+            .map_err(|e| Error::ExecutionError(format!("Failed to create tokio runtime: {e}")))?;
+        runtime.block_on(read_file(inner, sender))
     });
 
     Ok(ExecutionType::Input(Box::new(FileReader { receiver })))
