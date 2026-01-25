@@ -17,8 +17,9 @@
 //! If no metrics configuration is provided, a no-op implementation is used.
 
 use crate::config::{ExecutionType, ItemType};
-use crate::Error;
+use crate::{Closer, Error, Metrics};
 use async_trait::async_trait;
+use tracing::debug;
 
 #[cfg(feature = "prometheus")]
 pub mod prometheus;
@@ -32,50 +33,6 @@ pub(crate) fn register_plugins() -> Result<(), Error> {
     prometheus::register_prometheus()?;
 
     Ok(())
-}
-
-/// Trait for metrics backends.
-///
-/// Implementations of this trait are responsible for recording and exposing
-/// metrics from the fiddler runtime. The trait is designed to be lightweight
-/// and non-blocking to avoid impacting pipeline performance.
-#[async_trait]
-pub trait Metrics: Send + Sync {
-    /// Records current metrics values to the backend.
-    ///
-    /// This method is called periodically by the runtime to update metrics.
-    /// Implementations should be fast and non-blocking.
-    ///
-    /// # Arguments
-    ///
-    /// * `total_received` - Total messages received from input
-    /// * `total_completed` - Messages successfully processed through all outputs
-    /// * `total_process_errors` - Messages that encountered processing errors
-    /// * `total_output_errors` - Messages that encountered output errors
-    /// * `streams_started` - Number of streams started
-    /// * `streams_completed` - Number of streams completed
-    /// * `duplicates_rejected` - Duplicate messages rejected
-    /// * `stale_entries_removed` - Stale entries cleaned up
-    /// * `in_flight` - Current number of messages being processed
-    /// * `throughput_per_sec` - Current throughput in messages per second
-    fn record(
-        &self,
-        total_received: u64,
-        total_completed: u64,
-        total_process_errors: u64,
-        total_output_errors: u64,
-        streams_started: u64,
-        streams_completed: u64,
-        duplicates_rejected: u64,
-        stale_entries_removed: u64,
-        in_flight: usize,
-        throughput_per_sec: f64,
-    );
-
-    /// Closes the metrics backend and flushes any pending data.
-    async fn close(&self) -> Result<(), Error> {
-        Ok(())
-    }
 }
 
 /// No-op metrics implementation used when no metrics backend is configured.
@@ -108,6 +65,14 @@ impl Metrics for NoOpMetrics {
         _throughput_per_sec: f64,
     ) {
         // No-op: metrics are disabled
+    }
+}
+
+#[async_trait]
+impl Closer for NoOpMetrics {
+    async fn close(&mut self) -> Result<(), Error> {
+        debug!("noop metrics backend closing");
+        Ok(())
     }
 }
 
@@ -161,7 +126,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_noop_metrics_close() {
-        let metrics = NoOpMetrics::new();
+        let mut metrics = NoOpMetrics::new();
         assert!(metrics.close().await.is_ok());
     }
 

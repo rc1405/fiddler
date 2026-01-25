@@ -168,6 +168,45 @@ pub trait Processor: Closer {
     async fn process(&self, message: Message) -> Result<MessageBatch, Error>;
 }
 
+/// Trait for metrics backends.
+///
+/// Implementations of this trait are responsible for recording and exposing
+/// metrics from the fiddler runtime. The trait is designed to be lightweight
+/// and non-blocking to avoid impacting pipeline performance.
+#[async_trait]
+pub trait Metrics: Closer + Send {
+    /// Records current metrics values to the backend.
+    ///
+    /// This method is called periodically by the runtime to update metrics.
+    /// Implementations should be fast and non-blocking.
+    ///
+    /// # Arguments
+    ///
+    /// * `total_received` - Total messages received from input
+    /// * `total_completed` - Messages successfully processed through all outputs
+    /// * `total_process_errors` - Messages that encountered processing errors
+    /// * `total_output_errors` - Messages that encountered output errors
+    /// * `streams_started` - Number of streams started
+    /// * `streams_completed` - Number of streams completed
+    /// * `duplicates_rejected` - Duplicate messages rejected
+    /// * `stale_entries_removed` - Stale entries cleaned up
+    /// * `in_flight` - Current number of messages being processed
+    /// * `throughput_per_sec` - Current throughput in messages per second
+    fn record(
+        &self,
+        total_received: u64,
+        total_completed: u64,
+        total_process_errors: u64,
+        total_output_errors: u64,
+        streams_started: u64,
+        streams_completed: u64,
+        duplicates_rejected: u64,
+        stale_entries_removed: u64,
+        in_flight: usize,
+        throughput_per_sec: f64,
+    );
+}
+
 /// Enum to capture errors occurred through the pipeline.
 ///
 /// Uses `thiserror` for ergonomic error handling with proper `std::error::Error` implementation.

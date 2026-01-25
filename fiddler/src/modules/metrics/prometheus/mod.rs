@@ -13,8 +13,8 @@
 use crate::config::register_plugin;
 use crate::config::ItemType;
 use crate::config::{ConfigSpec, ExecutionType};
-use crate::modules::metrics::Metrics;
 use crate::Error;
+use crate::{Closer, Metrics};
 use async_trait::async_trait;
 use fiddler_macros::fiddler_registration_func;
 use metrics::{counter, gauge};
@@ -106,8 +106,11 @@ impl Metrics for PrometheusMetrics {
         gauge!("fiddler_messages_in_flight").set(in_flight as f64);
         gauge!("fiddler_throughput_per_second").set(throughput_per_sec);
     }
+}
 
-    async fn close(&self) -> Result<(), Error> {
+#[async_trait]
+impl Closer for PrometheusMetrics {
+    async fn close(&mut self) -> Result<(), Error> {
         debug!("Prometheus metrics backend closing");
         Ok(())
     }
@@ -147,7 +150,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_prometheus_metrics_close() {
-        let metrics = PrometheusMetrics::default();
+        let mut metrics = PrometheusMetrics::default();
         assert!(metrics.close().await.is_ok());
     }
 

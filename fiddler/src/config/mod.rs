@@ -13,8 +13,7 @@ use tracing::{debug, error, trace};
 use core::future::Future;
 use std::pin::Pin;
 
-use super::{Error, Input, Output, Processor};
-use crate::modules::metrics::Metrics;
+use super::{Error, Input, Metrics, Output, Processor};
 use crate::{InputBatch, OutputBatch};
 
 mod registration;
@@ -39,7 +38,7 @@ pub enum ItemType {
     OutputBatch,
     /// [crate::Processor] trait enum variant
     Processor,
-    /// Metrics backend enum variant
+    /// [crate::Metrics] backend enum variant
     Metrics,
 }
 

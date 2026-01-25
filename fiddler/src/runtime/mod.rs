@@ -131,11 +131,12 @@ fn spawn_runtime_task<F>(
 use super::CallbackChan;
 use super::Error;
 use super::Message;
+use super::Metrics;
 use crate::config::parse_configuration_item;
 use crate::config::ExecutionType;
 use crate::config::{Config, ItemType, ParsedConfig, ParsedRegisteredItem};
 
-use crate::modules::metrics::{create_metrics, Metrics};
+use crate::modules::metrics::create_metrics;
 use crate::modules::outputs;
 use crate::modules::processors;
 use crate::modules::register_plugins;
