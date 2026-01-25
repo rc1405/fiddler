@@ -14,7 +14,7 @@ use crate::config::register_plugin;
 use crate::config::ItemType;
 use crate::config::{ConfigSpec, ExecutionType};
 use crate::Error;
-use crate::{Closer, Metrics};
+use crate::{Closer, MetricEntry, Metrics};
 use async_trait::async_trait;
 use fiddler_macros::fiddler_registration_func;
 use metrics::{counter, gauge};
@@ -82,29 +82,17 @@ impl Default for PrometheusMetrics {
 
 #[async_trait]
 impl Metrics for PrometheusMetrics {
-    fn record(
-        &self,
-        total_received: u64,
-        total_completed: u64,
-        total_process_errors: u64,
-        total_output_errors: u64,
-        streams_started: u64,
-        streams_completed: u64,
-        duplicates_rejected: u64,
-        stale_entries_removed: u64,
-        in_flight: usize,
-        throughput_per_sec: f64,
-    ) {
-        counter!("fiddler_messages_received_total").absolute(total_received);
-        counter!("fiddler_messages_completed_total").absolute(total_completed);
-        counter!("fiddler_messages_process_errors_total").absolute(total_process_errors);
-        counter!("fiddler_messages_output_errors_total").absolute(total_output_errors);
-        counter!("fiddler_streams_started_total").absolute(streams_started);
-        counter!("fiddler_streams_completed_total").absolute(streams_completed);
-        counter!("fiddler_duplicates_rejected_total").absolute(duplicates_rejected);
-        counter!("fiddler_stale_entries_removed_total").absolute(stale_entries_removed);
-        gauge!("fiddler_messages_in_flight").set(in_flight as f64);
-        gauge!("fiddler_throughput_per_second").set(throughput_per_sec);
+    fn record(&self, metric: MetricEntry) {
+        counter!("fiddler_messages_received_total").absolute(metric.total_received);
+        counter!("fiddler_messages_completed_total").absolute(metric.total_completed);
+        counter!("fiddler_messages_process_errors_total").absolute(metric.total_process_errors);
+        counter!("fiddler_messages_output_errors_total").absolute(metric.total_output_errors);
+        counter!("fiddler_streams_started_total").absolute(metric.streams_started);
+        counter!("fiddler_streams_completed_total").absolute(metric.streams_completed);
+        counter!("fiddler_duplicates_rejected_total").absolute(metric.duplicates_rejected);
+        counter!("fiddler_stale_entries_removed_total").absolute(metric.stale_entries_removed);
+        gauge!("fiddler_messages_in_flight").set(metric.in_flight as f64);
+        gauge!("fiddler_throughput_per_second").set(metric.throughput_per_sec);
     }
 }
 
@@ -144,8 +132,19 @@ mod tests {
     fn test_prometheus_metrics_record() {
         // Note: This test may not fully initialize prometheus due to Once guard
         // but should not panic
-        let metrics = PrometheusMetrics::default();
-        metrics.record(100, 90, 5, 5, 10, 8, 2, 1, 50, 123.45);
+        let mut metrics = PrometheusMetrics::default();
+        metrics.record(MetricEntry {
+            total_received: 100,
+            total_completed: 90,
+            total_process_errors: 5,
+            total_output_errors: 5,
+            streams_started: 10,
+            streams_completed: 8,
+            duplicates_rejected: 2,
+            stale_entries_removed: 1,
+            in_flight: 50,
+            throughput_per_sec: 123.45,
+        });
     }
 
     #[tokio::test]

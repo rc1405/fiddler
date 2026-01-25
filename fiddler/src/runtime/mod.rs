@@ -9,6 +9,7 @@ use std::time::Instant;
 use tokio::task::JoinSet;
 use tracing::{debug, error, info, trace, warn};
 
+use crate::MetricEntry;
 use std::collections::HashMap;
 use std::str::FromStr;
 use std::sync::Once;
@@ -88,18 +89,18 @@ impl MessageMetrics {
     ///
     /// If no metrics backend is configured, this is a no-op.
     pub fn record(&self, metrics_backend: &dyn Metrics, in_flight: usize) {
-        metrics_backend.record(
-            self.total_received,
-            self.total_completed,
-            self.total_process_errors,
-            self.total_output_errors,
-            self.streams_started,
-            self.streams_completed,
-            self.duplicates_rejected,
-            self.stale_entries_removed,
-            in_flight,
-            self.throughput_per_sec(),
-        );
+        metrics_backend.record(MetricEntry {
+            total_received: self.total_received,
+            total_completed: self.total_completed,
+            total_process_errors: self.total_process_errors,
+            total_output_errors: self.total_output_errors,
+            streams_started: self.streams_started,
+            streams_completed: self.streams_completed,
+            duplicates_rejected: self.duplicates_rejected,
+            stale_entries_removed: self.stale_entries_removed,
+            in_flight: in_flight,
+            throughput_per_sec: self.throughput_per_sec(),
+        });
     }
 }
 
@@ -177,17 +178,6 @@ impl fmt::Display for MessageStatus {
             MessageStatus::StreamComplete => write!(f, "StreamComplete"),
         }
     }
-}
-
-#[derive(Clone, Serialize, Deserialize, Default)]
-pub(crate) enum ProcessingState {
-    #[default]
-    InputComplete,
-    ProcessorSubscribe((usize, String)),
-    ProcessorComplete(usize),
-    PipelineComplete,
-    OutputSubscribe(String),
-    OutputComplete,
 }
 
 #[derive(Clone, Serialize, Deserialize, Default)]
@@ -1119,8 +1109,8 @@ mod tests {
     fn test_message_metrics_record_with_noop_backend() {
         use crate::modules::metrics::NoOpMetrics;
         // Should work with no-op metrics backend
-        let metrics = MessageMetrics::new();
-        let backend = NoOpMetrics::new();
+        let mut metrics = MessageMetrics::new();
+        let mut backend = NoOpMetrics::new();
         metrics.record(&backend, 10);
         // No assertion needed - just verify it doesn't panic
     }

@@ -17,7 +17,7 @@
 //! If no metrics configuration is provided, a no-op implementation is used.
 
 use crate::config::{ExecutionType, ItemType};
-use crate::{Closer, Error, Metrics};
+use crate::{Closer, Error, MetricEntry, Metrics};
 use async_trait::async_trait;
 use tracing::debug;
 
@@ -51,19 +51,7 @@ impl NoOpMetrics {
 
 #[async_trait]
 impl Metrics for NoOpMetrics {
-    fn record(
-        &self,
-        _total_received: u64,
-        _total_completed: u64,
-        _total_process_errors: u64,
-        _total_output_errors: u64,
-        _streams_started: u64,
-        _streams_completed: u64,
-        _duplicates_rejected: u64,
-        _stale_entries_removed: u64,
-        _in_flight: usize,
-        _throughput_per_sec: f64,
-    ) {
+    fn record(&self, _metric: MetricEntry) {
         // No-op: metrics are disabled
     }
 }
@@ -119,9 +107,20 @@ mod tests {
 
     #[test]
     fn test_noop_metrics_record() {
-        let metrics = NoOpMetrics::new();
+        let mut metrics = NoOpMetrics::new();
         // Should not panic
-        metrics.record(100, 90, 5, 5, 10, 8, 2, 1, 50, 123.45);
+        metrics.record(MetricEntry {
+            total_received: 100,
+            total_completed: 90,
+            total_process_errors: 5,
+            total_output_errors: 5,
+            streams_started: 10,
+            streams_completed: 8,
+            duplicates_rejected: 2,
+            stale_entries_removed: 1,
+            in_flight: 50,
+            throughput_per_sec: 123.45,
+        });
     }
 
     #[tokio::test]
@@ -132,17 +131,39 @@ mod tests {
 
     #[tokio::test]
     async fn test_create_metrics_without_config() {
-        let metrics = create_metrics(None).await.unwrap();
+        let mut metrics = create_metrics(None).await.unwrap();
         // Should create a no-op metrics instance
-        metrics.record(0, 0, 0, 0, 0, 0, 0, 0, 0, 0.0);
+        metrics.record(MetricEntry {
+            total_received: 0,
+            total_completed: 0,
+            total_process_errors: 0,
+            total_output_errors: 0,
+            streams_started: 0,
+            streams_completed: 0,
+            duplicates_rejected: 0,
+            stale_entries_removed: 0,
+            in_flight: 0,
+            throughput_per_sec: 0.0,
+        });
     }
 
     #[tokio::test]
     async fn test_create_metrics_with_empty_config() {
         let config = crate::config::MetricsConfig::default();
-        let metrics = create_metrics(Some(&config)).await.unwrap();
+        let mut metrics = create_metrics(Some(&config)).await.unwrap();
         // Should create a no-op metrics instance when no backend specified
-        metrics.record(0, 0, 0, 0, 0, 0, 0, 0, 0, 0.0);
+        metrics.record(MetricEntry {
+            total_received: 0,
+            total_completed: 0,
+            total_process_errors: 0,
+            total_output_errors: 0,
+            streams_started: 0,
+            streams_completed: 0,
+            duplicates_rejected: 0,
+            stale_entries_removed: 0,
+            in_flight: 0,
+            throughput_per_sec: 0.0,
+        });
     }
 
     #[cfg(feature = "prometheus")]
@@ -160,9 +181,20 @@ mod tests {
             serde_yaml::Value::Mapping(serde_yaml::Mapping::new()),
         );
         let config = crate::config::MetricsConfig { label: None, extra };
-        let metrics = create_metrics(Some(&config)).await.unwrap();
+        let mut metrics = create_metrics(Some(&config)).await.unwrap();
         // Should create a prometheus metrics instance
-        metrics.record(100, 90, 5, 5, 10, 8, 2, 1, 50, 123.45);
+        metrics.record(MetricEntry {
+            total_received: 100,
+            total_completed: 90,
+            total_process_errors: 5,
+            total_output_errors: 5,
+            streams_started: 10,
+            streams_completed: 8,
+            duplicates_rejected: 2,
+            stale_entries_removed: 1,
+            in_flight: 50,
+            throughput_per_sec: 123.45,
+        });
     }
 
     #[tokio::test]

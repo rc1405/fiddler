@@ -85,6 +85,36 @@ pub struct Message {
 /// Type alias for Vec<[crate::Message]>, a grouping of Messages being produced
 pub type MessageBatch = Vec<Message>;
 
+/// MetricEntry is the uniform struct utilized within metrics modules of fiddler.
+/// ```
+/// # use fiddler::MetricEntry;
+/// let content = "This is a message being processed";
+/// let metric = MetricEntry::default();
+/// ```
+#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq)]
+pub struct MetricEntry {
+    /// * `total_received` - Total messages received from input
+    pub total_received: u64,
+    /// * `total_completed` - Messages successfully processed through all outputs
+    pub total_completed: u64,
+    /// * `total_process_errors` - Messages that encountered processing errors
+    pub total_process_errors: u64,
+    /// * `total_output_errors` - Messages that encountered output errors  
+    pub total_output_errors: u64,
+    /// * `streams_started` - Number of streams started
+    pub streams_started: u64,
+    /// * `streams_completed` - Number of streams completed
+    pub streams_completed: u64,
+    /// * `duplicates_rejected` - Duplicate messages rejected
+    pub duplicates_rejected: u64,
+    /// * `stale_entries_removed` - Stale entries cleaned up
+    pub stale_entries_removed: u64,
+    /// * `in_flight` - Current number of messages being processed
+    pub in_flight: usize,
+    /// * `throughput_per_sec` - Current throughput in messages per second
+    pub throughput_per_sec: f64,
+}
+
 /// Acknowledgement channel utilized to send feedback to input module on the successful
 /// or unsuccessful processing of event emited by input.
 pub type CallbackChan = oneshot::Sender<Status>;
@@ -174,7 +204,7 @@ pub trait Processor: Closer {
 /// metrics from the fiddler runtime. The trait is designed to be lightweight
 /// and non-blocking to avoid impacting pipeline performance.
 #[async_trait]
-pub trait Metrics: Closer + Send {
+pub trait Metrics: Send {
     /// Records current metrics values to the backend.
     ///
     /// This method is called periodically by the runtime to update metrics.
@@ -182,29 +212,8 @@ pub trait Metrics: Closer + Send {
     ///
     /// # Arguments
     ///
-    /// * `total_received` - Total messages received from input
-    /// * `total_completed` - Messages successfully processed through all outputs
-    /// * `total_process_errors` - Messages that encountered processing errors
-    /// * `total_output_errors` - Messages that encountered output errors
-    /// * `streams_started` - Number of streams started
-    /// * `streams_completed` - Number of streams completed
-    /// * `duplicates_rejected` - Duplicate messages rejected
-    /// * `stale_entries_removed` - Stale entries cleaned up
-    /// * `in_flight` - Current number of messages being processed
-    /// * `throughput_per_sec` - Current throughput in messages per second
-    fn record(
-        &self,
-        total_received: u64,
-        total_completed: u64,
-        total_process_errors: u64,
-        total_output_errors: u64,
-        streams_started: u64,
-        streams_completed: u64,
-        duplicates_rejected: u64,
-        stale_entries_removed: u64,
-        in_flight: usize,
-        throughput_per_sec: f64,
-    );
+    /// * `metric` - MetricEntry struct with details about metrics to be published
+    fn record(&self, metric: MetricEntry);
 }
 
 /// Enum to capture errors occurred through the pipeline.
