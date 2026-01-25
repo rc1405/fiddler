@@ -2,7 +2,9 @@ use flume::{bounded, Receiver, Sender};
 use serde::Deserialize;
 use serde::Serialize;
 use serde_yaml::Value;
+use std::collections::hash_map::Entry;
 use std::fmt;
+use std::future::Future;
 use std::mem;
 use std::time::Instant;
 use tokio::task::JoinSet;
@@ -22,6 +24,31 @@ const STALE_MESSAGE_TIMEOUT_SECS: u64 = 3600;
 
 /// Interval for cleaning up stale entries (5 minutes)
 const STALE_CLEANUP_INTERVAL_SECS: u64 = 300;
+
+/// Creates a new single-threaded tokio runtime with the given thread name.
+/// This helper reduces code duplication across the codebase.
+fn create_runtime(thread_name: impl Into<String>) -> Result<tokio::runtime::Runtime, Error> {
+    tokio::runtime::Builder::new_multi_thread()
+        .enable_all()
+        .thread_name(thread_name)
+        .worker_threads(1)
+        .build()
+        .map_err(|e| Error::ExecutionError(format!("Failed to create tokio runtime: {e}")))
+}
+
+/// Spawns a blocking task that creates its own runtime and runs the given future.
+fn spawn_runtime_task<F>(
+    handles: &mut JoinSet<Result<(), Error>>,
+    thread_name: impl Into<String> + Send + 'static,
+    task: F,
+) where
+    F: Future<Output = Result<(), Error>> + Send + 'static,
+{
+    handles.spawn_blocking(move || {
+        let runtime = create_runtime(thread_name)?;
+        runtime.block_on(task)
+    });
+}
 
 use super::CallbackChan;
 use super::Error;
@@ -323,17 +350,7 @@ impl Runtime {
         let (msg_tx, msg_rx) = bounded(0);
         let msg_state = message_handler(msg_rx, self.state_rx.clone(), self.config.num_threads);
 
-        let _ = handles.spawn_blocking(move || {
-            let runtime = tokio::runtime::Builder::new_multi_thread()
-                .enable_all()
-                .thread_name("state")
-                .worker_threads(1)
-                .build()
-                .map_err(|e| {
-                    Error::ExecutionError(format!("Failed to create tokio runtime: {}", e))
-                })?;
-            runtime.block_on(msg_state)
-        });
+        spawn_runtime_task(&mut handles, "state", msg_state);
 
         let output = self
             .output(self.config.output.clone(), &mut handles)
@@ -345,33 +362,13 @@ impl Runtime {
 
         let input = input(self.config.input.clone(), processors, msg_tx, ks_recv);
 
-        let _ = handles.spawn_blocking(move || {
-            let runtime = tokio::runtime::Builder::new_multi_thread()
-                .enable_all()
-                .thread_name("input")
-                .worker_threads(1)
-                // .on_thread_start(move || set_current_thread_priority_low())
-                .build()
-                .map_err(|e| {
-                    Error::ExecutionError(format!("Failed to create tokio runtime: {e}"))
-                })?;
-            runtime.block_on(input)
-        });
+        spawn_runtime_task(&mut handles, "input", input);
 
         info!(label = self.config.label, "pipeline started");
 
         if let Some(d) = self.timeout {
-            let _ = handles.spawn_blocking(move || {
-                let runtime = tokio::runtime::Builder::new_multi_thread()
-                    .enable_all()
-                    .thread_name("timeout")
-                    .worker_threads(1)
-                    // .on_thread_start(move || set_current_thread_priority_low())
-                    .build()
-                    .map_err(|e| {
-                        Error::ExecutionError(format!("Failed to create tokio runtime: {e}"))
-                    })?;
-
+            handles.spawn_blocking(move || {
+                let runtime = create_runtime("timeout")?;
                 runtime.block_on(sleep(d));
                 trace!("sending kill signal");
                 if !ks_send.is_disconnected() {
@@ -408,25 +405,13 @@ impl Runtime {
             let (tx, rx) = bounded(0);
 
             for n in 0..self.config.num_threads {
-                // tokio::spawn(processors::run_processor(p.clone(), next_tx.clone(), rx.clone(), self.state_tx.clone()));
                 let proc = processors::run_processor(
                     p.clone(),
                     next_tx.clone(),
                     rx.clone(),
                     self.state_tx.clone(),
                 );
-                let _ = handles.spawn_blocking(move || {
-                    let runtime = tokio::runtime::Builder::new_multi_thread()
-                        .enable_all()
-                        .thread_name(format!("processor{}-{}", i, n))
-                        .worker_threads(1)
-                        // .on_thread_start(move || set_current_thread_priority_low())
-                        .build()
-                        .map_err(|e| {
-                            Error::ExecutionError(format!("Failed to create tokio runtime: {e}"))
-                        })?;
-                    runtime.block_on(proc)
-                });
+                spawn_runtime_task(handles, format!("processor{i}-{n}"), proc);
             }
 
             next_tx = tx;
@@ -448,38 +433,22 @@ impl Runtime {
             let item = (output.creator)(output.config.clone()).await?;
             match item {
                 ExecutionType::Output(o) => {
-                    // handles.spawn(outputs::run_output(rx.clone(), self.state_tx.clone(), o));
                     let state_tx = self.state_tx.clone();
                     let new_rx = rx.clone();
-                    let _ = handles.spawn_blocking(move || {
-                        let runtime = tokio::runtime::Builder::new_multi_thread()
-                            .enable_all()
-                            .thread_name(format!("output{}", i))
-                            .worker_threads(1)
-                            // .on_thread_start(move || set_current_thread_priority_low())
-                            .build()
-                            .map_err(|e| {
-                                Error::ExecutionError(format!("Failed to create tokio runtime: {e}"))
-                            })?;
-                        runtime.block_on(outputs::run_output(new_rx, state_tx, o))
-                    });
+                    spawn_runtime_task(
+                        handles,
+                        format!("output{i}"),
+                        outputs::run_output(new_rx, state_tx, o),
+                    );
                 }
                 ExecutionType::OutputBatch(o) => {
-                    // handles.spawn(outputs::run_output_batch(rx.clone(), self.state_tx.clone(), o))
                     let state_tx = self.state_tx.clone();
                     let new_rx = rx.clone();
-                    let _ = handles.spawn_blocking(move || {
-                        let runtime = tokio::runtime::Builder::new_multi_thread()
-                            .enable_all()
-                            .thread_name(format!("output{}", i))
-                            .worker_threads(1)
-                            // .on_thread_start(move || set_current_thread_priority_low())
-                            .build()
-                            .map_err(|e| {
-                                Error::ExecutionError(format!("Failed to create tokio runtime: {e}"))
-                            })?;
-                        runtime.block_on(outputs::run_output_batch(new_rx, state_tx, o))
-                    });
+                    spawn_runtime_task(
+                        handles,
+                        format!("output{i}"),
+                        outputs::run_output_batch(new_rx, state_tx, o),
+                    );
                 }
                 _ => {
                     error!("invalid execution type for output");
@@ -778,25 +747,26 @@ async fn message_handler(
                 };
 
                 let closure = msg.closure;
-                let i = handles.insert(msg.message_id.clone(), State {
-                    instance_count: 1,
-                    processed_count: 0,
-                    processed_error_count: 0,
-                    output_count: 0,
-                    output_error_count: 0,
-                    closure,
-                    errors: Vec::new(),
-                    stream_id: msg.stream_id.clone(),
-                    stream_closed: match msg.is_stream {
-                        true => Some(false),
-                        false => None,
-                    },
-                    created_at: Instant::now(),
-                });
-                if i.is_some() {
-                    error!(message_id = msg.message_id, "Received duplicate message");
-                    return Err(Error::ExecutionError("Duplicate Message ID Error".into()))
-                };
+                match handles.entry(msg.message_id.clone()) {
+                    Entry::Vacant(entry) => {
+                        entry.insert(State {
+                            instance_count: 1,
+                            processed_count: 0,
+                            processed_error_count: 0,
+                            output_count: 0,
+                            output_error_count: 0,
+                            closure,
+                            errors: Vec::new(),
+                            stream_id: msg.stream_id.clone(),
+                            stream_closed: if msg.is_stream { Some(false) } else { None },
+                            created_at: Instant::now(),
+                        });
+                    }
+                    Entry::Occupied(_) => {
+                        error!(message_id = msg.message_id, "Received duplicate message");
+                        return Err(Error::ExecutionError("Duplicate Message ID Error".into()));
+                    }
+                }
 
                 if let Some(s) = &msg.stream_id {
                     if let Err(e) = process_state(&mut handles, &output_ct, &mut closed_outputs, InternalMessageState{

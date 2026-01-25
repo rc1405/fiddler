@@ -7,7 +7,7 @@ use std::collections::HashMap;
 use std::env;
 use std::fmt;
 use std::str::FromStr;
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 use tracing::{debug, error, trace};
 
 use core::future::Future;
@@ -231,16 +231,27 @@ pub struct ParsedConfig {
 }
 
 /// Plugin configuration validation snippet
-#[derive(Debug)]
+///
+/// Uses `Arc` internally to make cloning cheap without re-parsing the schema.
 pub struct ConfigSpec {
     raw_schema: String,
-    schema: JSONSchema,
+    schema: Arc<JSONSchema>,
+}
+
+impl std::fmt::Debug for ConfigSpec {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("ConfigSpec")
+            .field("raw_schema", &self.raw_schema)
+            .finish()
+    }
 }
 
 impl Clone for ConfigSpec {
     fn clone(&self) -> Self {
-        #[allow(clippy::unwrap_used)]
-        ConfigSpec::from_schema(&self.raw_schema).unwrap()
+        ConfigSpec {
+            raw_schema: self.raw_schema.clone(),
+            schema: Arc::clone(&self.schema),
+        }
     }
 }
 
@@ -274,14 +285,14 @@ impl ConfigSpec {
 
         let schema: JSONSchema = match JSONSchema::options().with_draft(Draft::Draft7).compile(&f) {
             Ok(js) => js,
-            Err(e) => return Err(Error::InvalidValidationSchema(format!("{}", e))),
+            Err(e) => return Err(Error::InvalidValidationSchema(format!("{e}"))),
         };
 
         trace!("json schema is valid");
 
         Ok(ConfigSpec {
             raw_schema: conf.into(),
-            schema,
+            schema: Arc::new(schema),
         })
     }
 
