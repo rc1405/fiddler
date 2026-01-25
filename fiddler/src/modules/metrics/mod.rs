@@ -184,7 +184,7 @@ mod tests {
     #[tokio::test]
     async fn test_create_metrics_with_prometheus_config() {
         // Registration should succeed (or already be registered)
-        let result = register_prometheus();
+        let result = prometheus::register_prometheus();
         // May return DuplicateRegisteredName if already registered by another test
         assert!(result.is_ok() || matches!(result, Err(crate::Error::DuplicateRegisteredName(_))));
 
