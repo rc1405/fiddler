@@ -84,27 +84,22 @@ impl MessageMetrics {
         }
     }
 
-    /// Records metrics to prometheus gauges/counters when the feature is enabled.
-    #[cfg(feature = "prometheus")]
-    pub fn record_to_prometheus(&self, in_flight: usize) {
-        use metrics::{counter, gauge};
-
-        counter!("fiddler_messages_received_total").absolute(self.total_received);
-        counter!("fiddler_messages_completed_total").absolute(self.total_completed);
-        counter!("fiddler_messages_process_errors_total").absolute(self.total_process_errors);
-        counter!("fiddler_messages_output_errors_total").absolute(self.total_output_errors);
-        counter!("fiddler_streams_started_total").absolute(self.streams_started);
-        counter!("fiddler_streams_completed_total").absolute(self.streams_completed);
-        counter!("fiddler_duplicates_rejected_total").absolute(self.duplicates_rejected);
-        counter!("fiddler_stale_entries_removed_total").absolute(self.stale_entries_removed);
-        gauge!("fiddler_messages_in_flight").set(in_flight as f64);
-        gauge!("fiddler_throughput_per_second").set(self.throughput_per_sec());
-    }
-
-    /// No-op when prometheus feature is not enabled.
-    #[cfg(not(feature = "prometheus"))]
-    pub fn record_to_prometheus(&self, _in_flight: usize) {
-        // Prometheus metrics disabled
+    /// Records metrics to the configured metrics backend.
+    ///
+    /// If no metrics backend is configured, this is a no-op.
+    pub fn record(&self, metrics_backend: &dyn Metrics, in_flight: usize) {
+        metrics_backend.record(
+            self.total_received,
+            self.total_completed,
+            self.total_process_errors,
+            self.total_output_errors,
+            self.streams_started,
+            self.streams_completed,
+            self.duplicates_rejected,
+            self.stale_entries_removed,
+            in_flight,
+            self.throughput_per_sec(),
+        );
     }
 }
 
@@ -140,6 +135,7 @@ use crate::config::parse_configuration_item;
 use crate::config::ExecutionType;
 use crate::config::{Config, ItemType, ParsedConfig, ParsedRegisteredItem};
 
+use crate::modules::metrics::{create_metrics, Metrics};
 use crate::modules::outputs;
 use crate::modules::processors;
 use crate::modules::register_plugins;
@@ -430,8 +426,16 @@ impl Runtime {
     pub async fn run(&self) -> Result<(), Error> {
         let mut handles = JoinSet::new();
 
+        // Create metrics backend based on configuration
+        let metrics_backend = create_metrics(self.config.metrics.as_ref()).await?;
+
         let (msg_tx, msg_rx) = bounded(0);
-        let msg_state = message_handler(msg_rx, self.state_rx.clone(), self.config.num_threads);
+        let msg_state = message_handler(
+            msg_rx,
+            self.state_rx.clone(),
+            self.config.num_threads,
+            metrics_backend,
+        );
 
         spawn_runtime_task(&mut handles, "state", msg_state);
 
@@ -771,6 +775,7 @@ async fn message_handler(
     new_msg: Receiver<MessageHandle>,
     msg_status: Receiver<InternalMessageState>,
     output_ct: usize,
+    metrics_backend: Box<dyn Metrics>,
 ) -> Result<(), Error> {
     let mut handles: HashMap<String, State> = HashMap::new();
     let mut closed_outputs = 0;
@@ -805,8 +810,8 @@ async fn message_handler(
             }
             last_cleanup = Instant::now();
 
-            // Record metrics to prometheus if enabled
-            metrics.record_to_prometheus(handles.len());
+            // Record metrics to configured backend
+            metrics.record(metrics_backend.as_ref(), handles.len());
         }
 
         tokio::select! {
@@ -823,7 +828,7 @@ async fn message_handler(
                     }, &mut metrics) {
                         match e {
                             Error::EndOfInput => {
-                                log_shutdown_metrics(&metrics, handles.len());
+                                log_shutdown_metrics(&metrics, handles.len(), metrics_backend.as_ref());
                                 return Ok(());
                             }
                             _ => return Err(e),
@@ -870,7 +875,7 @@ async fn message_handler(
                     }, &mut metrics) {
                         match e {
                             Error::EndOfInput => {
-                                log_shutdown_metrics(&metrics, handles.len());
+                                log_shutdown_metrics(&metrics, handles.len(), metrics_backend.as_ref());
                                 return Ok(());
                             }
                         _ => return Err(e),
@@ -882,7 +887,7 @@ async fn message_handler(
                 if let Err(e) = process_state(&mut handles, &output_ct, &mut closed_outputs, msg, &mut metrics) {
                     match e {
                         Error::EndOfInput => {
-                            log_shutdown_metrics(&metrics, handles.len());
+                            log_shutdown_metrics(&metrics, handles.len(), metrics_backend.as_ref());
                             return Ok(());
                         }
                         _ => return Err(e),
@@ -893,14 +898,14 @@ async fn message_handler(
         }
     }
 
-    log_shutdown_metrics(&metrics, handles.len());
+    log_shutdown_metrics(&metrics, handles.len(), metrics_backend.as_ref());
     Ok(())
 }
 
 /// Logs comprehensive shutdown metrics for observability.
-fn log_shutdown_metrics(metrics: &MessageMetrics, in_flight: usize) {
-    // Record final metrics to prometheus if enabled
-    metrics.record_to_prometheus(in_flight);
+fn log_shutdown_metrics(metrics: &MessageMetrics, in_flight: usize, metrics_backend: &dyn Metrics) {
+    // Record final metrics to configured backend
+    metrics.record(metrics_backend, in_flight);
 
     info!(
         total_received = metrics.total_received,
@@ -1110,10 +1115,12 @@ mod tests {
     }
 
     #[test]
-    fn test_message_metrics_record_to_prometheus_noop() {
-        // When prometheus feature is disabled, this should be a no-op
+    fn test_message_metrics_record_with_noop_backend() {
+        use crate::modules::metrics::NoOpMetrics;
+        // Should work with no-op metrics backend
         let metrics = MessageMetrics::new();
-        metrics.record_to_prometheus(10);
+        let backend = NoOpMetrics::new();
+        metrics.record(&backend, 10);
         // No assertion needed - just verify it doesn't panic
     }
 }
