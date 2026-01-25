@@ -18,10 +18,22 @@ pub(crate) mod modules;
 mod runtime;
 
 /// BatchingPolicy defines common configuration items for used in batching operations
-/// such as OutputBatch modules
+/// such as OutputBatch modules.
+///
+/// # Example Configuration
+///
+/// ```yaml
+/// output:
+///   elasticsearch:
+///     batch:
+///       duration: 10s
+///       size: 500
+/// ```
 #[derive(Deserialize, Default, Clone)]
 pub struct BatchingPolicy {
+    /// Maximum duration to wait before flushing a batch
     duration: Option<Duration>,
+    /// Maximum number of messages in a batch before flushing
     size: Option<usize>,
 }
 

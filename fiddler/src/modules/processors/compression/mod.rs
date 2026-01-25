@@ -14,11 +14,11 @@ use serde_yaml::Value;
 
 #[derive(Deserialize)]
 struct CompressConfig {
-    algorithm: Option<Algoritym>,
+    algorithm: Option<Algorithm>,
 }
 
 #[derive(Clone, Default, Deserialize)]
-pub enum Algoritym {
+pub enum Algorithm {
     #[default]
     Gzip,
     Zip,
@@ -34,7 +34,7 @@ pub enum Operation {
 
 #[derive(Clone, Default)]
 pub struct Compress {
-    algorith: Algoritym,
+    algorithm: Algorithm,
     method: Operation,
 }
 
@@ -42,61 +42,61 @@ pub struct Compress {
 impl Processor for Compress {
     async fn process(&self, mut message: Message) -> Result<MessageBatch, Error> {
         match self.method {
-            Operation::Compress => match self.algorith {
-                Algoritym::Gzip => {
+            Operation::Compress => match self.algorithm {
+                Algorithm::Gzip => {
                     let mut output = Vec::new();
                     let mut deflater =
                         read::GzEncoder::new(&message.bytes[..], Compression::best());
-                    let _ = deflater
+                    deflater
                         .read_to_end(&mut output)
                         .map_err(|e| Error::ProcessingError(format!("{e}")))?;
                     message.bytes = output;
                     Ok(vec![message])
                 }
-                Algoritym::Zip => {
+                Algorithm::Zip => {
                     let mut output = Vec::new();
                     let mut deflater =
                         read::DeflateEncoder::new(&message.bytes[..], Compression::best());
-                    let _ = deflater
+                    deflater
                         .read_to_end(&mut output)
                         .map_err(|e| Error::ProcessingError(format!("{e}")))?;
                     message.bytes = output;
                     Ok(vec![message])
                 }
-                Algoritym::Zlib => {
+                Algorithm::Zlib => {
                     let mut output = Vec::new();
                     let mut deflater =
                         read::ZlibEncoder::new(&message.bytes[..], Compression::best());
-                    let _ = deflater
+                    deflater
                         .read_to_end(&mut output)
                         .map_err(|e| Error::ProcessingError(format!("{e}")))?;
                     message.bytes = output;
                     Ok(vec![message])
                 }
             },
-            Operation::Decompress => match self.algorith {
-                Algoritym::Gzip => {
+            Operation::Decompress => match self.algorithm {
+                Algorithm::Gzip => {
                     let mut output = Vec::new();
                     let mut deflater = read::GzDecoder::new(&message.bytes[..]);
-                    let _ = deflater
+                    deflater
                         .read_to_end(&mut output)
                         .map_err(|e| Error::ProcessingError(format!("{e}")))?;
                     message.bytes = output;
                     Ok(vec![message])
                 }
-                Algoritym::Zip => {
+                Algorithm::Zip => {
                     let mut output = Vec::new();
                     let mut deflater = read::DeflateDecoder::new(&message.bytes[..]);
-                    let _ = deflater
+                    deflater
                         .read_to_end(&mut output)
                         .map_err(|e| Error::ProcessingError(format!("{e}")))?;
                     message.bytes = output;
                     Ok(vec![message])
                 }
-                Algoritym::Zlib => {
+                Algorithm::Zlib => {
                     let mut output = Vec::new();
                     let mut deflater = read::ZlibDecoder::new(&message.bytes[..]);
-                    let _ = deflater
+                    deflater
                         .read_to_end(&mut output)
                         .map_err(|e| Error::ProcessingError(format!("{e}")))?;
                     message.bytes = output;
@@ -114,7 +114,7 @@ fn create_compress(conf: Value) -> Result<ExecutionType, Error> {
     let mut proc = Compress::default();
     let c: CompressConfig = serde_yaml::from_value(conf)?;
     if let Some(a) = c.algorithm {
-        proc.algorith = a;
+        proc.algorithm = a;
     };
     proc.method = Operation::Compress;
 
@@ -126,7 +126,7 @@ fn create_decompress(conf: Value) -> Result<ExecutionType, Error> {
     let mut proc = Compress::default();
     let c: CompressConfig = serde_yaml::from_value(conf)?;
     if let Some(a) = c.algorithm {
-        proc.algorith = a;
+        proc.algorithm = a;
     };
     proc.method = Operation::Decompress;
 
@@ -176,7 +176,7 @@ mod test {
             ..Default::default()
         };
         let processor = Compress {
-            algorith: Algoritym::Zip,
+            algorithm: Algorithm::Zip,
             method: Operation::Compress,
         };
         let output = processor.process(msg).await.unwrap();
@@ -197,7 +197,7 @@ mod test {
             ..Default::default()
         };
         let processor = Compress {
-            algorith: Algoritym::Zip,
+            algorithm: Algorithm::Zip,
             method: Operation::Decompress,
         };
         let output = processor.process(msg).await.unwrap();
@@ -219,7 +219,7 @@ mod test {
             ..Default::default()
         };
         let processor = Compress {
-            algorith: Algoritym::Gzip,
+            algorithm: Algorithm::Gzip,
             method: Operation::Compress,
         };
         let output = processor.process(msg).await.unwrap();
@@ -240,7 +240,7 @@ mod test {
             ..Default::default()
         };
         let processor = Compress {
-            algorith: Algoritym::Gzip,
+            algorithm: Algorithm::Gzip,
             method: Operation::Decompress,
         };
         let output = processor.process(msg).await.unwrap();
@@ -262,7 +262,7 @@ mod test {
             ..Default::default()
         };
         let processor = Compress {
-            algorith: Algoritym::Zlib,
+            algorithm: Algorithm::Zlib,
             method: Operation::Compress,
         };
         let output = processor.process(msg).await.unwrap();
@@ -283,7 +283,7 @@ mod test {
             ..Default::default()
         };
         let processor = Compress {
-            algorith: Algoritym::Zlib,
+            algorithm: Algorithm::Zlib,
             method: Operation::Decompress,
         };
         let output = processor.process(msg).await.unwrap();

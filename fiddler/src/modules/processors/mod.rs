@@ -15,6 +15,9 @@ use tokio::task::yield_now;
 use tokio::time::{sleep, Duration};
 use tracing::{debug, error, trace};
 
+/// Backoff duration when channel is empty (in milliseconds)
+const EMPTY_CHANNEL_BACKOFF_MS: u64 = 250;
+
 pub(crate) fn register_plugins() -> Result<(), Error> {
     lines::register_lines()?;
     noop::register_noop()?;
@@ -59,7 +62,7 @@ pub(crate) async fn run_processor(
                                         ..Default::default()
                                     })
                                     .await
-                                    .map_err(|e| Error::UnableToSendToChannel(format!("{}", e)))?;
+                                    .map_err(|e| Error::UnableToSendToChannel(format!("{e}")))?;
                             }
                         }
 
@@ -72,7 +75,7 @@ pub(crate) async fn run_processor(
                             output
                                 .send_async(new_msg)
                                 .await
-                                .map_err(|e| Error::UnableToSendToChannel(format!("{}", e)))?;
+                                .map_err(|e| Error::UnableToSendToChannel(format!("{e}")))?;
                         }
                     }
                     Err(e) => match e {
@@ -82,15 +85,15 @@ pub(crate) async fn run_processor(
                             state_tx
                                 .send_async(InternalMessageState {
                                     message_id: msg.message_id,
-                                    status: MessageStatus::ProcessError(format!("{}", e)),
+                                    status: MessageStatus::ProcessError(format!("{e}")),
                                     stream_id: msg.message.stream_id.clone(),
                                     ..Default::default()
                                 })
                                 .await
-                                .map_err(|e| Error::UnableToSendToChannel(format!("{}", e)))?;
+                                .map_err(|e| Error::UnableToSendToChannel(format!("{e}")))?;
                         }
                         _ => {
-                            error!(error = format!("{}", e), "read error from processor");
+                            error!(error = format!("{e}"), "read error from processor");
                             return Err(e);
                         }
                     },
@@ -102,7 +105,7 @@ pub(crate) async fn run_processor(
                     debug!("processor closed");
                     return Ok(());
                 }
-                TryRecvError::Empty => sleep(Duration::from_millis(250)).await,
+                TryRecvError::Empty => sleep(Duration::from_millis(EMPTY_CHANNEL_BACKOFF_MS)).await,
             },
         };
         yield_now().await;

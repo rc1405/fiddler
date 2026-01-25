@@ -13,6 +13,9 @@ use std::sync::Once;
 use tokio::time::{sleep, Duration};
 use uuid::Uuid;
 
+/// Backoff duration when no input is available (in milliseconds)
+const NO_INPUT_BACKOFF_MS: u64 = 1500;
+
 use super::CallbackChan;
 use super::Error;
 use super::Message;
@@ -318,9 +321,10 @@ impl Runtime {
                 .enable_all()
                 .thread_name("state")
                 .worker_threads(1)
-                // .on_thread_start(move || set_current_thread_priority_low())
                 .build()
-                .expect("Creating tokio runtime");
+                .map_err(|e| {
+                    Error::ExecutionError(format!("Failed to create tokio runtime: {}", e))
+                })?;
             runtime.block_on(msg_state)
         });
 
@@ -341,7 +345,9 @@ impl Runtime {
                 .worker_threads(1)
                 // .on_thread_start(move || set_current_thread_priority_low())
                 .build()
-                .expect("Creating tokio runtime");
+                .map_err(|e| {
+                    Error::ExecutionError(format!("Failed to create tokio runtime: {e}"))
+                })?;
             runtime.block_on(input)
         });
 
@@ -355,7 +361,9 @@ impl Runtime {
                     .worker_threads(1)
                     // .on_thread_start(move || set_current_thread_priority_low())
                     .build()
-                    .expect("Creating tokio runtime");
+                    .map_err(|e| {
+                        Error::ExecutionError(format!("Failed to create tokio runtime: {e}"))
+                    })?;
 
                 runtime.block_on(sleep(d));
                 trace!("sending kill signal");
@@ -368,7 +376,7 @@ impl Runtime {
         }
 
         while let Some(res) = handles.join_next().await {
-            res.map_err(|e| Error::ProcessingError(format!("{}", e)))??;
+            res.map_err(|e| Error::ProcessingError(format!("{e}")))??;
         }
 
         info!("pipeline finished");
@@ -407,7 +415,9 @@ impl Runtime {
                         .worker_threads(1)
                         // .on_thread_start(move || set_current_thread_priority_low())
                         .build()
-                        .expect("Creating tokio runtime");
+                        .map_err(|e| {
+                            Error::ExecutionError(format!("Failed to create tokio runtime: {e}"))
+                        })?;
                     runtime.block_on(proc)
                 });
             }
@@ -441,7 +451,9 @@ impl Runtime {
                             .worker_threads(1)
                             // .on_thread_start(move || set_current_thread_priority_low())
                             .build()
-                            .expect("Creating tokio runtime");
+                            .map_err(|e| {
+                                Error::ExecutionError(format!("Failed to create tokio runtime: {e}"))
+                            })?;
                         runtime.block_on(outputs::run_output(new_rx, state_tx, o))
                     });
                 }
@@ -456,7 +468,9 @@ impl Runtime {
                             .worker_threads(1)
                             // .on_thread_start(move || set_current_thread_priority_low())
                             .build()
-                            .expect("Creating tokio runtime");
+                            .map_err(|e| {
+                                Error::ExecutionError(format!("Failed to create tokio runtime: {e}"))
+                            })?;
                         runtime.block_on(outputs::run_output_batch(new_rx, state_tx, o))
                     });
                 }
@@ -816,7 +830,7 @@ async fn input(
                                 stream_complete: matches!(&message_type, MessageType::EndStream(_))
                             })
                             .await
-                            .map_err(|e| Error::UnableToSendToChannel(format!("{}", e)))?;
+                            .map_err(|e| Error::UnableToSendToChannel(format!("{e}")))?;
 
                         // if message.type != registration forward down the pipeline
                         // new input send main event with type parent or whatever with a callback
@@ -834,7 +848,7 @@ async fn input(
                             output
                                 .send_async(internal_msg)
                                 .await
-                                .map_err(|e| Error::UnableToSendToChannel(format!("{}", e)))?;
+                                .map_err(|e| Error::UnableToSendToChannel(format!("{e}")))?;
                         }
 
                     }
@@ -845,7 +859,7 @@ async fn input(
                             return Ok(());
                         }
                         Error::NoInputToReturn => {
-                            sleep(Duration::from_millis(1500)).await;
+                            sleep(Duration::from_millis(NO_INPUT_BACKOFF_MS)).await;
                             continue;
                         }
                         _ => {

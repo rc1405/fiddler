@@ -11,6 +11,12 @@ use std::time;
 use tokio::time::{sleep, Duration};
 use tracing::{debug, error, trace};
 
+/// Message ID used for shutdown signals
+const SHUTDOWN_MESSAGE_ID: &str = "SHUTDOWN_SIGNAL";
+
+/// Backoff duration when channel is empty (in milliseconds)
+const EMPTY_CHANNEL_BACKOFF_MS: u64 = 250;
+
 pub(crate) fn register_plugins() -> Result<(), Error> {
     drop::register_drop()?;
     #[cfg(feature = "elasticsearch")]
@@ -42,7 +48,7 @@ pub(crate) async fn run_output(
                                 ..Default::default()
                             })
                             .await
-                            .map_err(|e| Error::UnableToSendToChannel(format!("{}", e)))?;
+                            .map_err(|e| Error::UnableToSendToChannel(format!("{e}")))?;
                     }
                     Err(e) => match e {
                         Error::ConditionalCheckfailed => {
@@ -53,12 +59,12 @@ pub(crate) async fn run_output(
                             state
                                 .send_async(InternalMessageState {
                                     message_id: msg.message_id,
-                                    status: MessageStatus::OutputError(format!("{}", e)),
+                                    status: MessageStatus::OutputError(format!("{e}")),
                                     stream_id: msg.message.stream_id.clone(),
                                     ..Default::default()
                                 })
                                 .await
-                                .map_err(|e| Error::UnableToSendToChannel(format!("{}", e)))?;
+                                .map_err(|e| Error::UnableToSendToChannel(format!("{e}")))?;
                         }
                     },
                 }
@@ -69,15 +75,15 @@ pub(crate) async fn run_output(
                     debug!("output closed");
                     state
                         .send_async(InternalMessageState {
-                            message_id: "end of the line".into(),
+                            message_id: SHUTDOWN_MESSAGE_ID.into(),
                             status: MessageStatus::Shutdown,
                             ..Default::default()
                         })
                         .await
-                        .map_err(|e| Error::UnableToSendToChannel(format!("{}", e)))?;
+                        .map_err(|e| Error::UnableToSendToChannel(format!("{e}")))?;
                     return Ok(());
                 }
-                TryRecvError::Empty => sleep(Duration::from_millis(250)).await,
+                TryRecvError::Empty => sleep(Duration::from_millis(EMPTY_CHANNEL_BACKOFF_MS)).await,
             },
         };
     }
@@ -105,7 +111,7 @@ pub(crate) async fn run_output_batch(
                 Ok(i) => internal_msg_batch.push(i),
                 Err(e) => match e {
                     TryRecvError::Disconnected => break,
-                    TryRecvError::Empty => sleep(Duration::from_millis(250)).await,
+                    TryRecvError::Empty => sleep(Duration::from_millis(EMPTY_CHANNEL_BACKOFF_MS)).await,
                 },
             }
         }
@@ -128,7 +134,7 @@ pub(crate) async fn run_output_batch(
                                 ..Default::default()
                             })
                             .await
-                            .map_err(|e| Error::UnableToSendToChannel(format!("{}", e)))?;
+                            .map_err(|e| Error::UnableToSendToChannel(format!("{e}")))?;
                     }
                 }
                 Err(e) => match e {
@@ -140,12 +146,12 @@ pub(crate) async fn run_output_batch(
                             state
                                 .send_async(InternalMessageState {
                                     message_id: msg.message_id,
-                                    status: MessageStatus::OutputError(format!("{}", e)),
+                                    status: MessageStatus::OutputError(format!("{e}")),
                                     stream_id: msg.message.stream_id.clone(),
                                     ..Default::default()
                                 })
                                 .await
-                                .map_err(|e| Error::UnableToSendToChannel(format!("{}", e)))?;
+                                .map_err(|e| Error::UnableToSendToChannel(format!("{e}")))?;
                         }
                     }
                 },
@@ -158,14 +164,14 @@ pub(crate) async fn run_output_batch(
     o.close().await?;
     match state
         .send_async(InternalMessageState {
-            message_id: "end of the line".into(),
+            message_id: SHUTDOWN_MESSAGE_ID.into(),
             status: MessageStatus::Shutdown,
             ..Default::default()
         })
         .await
     {
-        Ok(_) => debug!("exited successfuly"),
-        Err(e) => error!("unable to exit {}", e),
+        Ok(_) => debug!("exited successfully"),
+        Err(e) => error!("unable to exit {e}"),
     }
     Ok(())
 }

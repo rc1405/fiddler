@@ -74,13 +74,13 @@ async fn read_file(
                                 None,
                             )))
                             .await
-                            .map_err(|e| Error::UnableToSendToChannel(format!("{}", e)))?;
+                            .map_err(|e| Error::UnableToSendToChannel(format!("{e}")))?;
                     }
                     Err(e) => {
                         sender
-                            .send_async(Err(Error::InputError(format!("{}", e))))
+                            .send_async(Err(Error::InputError(format!("{e}"))))
                             .await
-                            .map_err(|e| Error::UnableToSendToChannel(format!("{}", e)))?;
+                            .map_err(|e| Error::UnableToSendToChannel(format!("{e}")))?;
                         return Ok(());
                     }
                 }
@@ -89,7 +89,7 @@ async fn read_file(
             sender
                 .send_async(Err(Error::EndOfInput))
                 .await
-                .map_err(|e| Error::UnableToSendToChannel(format!("{}", e)))?;
+                .map_err(|e| Error::UnableToSendToChannel(format!("{e}")))?;
             return Ok(());
         }
         ReaderType::ToEnd(mut f) => {
@@ -98,9 +98,9 @@ async fn read_file(
                 Ok(_) => {}
                 Err(e) => {
                     sender
-                        .send_async(Err(Error::InputError(format!("{}", e))))
+                        .send_async(Err(Error::InputError(format!("{e}"))))
                         .await
-                        .map_err(|e| Error::UnableToSendToChannel(format!("{}", e)))?;
+                        .map_err(|e| Error::UnableToSendToChannel(format!("{e}")))?;
                     return Ok(());
                 }
             };
@@ -114,12 +114,12 @@ async fn read_file(
                     None,
                 )))
                 .await
-                .map_err(|e| Error::UnableToSendToChannel(format!("{}", e)))?;
+                .map_err(|e| Error::UnableToSendToChannel(format!("{e}")))?;
 
             sender
                 .send_async(Err(Error::EndOfInput))
                 .await
-                .map_err(|e| Error::UnableToSendToChannel(format!("{}", e)))?;
+                .map_err(|e| Error::UnableToSendToChannel(format!("{e}")))?;
 
             return Ok(());
         }
@@ -135,7 +135,7 @@ async fn read_file(
                 current_pos = 0;
                 sync.send_async(current_pos)
                     .await
-                    .map_err(|e| Error::UnableToSendToChannel(format!("{}", e)))?;
+                    .map_err(|e| Error::UnableToSendToChannel(format!("{e}")))?;
             };
 
             let _ = file
@@ -184,7 +184,7 @@ async fn read_file(
                         Some(tx),
                     )))
                     .await
-                    .map_err(|e| Error::UnableToSendToChannel(format!("{}", e)))?;
+                    .map_err(|e| Error::UnableToSendToChannel(format!("{e}")))?;
             }
         }
     }
@@ -318,9 +318,8 @@ fn create_file(conf: Value) -> Result<ExecutionType, Error> {
             .worker_threads(1)
             // .on_thread_start(move || set_current_thread_priority_low())
             .build()
-            .expect("Creating tokio runtime");
-        #[allow(clippy::unwrap_used)]
-        runtime.block_on(read_file(inner, sender)).unwrap()
+            .map_err(|e| Error::ExecutionError(format!("Failed to create tokio runtime: {e}")))?;
+        runtime.block_on(read_file(inner, sender))
     });
 
     Ok(ExecutionType::Input(Box::new(FileReader { receiver })))
