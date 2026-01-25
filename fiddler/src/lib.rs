@@ -176,13 +176,21 @@ pub trait Processor: Closer {
 pub enum Error {
     /// Yaml parsing errors found within the declarative language provided
     #[error("Unable to serialize YAML object")]
-    UnableToSerializeYamlObject(#[from] #[source] serde_yaml::Error),
+    UnableToSerializeYamlObject(
+        #[from]
+        #[source]
+        serde_yaml::Error,
+    ),
 
     /// JSON serialization is primarily utilized as a preparser to passing the declarative
     /// language to the given module by utilizing jsonschema to validate the input. This is unlikely
     /// to occur in practice since the yaml configuration object is converted to json for this step.
     #[error("Unable to serialize JSON object")]
-    UnableToSerializeJsonObject(#[from] #[source] serde_json::Error),
+    UnableToSerializeJsonObject(
+        #[from]
+        #[source]
+        serde_json::Error,
+    ),
 
     /// Validation errors discovered by the jsonschema evaluation of the declarative configuration language
     /// provided to a given module
@@ -228,7 +236,11 @@ pub enum Error {
 
     /// Failure to receive from internal raw channel
     #[error("Channel receive error")]
-    RecvChannelError(#[from] #[source] flume::RecvError),
+    RecvChannelError(
+        #[from]
+        #[source]
+        flume::RecvError,
+    ),
 
     /// Processing module failed with an unrecoverable error. Processing of [crate::Message] is stopped and
     /// [crate::Status] is returned to the input module once all messages in this lineage have been processed

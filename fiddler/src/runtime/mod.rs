@@ -61,9 +61,7 @@ impl MessageMetrics {
 
     /// Returns the duration since metrics collection started.
     pub fn elapsed(&self) -> std::time::Duration {
-        self.started_at
-            .map(|t| t.elapsed())
-            .unwrap_or_default()
+        self.started_at.map(|t| t.elapsed()).unwrap_or_default()
     }
 
     /// Returns the throughput in messages per second.
@@ -749,7 +747,10 @@ fn process_state(
         }
 
         if remove_entry {
-            trace!(message_id = msg.message_id, "Marking message for removal from state");
+            trace!(
+                message_id = msg.message_id,
+                "Marking message for removal from state"
+            );
             entries_to_remove.push(msg.message_id);
             // Track completed messages (only count non-stream messages to avoid double counting)
             if message_completed_successfully && !msg.is_stream {

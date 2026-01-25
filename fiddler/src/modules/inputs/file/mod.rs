@@ -164,7 +164,10 @@ async fn read_file(
                     );
 
                     if file_not_found_count >= MAX_FILE_NOT_FOUND_RETRIES {
-                        error!(filename = filename, "File not found after max retries, stopping tail");
+                        error!(
+                            filename = filename,
+                            "File not found after max retries, stopping tail"
+                        );
                         sender
                             .send_async(Err(Error::InputError(format!(
                                 "File no longer exists after {} retries: {}",

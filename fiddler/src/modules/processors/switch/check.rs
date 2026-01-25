@@ -45,8 +45,8 @@ fn perform_check(condition: &str, json_str: String) -> Result<(), Error> {
 impl Processor for Check {
     async fn process(&self, message: Message) -> Result<MessageBatch, Error> {
         let mut messages = vec![message.clone()];
-        let json_str = String::from_utf8(message.bytes)
-            .map_err(|e| Error::ProcessingError(format!("{e}")))?;
+        let json_str =
+            String::from_utf8(message.bytes).map_err(|e| Error::ProcessingError(format!("{e}")))?;
 
         perform_check(&self.condition, json_str)?;
 
