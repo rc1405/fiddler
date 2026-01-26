@@ -1,0 +1,13 @@
+[package]
+name = "fiddler-script"
+version = "0.1.0"
+edition = "2021"
+description = "A minimal C-style scripting language interpreter"
+license-file = "../LICENSE"
+readme = "README.md"
+
+[dependencies]
+thiserror = "2"
+serde_json = "1"
+
+[dev-dependencies]

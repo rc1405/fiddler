@@ -1,2 +1,2 @@
 [workspace]
-members = ["fiddler-cli", "fiddler-macros", "fiddler"]
+members = ["fiddler-cli", "fiddler-macros", "fiddler", "fiddler-script"]

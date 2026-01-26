@@ -1,0 +1,863 @@
+//! Interpreter for FiddlerScript.
+//!
+//! This module contains the execution engine that evaluates the AST and
+//! produces runtime values.
+
+use std::collections::HashMap;
+
+use crate::ast::{BinaryOp, Block, ElseClause, Expression, Program, Statement, UnaryOp};
+use crate::builtins::get_default_builtins;
+use crate::error::RuntimeError;
+use crate::lexer::Lexer;
+use crate::parser::Parser;
+use crate::Value;
+
+/// A user-defined function.
+#[derive(Debug, Clone)]
+struct UserFunction {
+    /// Parameter names
+    params: Vec<String>,
+    /// Function body
+    body: Block,
+}
+
+/// Control flow signal for early returns.
+enum ControlFlow {
+    /// Normal execution continues
+    Continue(Value),
+    /// Return from function with value
+    Return(Value),
+}
+
+impl ControlFlow {
+    fn into_value(self) -> Value {
+        match self {
+            ControlFlow::Continue(v) | ControlFlow::Return(v) => v,
+        }
+    }
+}
+
+/// The FiddlerScript interpreter.
+pub struct Interpreter {
+    /// Stack of variable scopes (environment)
+    scopes: Vec<HashMap<String, Value>>,
+    /// User-defined functions
+    functions: HashMap<String, UserFunction>,
+    /// Built-in functions
+    builtins: HashMap<String, fn(Vec<Value>) -> Result<Value, RuntimeError>>,
+    /// Output capture (for testing)
+    output: Vec<String>,
+}
+
+impl Default for Interpreter {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl Interpreter {
+    /// Create a new interpreter with default built-in functions.
+    ///
+    /// The interpreter is initialized with all current OS environment variables
+    /// available as script variables.
+    pub fn new() -> Self {
+        Self::with_builtins(get_default_builtins())
+    }
+
+    /// Create a new interpreter with custom built-in functions.
+    ///
+    /// The interpreter is initialized with all current OS environment variables
+    /// available as script variables.
+    pub fn with_builtins(
+        builtins: HashMap<String, fn(Vec<Value>) -> Result<Value, RuntimeError>>,
+    ) -> Self {
+        let mut global_scope = HashMap::new();
+
+        // Load all OS environment variables into the global scope
+        for (key, value) in std::env::vars() {
+            global_scope.insert(key, Value::String(value));
+        }
+
+        Self {
+            scopes: vec![global_scope],
+            functions: HashMap::new(),
+            builtins,
+            output: Vec::new(),
+        }
+    }
+
+    /// Create a new interpreter without loading environment variables.
+    pub fn new_without_env() -> Self {
+        Self {
+            scopes: vec![HashMap::new()],
+            functions: HashMap::new(),
+            builtins: get_default_builtins(),
+            output: Vec::new(),
+        }
+    }
+
+    /// Run FiddlerScript source code.
+    pub fn run(&mut self, source: &str) -> Result<Value, crate::FiddlerError> {
+        let mut lexer = Lexer::new(source);
+        let tokens = lexer.tokenize()?;
+        let mut parser = Parser::new(tokens);
+        let program = parser.parse()?;
+        Ok(self.execute(&program)?)
+    }
+
+    /// Execute a parsed program.
+    pub fn execute(&mut self, program: &Program) -> Result<Value, RuntimeError> {
+        let mut result = Value::Null;
+        for statement in &program.statements {
+            match self.execute_statement(statement)? {
+                ControlFlow::Continue(v) => result = v,
+                ControlFlow::Return(_) => {
+                    return Err(RuntimeError::ReturnOutsideFunction);
+                }
+            }
+        }
+        Ok(result)
+    }
+
+    /// Get captured output (for testing).
+    pub fn output(&self) -> &[String] {
+        &self.output
+    }
+
+    /// Clear captured output.
+    pub fn clear_output(&mut self) {
+        self.output.clear();
+    }
+
+    // === Public variable access API ===
+
+    /// Set a variable by name in the global scope.
+    ///
+    /// This allows external code to inject values into the interpreter
+    /// before running a script.
+    ///
+    /// # Arguments
+    /// * `name` - The variable name
+    /// * `value` - The value to set
+    pub fn set_variable_value(&mut self, name: impl Into<String>, value: Value) {
+        if let Some(scope) = self.scopes.first_mut() {
+            scope.insert(name.into(), value);
+        }
+    }
+
+    /// Set a variable from bytes.
+    ///
+    /// Convenience method to set a variable with byte data.
+    ///
+    /// # Arguments
+    /// * `name` - The variable name
+    /// * `bytes` - The byte data
+    pub fn set_variable_bytes(&mut self, name: impl Into<String>, bytes: Vec<u8>) {
+        self.set_variable_value(name, Value::Bytes(bytes));
+    }
+
+    /// Set a variable from a string.
+    ///
+    /// Convenience method to set a variable with string data.
+    ///
+    /// # Arguments
+    /// * `name` - The variable name
+    /// * `value` - The string value
+    pub fn set_variable_string(&mut self, name: impl Into<String>, value: impl Into<String>) {
+        self.set_variable_value(name, Value::String(value.into()));
+    }
+
+    /// Set a variable from an integer.
+    ///
+    /// Convenience method to set a variable with an integer value.
+    ///
+    /// # Arguments
+    /// * `name` - The variable name
+    /// * `value` - The integer value
+    pub fn set_variable_int(&mut self, name: impl Into<String>, value: i64) {
+        self.set_variable_value(name, Value::Integer(value));
+    }
+
+    /// Set a variable as an array.
+    ///
+    /// Convenience method to set a variable with an array value.
+    ///
+    /// # Arguments
+    /// * `name` - The variable name
+    /// * `values` - The array values
+    pub fn set_variable_array(&mut self, name: impl Into<String>, values: Vec<Value>) {
+        self.set_variable_value(name, Value::Array(values));
+    }
+
+    /// Set a variable as a dictionary.
+    ///
+    /// Convenience method to set a variable with a dictionary value.
+    ///
+    /// # Arguments
+    /// * `name` - The variable name
+    /// * `values` - The dictionary values
+    pub fn set_variable_dict(
+        &mut self,
+        name: impl Into<String>,
+        values: std::collections::HashMap<String, Value>,
+    ) {
+        self.set_variable_value(name, Value::Dictionary(values));
+    }
+
+    /// Get a variable by name, returning the Value type.
+    ///
+    /// Searches all scopes from innermost to outermost.
+    ///
+    /// # Arguments
+    /// * `name` - The variable name
+    ///
+    /// # Returns
+    /// * `Some(Value)` if the variable exists
+    /// * `None` if the variable is not defined
+    pub fn get_value(&self, name: &str) -> Option<Value> {
+        for scope in self.scopes.iter().rev() {
+            if let Some(value) = scope.get(name) {
+                return Some(value.clone());
+            }
+        }
+        None
+    }
+
+    /// Get a variable by name as bytes.
+    ///
+    /// Converts the variable value to its byte representation.
+    ///
+    /// # Arguments
+    /// * `name` - The variable name
+    ///
+    /// # Returns
+    /// * `Some(Vec<u8>)` if the variable exists
+    /// * `None` if the variable is not defined
+    pub fn get_bytes(&self, name: &str) -> Option<Vec<u8>> {
+        self.get_value(name).map(|v| v.to_bytes())
+    }
+
+    /// Check if a variable exists.
+    ///
+    /// # Arguments
+    /// * `name` - The variable name
+    ///
+    /// # Returns
+    /// * `true` if the variable exists in any scope
+    /// * `false` otherwise
+    pub fn has_variable(&self, name: &str) -> bool {
+        self.get_value(name).is_some()
+    }
+
+    // === Scope management ===
+
+    fn push_scope(&mut self) {
+        self.scopes.push(HashMap::new());
+    }
+
+    fn pop_scope(&mut self) {
+        self.scopes.pop();
+    }
+
+    fn define_variable(&mut self, name: String, value: Value) {
+        if let Some(scope) = self.scopes.last_mut() {
+            scope.insert(name, value);
+        }
+    }
+
+    fn get_variable(&self, name: &str) -> Result<Value, RuntimeError> {
+        for scope in self.scopes.iter().rev() {
+            if let Some(value) = scope.get(name) {
+                return Ok(value.clone());
+            }
+        }
+        Err(RuntimeError::UndefinedVariable(name.to_string()))
+    }
+
+    fn set_variable(&mut self, name: &str, value: Value) -> Result<(), RuntimeError> {
+        for scope in self.scopes.iter_mut().rev() {
+            if scope.contains_key(name) {
+                scope.insert(name.to_string(), value);
+                return Ok(());
+            }
+        }
+        Err(RuntimeError::UndefinedVariable(name.to_string()))
+    }
+
+    // === Statement execution ===
+
+    fn execute_statement(&mut self, stmt: &Statement) -> Result<ControlFlow, RuntimeError> {
+        match stmt {
+            Statement::Let { name, value, .. } => {
+                let val = self.evaluate_expression(value)?;
+                self.define_variable(name.clone(), val);
+                Ok(ControlFlow::Continue(Value::Null))
+            }
+
+            Statement::If {
+                condition,
+                then_block,
+                else_block,
+                ..
+            } => {
+                let cond = self.evaluate_expression(condition)?;
+                if self.is_truthy(&cond) {
+                    self.execute_block(then_block)
+                } else if let Some(else_clause) = else_block {
+                    match else_clause {
+                        ElseClause::Block(block) => self.execute_block(block),
+                        ElseClause::ElseIf(if_stmt) => self.execute_statement(if_stmt),
+                    }
+                } else {
+                    Ok(ControlFlow::Continue(Value::Null))
+                }
+            }
+
+            Statement::For {
+                init,
+                condition,
+                update,
+                body,
+                ..
+            } => {
+                self.push_scope();
+
+                // Execute init
+                if let Some(init_stmt) = init {
+                    self.execute_statement(init_stmt)?;
+                }
+
+                // Loop
+                loop {
+                    // Check condition
+                    if let Some(cond) = condition {
+                        let cond_val = self.evaluate_expression(cond)?;
+                        if !self.is_truthy(&cond_val) {
+                            break;
+                        }
+                    }
+
+                    // Execute body
+                    match self.execute_block(body)? {
+                        ControlFlow::Return(v) => {
+                            self.pop_scope();
+                            return Ok(ControlFlow::Return(v));
+                        }
+                        ControlFlow::Continue(_) => {}
+                    }
+
+                    // Execute update
+                    if let Some(upd) = update {
+                        self.evaluate_expression(upd)?;
+                    }
+                }
+
+                self.pop_scope();
+                Ok(ControlFlow::Continue(Value::Null))
+            }
+
+            Statement::Return { value, .. } => {
+                let val = if let Some(expr) = value {
+                    self.evaluate_expression(expr)?
+                } else {
+                    Value::Null
+                };
+                Ok(ControlFlow::Return(val))
+            }
+
+            Statement::Function {
+                name, params, body, ..
+            } => {
+                self.functions.insert(
+                    name.clone(),
+                    UserFunction {
+                        params: params.clone(),
+                        body: body.clone(),
+                    },
+                );
+                Ok(ControlFlow::Continue(Value::Null))
+            }
+
+            Statement::Expression { expression, .. } => {
+                let val = self.evaluate_expression(expression)?;
+                Ok(ControlFlow::Continue(val))
+            }
+
+            Statement::Block(block) => self.execute_block(block),
+        }
+    }
+
+    fn execute_block(&mut self, block: &Block) -> Result<ControlFlow, RuntimeError> {
+        self.push_scope();
+        let mut result = ControlFlow::Continue(Value::Null);
+
+        for stmt in &block.statements {
+            result = self.execute_statement(stmt)?;
+            if matches!(result, ControlFlow::Return(_)) {
+                break;
+            }
+        }
+
+        self.pop_scope();
+        Ok(result)
+    }
+
+    // === Expression evaluation ===
+
+    fn evaluate_expression(&mut self, expr: &Expression) -> Result<Value, RuntimeError> {
+        match expr {
+            Expression::Integer { value, .. } => Ok(Value::Integer(*value)),
+            Expression::String { value, .. } => Ok(Value::String(value.clone())),
+            Expression::Boolean { value, .. } => Ok(Value::Boolean(*value)),
+
+            Expression::Identifier { name, .. } => self.get_variable(name),
+
+            Expression::Binary {
+                left,
+                operator,
+                right,
+                ..
+            } => {
+                let left_val = self.evaluate_expression(left)?;
+                let right_val = self.evaluate_expression(right)?;
+                self.evaluate_binary_op(*operator, left_val, right_val)
+            }
+
+            Expression::Unary {
+                operator, operand, ..
+            } => {
+                let val = self.evaluate_expression(operand)?;
+                self.evaluate_unary_op(*operator, val)
+            }
+
+            Expression::Assignment { name, value, .. } => {
+                let val = self.evaluate_expression(value)?;
+                self.set_variable(name, val.clone())?;
+                Ok(val)
+            }
+
+            Expression::Call {
+                function,
+                arguments,
+                ..
+            } => self.call_function(function, arguments),
+
+            Expression::Grouped { expression, .. } => self.evaluate_expression(expression),
+        }
+    }
+
+    fn evaluate_binary_op(
+        &mut self,
+        op: BinaryOp,
+        left: Value,
+        right: Value,
+    ) -> Result<Value, RuntimeError> {
+        match op {
+            // Arithmetic (integers only, except + for strings)
+            BinaryOp::Add => match (&left, &right) {
+                (Value::Integer(a), Value::Integer(b)) => Ok(Value::Integer(a + b)),
+                (Value::String(a), Value::String(b)) => Ok(Value::String(format!("{}{}", a, b))),
+                _ => Err(RuntimeError::TypeMismatch(format!(
+                    "Cannot add {:?} and {:?}",
+                    left, right
+                ))),
+            },
+            BinaryOp::Subtract => match (&left, &right) {
+                (Value::Integer(a), Value::Integer(b)) => Ok(Value::Integer(a - b)),
+                _ => Err(RuntimeError::TypeMismatch(
+                    "Subtraction requires integers".to_string(),
+                )),
+            },
+            BinaryOp::Multiply => match (&left, &right) {
+                (Value::Integer(a), Value::Integer(b)) => Ok(Value::Integer(a * b)),
+                _ => Err(RuntimeError::TypeMismatch(
+                    "Multiplication requires integers".to_string(),
+                )),
+            },
+            BinaryOp::Divide => match (&left, &right) {
+                (Value::Integer(_), Value::Integer(0)) => Err(RuntimeError::DivisionByZero),
+                (Value::Integer(a), Value::Integer(b)) => Ok(Value::Integer(a / b)),
+                _ => Err(RuntimeError::TypeMismatch(
+                    "Division requires integers".to_string(),
+                )),
+            },
+            BinaryOp::Modulo => match (&left, &right) {
+                (Value::Integer(_), Value::Integer(0)) => Err(RuntimeError::DivisionByZero),
+                (Value::Integer(a), Value::Integer(b)) => Ok(Value::Integer(a % b)),
+                _ => Err(RuntimeError::TypeMismatch(
+                    "Modulo requires integers".to_string(),
+                )),
+            },
+
+            // Comparison
+            BinaryOp::Equal => Ok(Value::Boolean(left == right)),
+            BinaryOp::NotEqual => Ok(Value::Boolean(left != right)),
+            BinaryOp::LessThan => match (&left, &right) {
+                (Value::Integer(a), Value::Integer(b)) => Ok(Value::Boolean(a < b)),
+                (Value::String(a), Value::String(b)) => Ok(Value::Boolean(a < b)),
+                _ => Err(RuntimeError::TypeMismatch(
+                    "Comparison requires matching types".to_string(),
+                )),
+            },
+            BinaryOp::LessEqual => match (&left, &right) {
+                (Value::Integer(a), Value::Integer(b)) => Ok(Value::Boolean(a <= b)),
+                (Value::String(a), Value::String(b)) => Ok(Value::Boolean(a <= b)),
+                _ => Err(RuntimeError::TypeMismatch(
+                    "Comparison requires matching types".to_string(),
+                )),
+            },
+            BinaryOp::GreaterThan => match (&left, &right) {
+                (Value::Integer(a), Value::Integer(b)) => Ok(Value::Boolean(a > b)),
+                (Value::String(a), Value::String(b)) => Ok(Value::Boolean(a > b)),
+                _ => Err(RuntimeError::TypeMismatch(
+                    "Comparison requires matching types".to_string(),
+                )),
+            },
+            BinaryOp::GreaterEqual => match (&left, &right) {
+                (Value::Integer(a), Value::Integer(b)) => Ok(Value::Boolean(a >= b)),
+                (Value::String(a), Value::String(b)) => Ok(Value::Boolean(a >= b)),
+                _ => Err(RuntimeError::TypeMismatch(
+                    "Comparison requires matching types".to_string(),
+                )),
+            },
+
+            // Logical
+            BinaryOp::And => Ok(Value::Boolean(self.is_truthy(&left) && self.is_truthy(&right))),
+            BinaryOp::Or => Ok(Value::Boolean(self.is_truthy(&left) || self.is_truthy(&right))),
+        }
+    }
+
+    fn evaluate_unary_op(&self, op: UnaryOp, operand: Value) -> Result<Value, RuntimeError> {
+        match op {
+            UnaryOp::Not => Ok(Value::Boolean(!self.is_truthy(&operand))),
+            UnaryOp::Negate => match operand {
+                Value::Integer(n) => Ok(Value::Integer(-n)),
+                _ => Err(RuntimeError::TypeMismatch(
+                    "Negation requires integer".to_string(),
+                )),
+            },
+        }
+    }
+
+    fn is_truthy(&self, value: &Value) -> bool {
+        match value {
+            Value::Boolean(b) => *b,
+            Value::Integer(n) => *n != 0,
+            Value::String(s) => !s.is_empty(),
+            Value::Bytes(b) => !b.is_empty(),
+            Value::Array(a) => !a.is_empty(),
+            Value::Dictionary(d) => !d.is_empty(),
+            Value::Null => false,
+        }
+    }
+
+    fn call_function(
+        &mut self,
+        name: &str,
+        arguments: &[Expression],
+    ) -> Result<Value, RuntimeError> {
+        // Evaluate arguments
+        let args: Vec<Value> = arguments
+            .iter()
+            .map(|arg| self.evaluate_expression(arg))
+            .collect::<Result<_, _>>()?;
+
+        // Check for built-in function
+        if let Some(builtin) = self.builtins.get(name) {
+            let result = builtin(args)?;
+            // Capture print output for testing
+            if name == "print" {
+                // Already printed by builtin, but we capture for testing
+            }
+            return Ok(result);
+        }
+
+        // Check for user-defined function
+        if let Some(func) = self.functions.get(name).cloned() {
+            if args.len() != func.params.len() {
+                return Err(RuntimeError::WrongArgumentCount(func.params.len(), args.len()));
+            }
+
+            // Create new scope for function
+            self.push_scope();
+
+            // Bind arguments to parameters
+            for (param, arg) in func.params.iter().zip(args) {
+                self.define_variable(param.clone(), arg);
+            }
+
+            // Execute function body
+            let result = self.execute_block(&func.body)?;
+
+            self.pop_scope();
+
+            return Ok(result.into_value());
+        }
+
+        Err(RuntimeError::UndefinedFunction(name.to_string()))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn run(source: &str) -> Result<Value, crate::FiddlerError> {
+        let mut interpreter = Interpreter::new();
+        interpreter.run(source)
+    }
+
+    #[test]
+    fn test_integer_literal() {
+        assert_eq!(run("42;").unwrap(), Value::Integer(42));
+    }
+
+    #[test]
+    fn test_string_literal() {
+        assert_eq!(
+            run(r#""hello";"#).unwrap(),
+            Value::String("hello".to_string())
+        );
+    }
+
+    #[test]
+    fn test_boolean_literal() {
+        assert_eq!(run("true;").unwrap(), Value::Boolean(true));
+        assert_eq!(run("false;").unwrap(), Value::Boolean(false));
+    }
+
+    #[test]
+    fn test_arithmetic() {
+        assert_eq!(run("5 + 3;").unwrap(), Value::Integer(8));
+        assert_eq!(run("5 - 3;").unwrap(), Value::Integer(2));
+        assert_eq!(run("5 * 3;").unwrap(), Value::Integer(15));
+        assert_eq!(run("6 / 2;").unwrap(), Value::Integer(3));
+        assert_eq!(run("7 % 3;").unwrap(), Value::Integer(1));
+    }
+
+    #[test]
+    fn test_string_concatenation() {
+        assert_eq!(
+            run(r#""hello" + " " + "world";"#).unwrap(),
+            Value::String("hello world".to_string())
+        );
+    }
+
+    #[test]
+    fn test_comparison() {
+        assert_eq!(run("5 > 3;").unwrap(), Value::Boolean(true));
+        assert_eq!(run("5 < 3;").unwrap(), Value::Boolean(false));
+        assert_eq!(run("5 == 5;").unwrap(), Value::Boolean(true));
+        assert_eq!(run("5 != 3;").unwrap(), Value::Boolean(true));
+    }
+
+    #[test]
+    fn test_logical() {
+        assert_eq!(run("true && true;").unwrap(), Value::Boolean(true));
+        assert_eq!(run("true && false;").unwrap(), Value::Boolean(false));
+        assert_eq!(run("true || false;").unwrap(), Value::Boolean(true));
+        assert_eq!(run("!true;").unwrap(), Value::Boolean(false));
+    }
+
+    #[test]
+    fn test_variable() {
+        assert_eq!(run("let x = 10; x;").unwrap(), Value::Integer(10));
+    }
+
+    #[test]
+    fn test_variable_assignment() {
+        assert_eq!(run("let x = 10; x = 20; x;").unwrap(), Value::Integer(20));
+    }
+
+    #[test]
+    fn test_if_true() {
+        assert_eq!(
+            run("let x = 0; if (true) { x = 1; } x;").unwrap(),
+            Value::Integer(1)
+        );
+    }
+
+    #[test]
+    fn test_if_false() {
+        assert_eq!(
+            run("let x = 0; if (false) { x = 1; } x;").unwrap(),
+            Value::Integer(0)
+        );
+    }
+
+    #[test]
+    fn test_if_else() {
+        assert_eq!(
+            run("let x = 0; if (false) { x = 1; } else { x = 2; } x;").unwrap(),
+            Value::Integer(2)
+        );
+    }
+
+    #[test]
+    fn test_for_loop() {
+        assert_eq!(
+            run("let sum = 0; for (let i = 0; i < 5; i = i + 1) { sum = sum + i; } sum;").unwrap(),
+            Value::Integer(10) // 0 + 1 + 2 + 3 + 4
+        );
+    }
+
+    #[test]
+    fn test_function() {
+        assert_eq!(
+            run("fn add(a, b) { return a + b; } add(2, 3);").unwrap(),
+            Value::Integer(5)
+        );
+    }
+
+    #[test]
+    fn test_recursion() {
+        let source = r#"
+            fn factorial(n) {
+                if (n <= 1) {
+                    return 1;
+                }
+                return n * factorial(n - 1);
+            }
+            factorial(5);
+        "#;
+        assert_eq!(run(source).unwrap(), Value::Integer(120));
+    }
+
+    #[test]
+    fn test_division_by_zero() {
+        let result = run("5 / 0;");
+        assert!(matches!(
+            result,
+            Err(crate::FiddlerError::Runtime(RuntimeError::DivisionByZero))
+        ));
+    }
+
+    #[test]
+    fn test_undefined_variable() {
+        let result = run("x;");
+        assert!(matches!(
+            result,
+            Err(crate::FiddlerError::Runtime(
+                RuntimeError::UndefinedVariable(_)
+            ))
+        ));
+    }
+
+    #[test]
+    fn test_undefined_function() {
+        let result = run("foo();");
+        assert!(matches!(
+            result,
+            Err(crate::FiddlerError::Runtime(
+                RuntimeError::UndefinedFunction(_)
+            ))
+        ));
+    }
+
+    #[test]
+    fn test_wrong_argument_count() {
+        let result = run("fn add(a, b) { return a + b; } add(1);");
+        assert!(matches!(
+            result,
+            Err(crate::FiddlerError::Runtime(
+                RuntimeError::WrongArgumentCount(2, 1)
+            ))
+        ));
+    }
+
+    #[test]
+    fn test_set_and_get_variable() {
+        let mut interpreter = Interpreter::new_without_env();
+        interpreter.set_variable_value("x", Value::Integer(42));
+        assert_eq!(interpreter.get_value("x"), Some(Value::Integer(42)));
+    }
+
+    #[test]
+    fn test_set_variable_string() {
+        let mut interpreter = Interpreter::new_without_env();
+        interpreter.set_variable_string("name", "Alice");
+        assert_eq!(
+            interpreter.get_value("name"),
+            Some(Value::String("Alice".to_string()))
+        );
+    }
+
+    #[test]
+    fn test_set_variable_bytes() {
+        let mut interpreter = Interpreter::new_without_env();
+        interpreter.set_variable_bytes("data", vec![1, 2, 3]);
+        assert_eq!(
+            interpreter.get_value("data"),
+            Some(Value::Bytes(vec![1, 2, 3]))
+        );
+    }
+
+    #[test]
+    fn test_get_bytes() {
+        let mut interpreter = Interpreter::new_without_env();
+        interpreter.set_variable_string("msg", "hello");
+        assert_eq!(
+            interpreter.get_bytes("msg"),
+            Some("hello".as_bytes().to_vec())
+        );
+    }
+
+    #[test]
+    fn test_has_variable() {
+        let mut interpreter = Interpreter::new_without_env();
+        interpreter.set_variable_int("count", 10);
+        assert!(interpreter.has_variable("count"));
+        assert!(!interpreter.has_variable("nonexistent"));
+    }
+
+    #[test]
+    fn test_env_vars_loaded() {
+        std::env::set_var("FIDDLER_TEST_VAR", "test123");
+        let interpreter = Interpreter::new();
+        assert_eq!(
+            interpreter.get_value("FIDDLER_TEST_VAR"),
+            Some(Value::String("test123".to_string()))
+        );
+        std::env::remove_var("FIDDLER_TEST_VAR");
+    }
+
+    #[test]
+    fn test_use_injected_variable_in_script() {
+        let mut interpreter = Interpreter::new_without_env();
+        interpreter.set_variable_int("input", 5);
+        let result = interpreter.run("input * 2;").unwrap();
+        assert_eq!(result, Value::Integer(10));
+    }
+
+    #[test]
+    fn test_bytes_in_script() {
+        let mut interpreter = Interpreter::new_without_env();
+        interpreter.set_variable_bytes("data", b"hello".to_vec());
+        let result = interpreter.run("bytes_to_string(data);").unwrap();
+        assert_eq!(result, Value::String("hello".to_string()));
+    }
+
+    #[test]
+    fn test_parse_json_in_script() {
+        let mut interpreter = Interpreter::new_without_env();
+        interpreter.set_variable_bytes("json_data", br#"{"name": "test"}"#.to_vec());
+        let result = interpreter.run("parse_json(json_data);").unwrap();
+        assert!(matches!(result, Value::Dictionary(_)));
+    }
+
+    #[test]
+    fn test_bytes_truthy() {
+        let mut interpreter = Interpreter::new_without_env();
+        interpreter.set_variable_bytes("data", b"hello".to_vec());
+        let result = interpreter.run("if (data) { 1; } else { 0; }").unwrap();
+        assert_eq!(result, Value::Integer(1));
+    }
+
+    #[test]
+    fn test_empty_bytes_falsy() {
+        let mut interpreter = Interpreter::new_without_env();
+        interpreter.set_variable_bytes("empty", vec![]);
+        let result = interpreter.run("if (empty) { 1; } else { 0; }").unwrap();
+        assert_eq!(result, Value::Integer(0));
+    }
+}

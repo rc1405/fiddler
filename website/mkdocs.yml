@@ -5,6 +5,11 @@ nav:
   - Home: index.md
   - Getting Started: getting_started.md
   - Configuration: configuration.md
+  - FiddlerScript:
+    - About: scripting/About.md
+    - Syntax: scripting/syntax.md
+    - Built-in Functions: scripting/builtins.md
+    - Integration: scripting/integration.md
 theme: 
   name: material
   favicon: img/favicon.ico
