@@ -1,5 +1,7 @@
 //! Collection built-in functions (arrays and dictionaries).
 
+use indexmap::IndexMap;
+
 use crate::error::RuntimeError;
 use crate::Value;
 
@@ -24,7 +26,7 @@ pub fn builtin_array(args: Vec<Value>) -> Result<Value, RuntimeError> {
 /// - A new array with the value appended
 pub fn builtin_push(args: Vec<Value>) -> Result<Value, RuntimeError> {
     if args.len() != 2 {
-        return Err(RuntimeError::WrongArgumentCount(2, args.len()));
+        return Err(RuntimeError::wrong_argument_count(2, args.len()));
     }
 
     match &args[0] {
@@ -33,7 +35,7 @@ pub fn builtin_push(args: Vec<Value>) -> Result<Value, RuntimeError> {
             new_arr.push(args[1].clone());
             Ok(Value::Array(new_arr))
         }
-        _ => Err(RuntimeError::InvalidArgument(
+        _ => Err(RuntimeError::invalid_argument(
             "push() requires an array as first argument".to_string(),
         )),
     }
@@ -47,17 +49,32 @@ pub fn builtin_push(args: Vec<Value>) -> Result<Value, RuntimeError> {
 ///
 /// # Returns
 /// - The value at the index/key, or null if not found
+///
+/// # Errors
+/// - Returns an error if the index is negative
 pub fn builtin_get(args: Vec<Value>) -> Result<Value, RuntimeError> {
     if args.len() != 2 {
-        return Err(RuntimeError::WrongArgumentCount(2, args.len()));
+        return Err(RuntimeError::wrong_argument_count(2, args.len()));
     }
 
     match (&args[0], &args[1]) {
         (Value::Array(arr), Value::Integer(idx)) => {
+            if *idx < 0 {
+                return Err(RuntimeError::invalid_argument(format!(
+                    "Array index cannot be negative: {}",
+                    idx
+                )));
+            }
             let idx = *idx as usize;
             Ok(arr.get(idx).cloned().unwrap_or(Value::Null))
         }
         (Value::String(s), Value::Integer(idx)) => {
+            if *idx < 0 {
+                return Err(RuntimeError::invalid_argument(format!(
+                    "String index cannot be negative: {}",
+                    idx
+                )));
+            }
             let idx = *idx as usize;
             Ok(s.chars()
                 .nth(idx)
@@ -67,13 +84,13 @@ pub fn builtin_get(args: Vec<Value>) -> Result<Value, RuntimeError> {
         (Value::Dictionary(dict), Value::String(key)) => {
             Ok(dict.get(key).cloned().unwrap_or(Value::Null))
         }
-        (Value::Array(_) | Value::String(_), _) => Err(RuntimeError::InvalidArgument(
+        (Value::Array(_) | Value::String(_), _) => Err(RuntimeError::invalid_argument(
             "Array/string index must be an integer".to_string(),
         )),
-        (Value::Dictionary(_), _) => Err(RuntimeError::InvalidArgument(
+        (Value::Dictionary(_), _) => Err(RuntimeError::invalid_argument(
             "Dictionary key must be a string".to_string(),
         )),
-        _ => Err(RuntimeError::InvalidArgument(
+        _ => Err(RuntimeError::invalid_argument(
             "get() requires an array, dictionary, or string as first argument".to_string(),
         )),
     }
@@ -86,15 +103,34 @@ pub fn builtin_get(args: Vec<Value>) -> Result<Value, RuntimeError> {
 /// - An index (integer for array) or key (string for dictionary)
 /// - The value to set
 ///
+/// # Array Behavior
+/// If the index is beyond the current array length, the array will be
+/// automatically extended with `null` values to accommodate the new index.
+///
+/// # Examples
+/// ```ignore
+/// let arr = array(1, 2, 3);
+/// let arr2 = set(arr, 5, 99);  // Results in [1, 2, 3, null, null, 99]
+/// ```
+///
 /// # Returns
 /// - A new array/dictionary with the value set
+///
+/// # Errors
+/// - Returns an error if the array index is negative
 pub fn builtin_set(args: Vec<Value>) -> Result<Value, RuntimeError> {
     if args.len() != 3 {
-        return Err(RuntimeError::WrongArgumentCount(3, args.len()));
+        return Err(RuntimeError::wrong_argument_count(3, args.len()));
     }
 
     match (&args[0], &args[1]) {
         (Value::Array(arr), Value::Integer(idx)) => {
+            if *idx < 0 {
+                return Err(RuntimeError::invalid_argument(format!(
+                    "Array index cannot be negative: {}",
+                    idx
+                )));
+            }
             let idx = *idx as usize;
             let mut new_arr = arr.clone();
             if idx < new_arr.len() {
@@ -113,13 +149,13 @@ pub fn builtin_set(args: Vec<Value>) -> Result<Value, RuntimeError> {
             new_dict.insert(key.clone(), args[2].clone());
             Ok(Value::Dictionary(new_dict))
         }
-        (Value::Array(_), _) => Err(RuntimeError::InvalidArgument(
+        (Value::Array(_), _) => Err(RuntimeError::invalid_argument(
             "Array index must be an integer".to_string(),
         )),
-        (Value::Dictionary(_), _) => Err(RuntimeError::InvalidArgument(
+        (Value::Dictionary(_), _) => Err(RuntimeError::invalid_argument(
             "Dictionary key must be a string".to_string(),
         )),
-        _ => Err(RuntimeError::InvalidArgument(
+        _ => Err(RuntimeError::invalid_argument(
             "set() requires an array or dictionary as first argument".to_string(),
         )),
     }
@@ -128,9 +164,9 @@ pub fn builtin_set(args: Vec<Value>) -> Result<Value, RuntimeError> {
 /// Create an empty dictionary.
 ///
 /// # Returns
-/// - An empty dictionary
+/// - An empty dictionary (with insertion order preserved)
 pub fn builtin_dict(_args: Vec<Value>) -> Result<Value, RuntimeError> {
-    Ok(Value::Dictionary(std::collections::HashMap::new()))
+    Ok(Value::Dictionary(IndexMap::new()))
 }
 
 /// Get all keys from a dictionary.
@@ -142,7 +178,7 @@ pub fn builtin_dict(_args: Vec<Value>) -> Result<Value, RuntimeError> {
 /// - An array of keys
 pub fn builtin_keys(args: Vec<Value>) -> Result<Value, RuntimeError> {
     if args.len() != 1 {
-        return Err(RuntimeError::WrongArgumentCount(1, args.len()));
+        return Err(RuntimeError::wrong_argument_count(1, args.len()));
     }
 
     match &args[0] {
@@ -150,7 +186,7 @@ pub fn builtin_keys(args: Vec<Value>) -> Result<Value, RuntimeError> {
             let keys: Vec<Value> = dict.keys().map(|k| Value::String(k.clone())).collect();
             Ok(Value::Array(keys))
         }
-        _ => Err(RuntimeError::InvalidArgument(
+        _ => Err(RuntimeError::invalid_argument(
             "keys() requires a dictionary argument".to_string(),
         )),
     }
@@ -165,7 +201,7 @@ pub fn builtin_keys(args: Vec<Value>) -> Result<Value, RuntimeError> {
 /// - true if the value is an array, false otherwise
 pub fn builtin_is_array(args: Vec<Value>) -> Result<Value, RuntimeError> {
     if args.len() != 1 {
-        return Err(RuntimeError::WrongArgumentCount(1, args.len()));
+        return Err(RuntimeError::wrong_argument_count(1, args.len()));
     }
 
     Ok(Value::Boolean(args[0].is_array()))
@@ -180,7 +216,7 @@ pub fn builtin_is_array(args: Vec<Value>) -> Result<Value, RuntimeError> {
 /// - true if the value is a dictionary, false otherwise
 pub fn builtin_is_dict(args: Vec<Value>) -> Result<Value, RuntimeError> {
     if args.len() != 1 {
-        return Err(RuntimeError::WrongArgumentCount(1, args.len()));
+        return Err(RuntimeError::wrong_argument_count(1, args.len()));
     }
 
     Ok(Value::Boolean(args[0].is_dictionary()))
@@ -193,18 +229,27 @@ pub fn builtin_is_dict(args: Vec<Value>) -> Result<Value, RuntimeError> {
 ///
 /// # Returns
 /// - A new collection without the element
+///
+/// # Errors
+/// - Returns an error if the array index is negative
 pub fn builtin_delete(args: Vec<Value>) -> Result<Value, RuntimeError> {
     if args.len() != 2 {
-        return Err(RuntimeError::WrongArgumentCount(2, args.len()));
+        return Err(RuntimeError::wrong_argument_count(2, args.len()));
     }
 
     match (&args[0], &args[1]) {
         (Value::Dictionary(dict), Value::String(key)) => {
             let mut new_dict = dict.clone();
-            new_dict.remove(key);
+            new_dict.shift_remove(key);
             Ok(Value::Dictionary(new_dict))
         }
         (Value::Array(arr), Value::Integer(idx)) => {
+            if *idx < 0 {
+                return Err(RuntimeError::invalid_argument(format!(
+                    "Array index cannot be negative: {}",
+                    idx
+                )));
+            }
             let idx = *idx as usize;
             if idx < arr.len() {
                 let mut new_arr = arr.clone();
@@ -214,7 +259,7 @@ pub fn builtin_delete(args: Vec<Value>) -> Result<Value, RuntimeError> {
                 Ok(Value::Array(arr.clone()))
             }
         }
-        _ => Err(RuntimeError::InvalidArgument(
+        _ => Err(RuntimeError::invalid_argument(
             "delete() requires a dictionary and string key, or array and integer index".to_string(),
         )),
     }

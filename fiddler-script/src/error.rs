@@ -88,32 +88,134 @@ pub enum ParseError {
 #[derive(Debug, Error, Clone, PartialEq)]
 pub enum RuntimeError {
     /// Undefined variable
-    #[error("Undefined variable '{0}'")]
-    UndefinedVariable(String),
+    #[error("Undefined variable '{name}'{}", format_position(*.position))]
+    UndefinedVariable {
+        /// The name of the undefined variable
+        name: String,
+        /// Source position where the error occurred
+        position: Option<Position>,
+    },
 
     /// Undefined function
-    #[error("Undefined function '{0}'")]
-    UndefinedFunction(String),
+    #[error("Undefined function '{name}'{}", format_position(*.position))]
+    UndefinedFunction {
+        /// The name of the undefined function
+        name: String,
+        /// Source position where the error occurred
+        position: Option<Position>,
+    },
 
     /// Type mismatch in operation
-    #[error("Type mismatch: {0}")]
-    TypeMismatch(String),
+    #[error("Type mismatch: {message}{}", format_position(*.position))]
+    TypeMismatch {
+        /// Description of the type mismatch
+        message: String,
+        /// Source position where the error occurred
+        position: Option<Position>,
+    },
 
     /// Division by zero
-    #[error("Division by zero")]
-    DivisionByZero,
+    #[error("Division by zero{}", format_position(*.position))]
+    DivisionByZero {
+        /// Source position where the error occurred
+        position: Option<Position>,
+    },
 
     /// Wrong number of arguments
-    #[error("Expected {0} arguments but got {1}")]
-    WrongArgumentCount(usize, usize),
+    #[error("Expected {expected} arguments but got {actual}{}", format_position(*.position))]
+    WrongArgumentCount {
+        /// Expected number of arguments
+        expected: usize,
+        /// Actual number of arguments provided
+        actual: usize,
+        /// Source position where the error occurred
+        position: Option<Position>,
+    },
 
     /// Invalid argument to function
-    #[error("Invalid argument: {0}")]
-    InvalidArgument(String),
+    #[error("Invalid argument: {message}")]
+    InvalidArgument {
+        /// Description of the invalid argument
+        message: String,
+    },
 
     /// Return from function (used internally for control flow)
     #[error("Return outside of function")]
     ReturnOutsideFunction,
+
+    /// Stack overflow from too deep recursion
+    #[error("Stack overflow: maximum recursion depth ({max_depth}) exceeded")]
+    StackOverflow {
+        /// The maximum recursion depth that was exceeded
+        max_depth: usize,
+    },
+}
+
+/// Format an optional position for error messages.
+fn format_position(pos: Option<Position>) -> String {
+    match pos {
+        Some(p) => format!(" at {}", p),
+        None => String::new(),
+    }
+}
+
+// Convenience constructors for backwards compatibility
+impl RuntimeError {
+    /// Create an UndefinedVariable error without position.
+    pub fn undefined_variable(name: impl Into<String>) -> Self {
+        RuntimeError::UndefinedVariable {
+            name: name.into(),
+            position: None,
+        }
+    }
+
+    /// Create an UndefinedVariable error with position.
+    pub fn undefined_variable_at(name: impl Into<String>, position: Position) -> Self {
+        RuntimeError::UndefinedVariable {
+            name: name.into(),
+            position: Some(position),
+        }
+    }
+
+    /// Create an UndefinedFunction error without position.
+    pub fn undefined_function(name: impl Into<String>) -> Self {
+        RuntimeError::UndefinedFunction {
+            name: name.into(),
+            position: None,
+        }
+    }
+
+    /// Create a TypeMismatch error without position.
+    pub fn type_mismatch(message: impl Into<String>) -> Self {
+        RuntimeError::TypeMismatch {
+            message: message.into(),
+            position: None,
+        }
+    }
+
+    /// Create a TypeMismatch error with position.
+    pub fn type_mismatch_at(message: impl Into<String>, position: Position) -> Self {
+        RuntimeError::TypeMismatch {
+            message: message.into(),
+            position: Some(position),
+        }
+    }
+
+    /// Create an InvalidArgument error.
+    pub fn invalid_argument(message: impl Into<String>) -> Self {
+        RuntimeError::InvalidArgument {
+            message: message.into(),
+        }
+    }
+
+    /// Create a WrongArgumentCount error without position.
+    pub fn wrong_argument_count(expected: usize, actual: usize) -> Self {
+        RuntimeError::WrongArgumentCount {
+            expected,
+            actual,
+            position: None,
+        }
+    }
 }
 
 /// Top-level error type that wraps all FiddlerScript errors.
@@ -157,7 +259,7 @@ mod tests {
 
     #[test]
     fn test_runtime_error_display() {
-        let err = RuntimeError::UndefinedVariable("foo".to_string());
+        let err = RuntimeError::undefined_variable("foo");
         assert!(err.to_string().contains("foo"));
     }
 

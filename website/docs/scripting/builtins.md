@@ -126,7 +126,7 @@ print(PATH);      // Same as getenv("PATH")
 Parse JSON from bytes or a string.
 
 **Arguments:** Bytes or string containing valid JSON
-**Returns:** Parsed value (string, integer, boolean, or null)
+**Returns:** Parsed value (dictionary, array, string, integer, boolean, or null)
 
 ```fiddlerscript
 // Parse a JSON string
@@ -141,8 +141,13 @@ let b = parse_json("true");           // true
 // Parse a JSON null
 let z = parse_json("null");           // null
 
-// Parse a JSON object (returns string representation)
-let obj = parse_json("{\"key\": \"value\"}");
+// Parse a JSON object (returns dictionary)
+let obj = parse_json("{\"name\": \"Alice\", \"age\": 30}");
+let name = get(obj, "name");          // "Alice"
+
+// Parse a JSON array (returns array)
+let arr = parse_json("[1, 2, 3]");
+let first = get(arr, 0);              // 1
 ```
 
 **Supported JSON types:**
@@ -150,8 +155,8 @@ let obj = parse_json("{\"key\": \"value\"}");
 - `true`/`false` -> boolean
 - numbers -> integer (floats are truncated)
 - strings -> string
-- arrays -> JSON string representation
-- objects -> JSON string representation
+- arrays -> array
+- objects -> dictionary
 
 ## Array Operations
 
@@ -252,12 +257,14 @@ let d2 = set(d, "key", "value");
 Get all keys from a dictionary.
 
 **Arguments:** A dictionary
-**Returns:** Array of keys (strings)
+**Returns:** Array of keys (strings) in insertion order
 
 ```fiddlerscript
 let d = set(set(dict(), "a", 1), "b", 2);
-let k = keys(d);  // array("a", "b")
+let k = keys(d);  // array("a", "b") - order is preserved
 ```
+
+**Note:** Keys are returned in the order they were inserted into the dictionary.
 
 ### `is_dict(value)`
 
@@ -424,15 +431,20 @@ Handles both Unix (`\n`) and Windows (`\r\n`) line endings.
 
 ## Compression
 
-### `gzip_compress(data)`
+### `gzip_compress(data, level?)`
 
 Compress data using gzip.
 
-**Arguments:** String or bytes
+**Arguments:**
+- `data` - String or bytes to compress
+- `level` (optional) - Compression level 0-9 (default: 6). 0 = no compression, 9 = maximum compression.
+
 **Returns:** Compressed bytes
 
 ```fiddlerscript
 let compressed = gzip_compress("hello world");
+let max_compressed = gzip_compress("hello world", 9);  // Maximum compression
+let fast_compressed = gzip_compress("hello world", 1); // Fast compression
 ```
 
 ### `gzip_decompress(data)`
@@ -447,15 +459,19 @@ let original = gzip_decompress(compressed);
 let text = bytes_to_string(original);
 ```
 
-### `zlib_compress(data)`
+### `zlib_compress(data, level?)`
 
 Compress data using zlib.
 
-**Arguments:** String or bytes
+**Arguments:**
+- `data` - String or bytes to compress
+- `level` (optional) - Compression level 0-9 (default: 6). 0 = no compression, 9 = maximum compression.
+
 **Returns:** Compressed bytes
 
 ```fiddlerscript
 let compressed = zlib_compress("hello world");
+let max_compressed = zlib_compress("hello world", 9);  // Maximum compression
 ```
 
 ### `zlib_decompress(data)`
@@ -469,15 +485,19 @@ Decompress zlib-compressed data.
 let original = zlib_decompress(compressed);
 ```
 
-### `deflate_compress(data)`
+### `deflate_compress(data, level?)`
 
 Compress data using raw deflate.
 
-**Arguments:** String or bytes
+**Arguments:**
+- `data` - String or bytes to compress
+- `level` (optional) - Compression level 0-9 (default: 6). 0 = no compression, 9 = maximum compression.
+
 **Returns:** Compressed bytes
 
 ```fiddlerscript
 let compressed = deflate_compress("hello world");
+let max_compressed = deflate_compress("hello world", 9);  // Maximum compression
 ```
 
 ### `deflate_decompress(data)`
@@ -529,7 +549,7 @@ let text = bytes_to_string(decoded);  // "hello"
 | `bytes(value)` | Any | Bytes | Convert to bytes |
 | `bytes_to_string(value)` | Bytes or string | String | Convert bytes to string |
 | `getenv(name)` | String | String or null | Get environment variable |
-| `parse_json(data)` | Bytes or string | Any | Parse JSON data |
+| `parse_json(data)` | Bytes or string | Dict, array, etc. | Parse JSON data |
 
 ### Collections
 
@@ -541,7 +561,7 @@ let text = bytes_to_string(decoded);  // "hello"
 | `set(coll, key, val)` | Collection, key, any | Collection | Set by index/key |
 | `delete(coll, key)` | Collection, key | Collection | Remove by index/key |
 | `dict()` | None | Dictionary | Create empty dict |
-| `keys(dict)` | Dictionary | Array | Get dictionary keys |
+| `keys(dict)` | Dictionary | Array | Get keys (insertion order) |
 | `is_array(val)` | Any | Boolean | Check if array |
 | `is_dict(val)` | Any | Boolean | Check if dictionary |
 
@@ -565,11 +585,11 @@ let text = bytes_to_string(decoded);  // "hello"
 
 | Function | Arguments | Returns | Description |
 |----------|-----------|---------|-------------|
-| `gzip_compress(data)` | String or bytes | Bytes | Gzip compress |
+| `gzip_compress(data, level?)` | Data, optional level (0-9) | Bytes | Gzip compress |
 | `gzip_decompress(data)` | Bytes | Bytes | Gzip decompress |
-| `zlib_compress(data)` | String or bytes | Bytes | Zlib compress |
+| `zlib_compress(data, level?)` | Data, optional level (0-9) | Bytes | Zlib compress |
 | `zlib_decompress(data)` | Bytes | Bytes | Zlib decompress |
-| `deflate_compress(data)` | String or bytes | Bytes | Deflate compress |
+| `deflate_compress(data, level?)` | Data, optional level (0-9) | Bytes | Deflate compress |
 | `deflate_decompress(data)` | Bytes | Bytes | Deflate decompress |
 
 ### Encoding

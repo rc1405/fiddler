@@ -5,12 +5,25 @@
 
 use std::collections::HashMap;
 
+use indexmap::IndexMap;
+
 use crate::ast::{BinaryOp, Block, ElseClause, Expression, Program, Statement, UnaryOp};
 use crate::builtins::get_default_builtins;
 use crate::error::RuntimeError;
 use crate::lexer::Lexer;
 use crate::parser::Parser;
 use crate::Value;
+
+/// Maximum recursion depth to prevent stack overflow.
+/// Set conservatively to avoid hitting the actual OS stack limit,
+/// especially in test environments with smaller thread stacks.
+const MAX_CALL_DEPTH: usize = 64;
+
+/// Maximum number of print output lines to capture before truncation.
+const MAX_OUTPUT_LINES: usize = 1000;
+
+/// Maximum total bytes of print output to capture before truncation.
+const MAX_OUTPUT_BYTES: usize = 64 * 1024; // 64 KB
 
 /// A user-defined function.
 #[derive(Debug, Clone)]
@@ -47,6 +60,12 @@ pub struct Interpreter {
     builtins: HashMap<String, fn(Vec<Value>) -> Result<Value, RuntimeError>>,
     /// Output capture (for testing)
     output: Vec<String>,
+    /// Total bytes captured in output
+    output_bytes: usize,
+    /// Whether output has been truncated
+    output_truncated: bool,
+    /// Current call depth for recursion limiting
+    call_depth: usize,
 }
 
 impl Default for Interpreter {
@@ -83,6 +102,9 @@ impl Interpreter {
             functions: HashMap::new(),
             builtins,
             output: Vec::new(),
+            output_bytes: 0,
+            output_truncated: false,
+            call_depth: 0,
         }
     }
 
@@ -93,6 +115,9 @@ impl Interpreter {
             functions: HashMap::new(),
             builtins: get_default_builtins(),
             output: Vec::new(),
+            output_bytes: 0,
+            output_truncated: false,
+            call_depth: 0,
         }
     }
 
@@ -127,6 +152,13 @@ impl Interpreter {
     /// Clear captured output.
     pub fn clear_output(&mut self) {
         self.output.clear();
+        self.output_bytes = 0;
+        self.output_truncated = false;
+    }
+
+    /// Check if captured output was truncated.
+    pub fn is_output_truncated(&self) -> bool {
+        self.output_truncated
     }
 
     // === Public variable access API ===
@@ -196,11 +228,7 @@ impl Interpreter {
     /// # Arguments
     /// * `name` - The variable name
     /// * `values` - The dictionary values
-    pub fn set_variable_dict(
-        &mut self,
-        name: impl Into<String>,
-        values: std::collections::HashMap<String, Value>,
-    ) {
+    pub fn set_variable_dict(&mut self, name: impl Into<String>, values: IndexMap<String, Value>) {
         self.set_variable_value(name, Value::Dictionary(values));
     }
 
@@ -271,7 +299,7 @@ impl Interpreter {
                 return Ok(value.clone());
             }
         }
-        Err(RuntimeError::UndefinedVariable(name.to_string()))
+        Err(RuntimeError::undefined_variable(name))
     }
 
     fn set_variable(&mut self, name: &str, value: Value) -> Result<(), RuntimeError> {
@@ -281,7 +309,7 @@ impl Interpreter {
                 return Ok(());
             }
         }
-        Err(RuntimeError::UndefinedVariable(name.to_string()))
+        Err(RuntimeError::undefined_variable(name))
     }
 
     // === Statement execution ===
@@ -443,6 +471,31 @@ impl Interpreter {
             } => self.call_function(function, arguments),
 
             Expression::Grouped { expression, .. } => self.evaluate_expression(expression),
+
+            Expression::ArrayLiteral { elements, .. } => {
+                let values: Vec<Value> = elements
+                    .iter()
+                    .map(|e| self.evaluate_expression(e))
+                    .collect::<Result<_, _>>()?;
+                Ok(Value::Array(values))
+            }
+
+            Expression::DictionaryLiteral { pairs, .. } => {
+                let mut dict = IndexMap::new();
+                for (key_expr, value_expr) in pairs {
+                    let key = match self.evaluate_expression(key_expr)? {
+                        Value::String(s) => s,
+                        _ => {
+                            return Err(RuntimeError::type_mismatch(
+                                "Dictionary key must be a string",
+                            ))
+                        }
+                    };
+                    let value = self.evaluate_expression(value_expr)?;
+                    dict.insert(key, value);
+                }
+                Ok(Value::Dictionary(dict))
+            }
         }
     }
 
@@ -457,34 +510,38 @@ impl Interpreter {
             BinaryOp::Add => match (&left, &right) {
                 (Value::Integer(a), Value::Integer(b)) => Ok(Value::Integer(a + b)),
                 (Value::String(a), Value::String(b)) => Ok(Value::String(format!("{}{}", a, b))),
-                _ => Err(RuntimeError::TypeMismatch(format!(
+                _ => Err(RuntimeError::type_mismatch(format!(
                     "Cannot add {:?} and {:?}",
                     left, right
                 ))),
             },
             BinaryOp::Subtract => match (&left, &right) {
                 (Value::Integer(a), Value::Integer(b)) => Ok(Value::Integer(a - b)),
-                _ => Err(RuntimeError::TypeMismatch(
+                _ => Err(RuntimeError::type_mismatch(
                     "Subtraction requires integers".to_string(),
                 )),
             },
             BinaryOp::Multiply => match (&left, &right) {
                 (Value::Integer(a), Value::Integer(b)) => Ok(Value::Integer(a * b)),
-                _ => Err(RuntimeError::TypeMismatch(
+                _ => Err(RuntimeError::type_mismatch(
                     "Multiplication requires integers".to_string(),
                 )),
             },
             BinaryOp::Divide => match (&left, &right) {
-                (Value::Integer(_), Value::Integer(0)) => Err(RuntimeError::DivisionByZero),
+                (Value::Integer(_), Value::Integer(0)) => {
+                    Err(RuntimeError::DivisionByZero { position: None })
+                }
                 (Value::Integer(a), Value::Integer(b)) => Ok(Value::Integer(a / b)),
-                _ => Err(RuntimeError::TypeMismatch(
+                _ => Err(RuntimeError::type_mismatch(
                     "Division requires integers".to_string(),
                 )),
             },
             BinaryOp::Modulo => match (&left, &right) {
-                (Value::Integer(_), Value::Integer(0)) => Err(RuntimeError::DivisionByZero),
+                (Value::Integer(_), Value::Integer(0)) => {
+                    Err(RuntimeError::DivisionByZero { position: None })
+                }
                 (Value::Integer(a), Value::Integer(b)) => Ok(Value::Integer(a % b)),
-                _ => Err(RuntimeError::TypeMismatch(
+                _ => Err(RuntimeError::type_mismatch(
                     "Modulo requires integers".to_string(),
                 )),
             },
@@ -492,34 +549,10 @@ impl Interpreter {
             // Comparison
             BinaryOp::Equal => Ok(Value::Boolean(left == right)),
             BinaryOp::NotEqual => Ok(Value::Boolean(left != right)),
-            BinaryOp::LessThan => match (&left, &right) {
-                (Value::Integer(a), Value::Integer(b)) => Ok(Value::Boolean(a < b)),
-                (Value::String(a), Value::String(b)) => Ok(Value::Boolean(a < b)),
-                _ => Err(RuntimeError::TypeMismatch(
-                    "Comparison requires matching types".to_string(),
-                )),
-            },
-            BinaryOp::LessEqual => match (&left, &right) {
-                (Value::Integer(a), Value::Integer(b)) => Ok(Value::Boolean(a <= b)),
-                (Value::String(a), Value::String(b)) => Ok(Value::Boolean(a <= b)),
-                _ => Err(RuntimeError::TypeMismatch(
-                    "Comparison requires matching types".to_string(),
-                )),
-            },
-            BinaryOp::GreaterThan => match (&left, &right) {
-                (Value::Integer(a), Value::Integer(b)) => Ok(Value::Boolean(a > b)),
-                (Value::String(a), Value::String(b)) => Ok(Value::Boolean(a > b)),
-                _ => Err(RuntimeError::TypeMismatch(
-                    "Comparison requires matching types".to_string(),
-                )),
-            },
-            BinaryOp::GreaterEqual => match (&left, &right) {
-                (Value::Integer(a), Value::Integer(b)) => Ok(Value::Boolean(a >= b)),
-                (Value::String(a), Value::String(b)) => Ok(Value::Boolean(a >= b)),
-                _ => Err(RuntimeError::TypeMismatch(
-                    "Comparison requires matching types".to_string(),
-                )),
-            },
+            BinaryOp::LessThan
+            | BinaryOp::LessEqual
+            | BinaryOp::GreaterThan
+            | BinaryOp::GreaterEqual => self.evaluate_comparison(op, &left, &right),
 
             // Logical
             BinaryOp::And => Ok(Value::Boolean(
@@ -531,12 +564,43 @@ impl Interpreter {
         }
     }
 
+    /// Evaluate comparison operators (<, <=, >, >=).
+    fn evaluate_comparison(
+        &self,
+        op: BinaryOp,
+        left: &Value,
+        right: &Value,
+    ) -> Result<Value, RuntimeError> {
+        let result = match (left, right) {
+            (Value::Integer(a), Value::Integer(b)) => match op {
+                BinaryOp::LessThan => a < b,
+                BinaryOp::LessEqual => a <= b,
+                BinaryOp::GreaterThan => a > b,
+                BinaryOp::GreaterEqual => a >= b,
+                _ => unreachable!(),
+            },
+            (Value::String(a), Value::String(b)) => match op {
+                BinaryOp::LessThan => a < b,
+                BinaryOp::LessEqual => a <= b,
+                BinaryOp::GreaterThan => a > b,
+                BinaryOp::GreaterEqual => a >= b,
+                _ => unreachable!(),
+            },
+            _ => {
+                return Err(RuntimeError::type_mismatch(
+                    "Comparison requires matching types".to_string(),
+                ))
+            }
+        };
+        Ok(Value::Boolean(result))
+    }
+
     fn evaluate_unary_op(&self, op: UnaryOp, operand: Value) -> Result<Value, RuntimeError> {
         match op {
             UnaryOp::Not => Ok(Value::Boolean(!self.is_truthy(&operand))),
             UnaryOp::Negate => match operand {
                 Value::Integer(n) => Ok(Value::Integer(-n)),
-                _ => Err(RuntimeError::TypeMismatch(
+                _ => Err(RuntimeError::type_mismatch(
                     "Negation requires integer".to_string(),
                 )),
             },
@@ -568,22 +632,49 @@ impl Interpreter {
 
         // Check for built-in function
         if let Some(builtin) = self.builtins.get(name) {
-            let result = builtin(args)?;
-            // Capture print output for testing
-            if name == "print" {
-                // Already printed by builtin, but we capture for testing
+            // Capture print output for testing (with truncation)
+            if name == "print" && !self.output_truncated {
+                let output_str = args
+                    .iter()
+                    .map(|v| format!("{}", v))
+                    .collect::<Vec<_>>()
+                    .join(" ");
+
+                // Check if adding this output would exceed limits
+                let new_bytes = self.output_bytes + output_str.len();
+                let new_lines = self.output.len() + 1;
+
+                if new_lines > MAX_OUTPUT_LINES || new_bytes > MAX_OUTPUT_BYTES {
+                    self.output.push("[truncated]".to_string());
+                    self.output_truncated = true;
+                } else {
+                    self.output_bytes = new_bytes;
+                    self.output.push(output_str);
+                }
             }
+            let result = builtin(args)?;
             return Ok(result);
         }
 
         // Check for user-defined function
         if let Some(func) = self.functions.get(name).cloned() {
-            if args.len() != func.params.len() {
-                return Err(RuntimeError::WrongArgumentCount(
-                    func.params.len(),
-                    args.len(),
-                ));
+            // Check recursion depth
+            if self.call_depth >= MAX_CALL_DEPTH {
+                return Err(RuntimeError::StackOverflow {
+                    max_depth: MAX_CALL_DEPTH,
+                });
             }
+
+            if args.len() != func.params.len() {
+                return Err(RuntimeError::WrongArgumentCount {
+                    expected: func.params.len(),
+                    actual: args.len(),
+                    position: None,
+                });
+            }
+
+            // Increment call depth
+            self.call_depth += 1;
 
             // Create new scope for function
             self.push_scope();
@@ -594,14 +685,17 @@ impl Interpreter {
             }
 
             // Execute function body
-            let result = self.execute_block(&func.body)?;
+            let result = self.execute_block(&func.body);
 
             self.pop_scope();
 
-            return Ok(result.into_value());
+            // Decrement call depth (even on error)
+            self.call_depth -= 1;
+
+            return result.map(|cf| cf.into_value());
         }
 
-        Err(RuntimeError::UndefinedFunction(name.to_string()))
+        Err(RuntimeError::undefined_function(name))
     }
 }
 
@@ -735,7 +829,9 @@ mod tests {
         let result = run("5 / 0;");
         assert!(matches!(
             result,
-            Err(crate::FiddlerError::Runtime(RuntimeError::DivisionByZero))
+            Err(crate::FiddlerError::Runtime(RuntimeError::DivisionByZero {
+                position: None
+            }))
         ));
     }
 
@@ -745,7 +841,7 @@ mod tests {
         assert!(matches!(
             result,
             Err(crate::FiddlerError::Runtime(
-                RuntimeError::UndefinedVariable(_)
+                RuntimeError::UndefinedVariable { .. }
             ))
         ));
     }
@@ -756,7 +852,7 @@ mod tests {
         assert!(matches!(
             result,
             Err(crate::FiddlerError::Runtime(
-                RuntimeError::UndefinedFunction(_)
+                RuntimeError::UndefinedFunction { .. }
             ))
         ));
     }
@@ -767,7 +863,11 @@ mod tests {
         assert!(matches!(
             result,
             Err(crate::FiddlerError::Runtime(
-                RuntimeError::WrongArgumentCount(2, 1)
+                RuntimeError::WrongArgumentCount {
+                    expected: 2,
+                    actual: 1,
+                    ..
+                }
             ))
         ));
     }
@@ -866,5 +966,276 @@ mod tests {
         interpreter.set_variable_bytes("empty", vec![]);
         let result = interpreter.run("if (empty) { 1; } else { 0; }").unwrap();
         assert_eq!(result, Value::Integer(0));
+    }
+
+    #[test]
+    fn test_print_output_capture() {
+        let mut interpreter = Interpreter::new_without_env();
+        interpreter
+            .run(r#"print("hello"); print("world");"#)
+            .unwrap();
+        assert_eq!(interpreter.output(), &["hello", "world"]);
+    }
+
+    #[test]
+    fn test_print_output_multiple_args() {
+        let mut interpreter = Interpreter::new_without_env();
+        interpreter.run(r#"print("a", 42, true);"#).unwrap();
+        assert_eq!(interpreter.output(), &["a 42 true"]);
+    }
+
+    #[test]
+    fn test_clear_output() {
+        let mut interpreter = Interpreter::new_without_env();
+        interpreter.run(r#"print("test");"#).unwrap();
+        assert_eq!(interpreter.output().len(), 1);
+        assert!(!interpreter.is_output_truncated());
+        interpreter.clear_output();
+        assert!(interpreter.output().is_empty());
+        assert!(!interpreter.is_output_truncated());
+    }
+
+    #[test]
+    fn test_output_truncation_by_lines() {
+        let mut interpreter = Interpreter::new_without_env();
+        // Generate more than MAX_OUTPUT_LINES (1000) print statements
+        let mut source = String::new();
+        for i in 0..1005 {
+            source.push_str(&format!("print({});\n", i));
+        }
+        interpreter.run(&source).unwrap();
+
+        // Should have MAX_OUTPUT_LINES entries plus "[truncated]"
+        assert!(interpreter.output().len() <= MAX_OUTPUT_LINES + 1);
+        assert!(interpreter.is_output_truncated());
+        assert_eq!(
+            interpreter.output().last(),
+            Some(&"[truncated]".to_string())
+        );
+    }
+
+    #[test]
+    fn test_output_truncation_by_bytes() {
+        let mut interpreter = Interpreter::new_without_env();
+        // Generate a long string that exceeds MAX_OUTPUT_BYTES (64KB)
+        let long_string = "x".repeat(70_000);
+        let source = format!(r#"print("{}");"#, long_string);
+        interpreter.run(&source).unwrap();
+
+        // The single line exceeds the byte limit, so it should be truncated
+        assert!(interpreter.is_output_truncated());
+        assert_eq!(
+            interpreter.output().last(),
+            Some(&"[truncated]".to_string())
+        );
+    }
+
+    #[test]
+    fn test_output_not_truncated_within_limits() {
+        let mut interpreter = Interpreter::new_without_env();
+        // Just a few print statements should not trigger truncation
+        interpreter
+            .run(r#"print("a"); print("b"); print("c");"#)
+            .unwrap();
+        assert!(!interpreter.is_output_truncated());
+        assert_eq!(interpreter.output(), &["a", "b", "c"]);
+    }
+
+    #[test]
+    fn test_stack_overflow() {
+        let mut interpreter = Interpreter::new_without_env();
+        let source = r#"
+            fn recurse() {
+                recurse();
+            }
+            recurse();
+        "#;
+        let result = interpreter.run(source);
+        assert!(matches!(
+            result,
+            Err(crate::FiddlerError::Runtime(
+                RuntimeError::StackOverflow { .. }
+            ))
+        ));
+    }
+
+    #[test]
+    fn test_deep_recursion_within_limit() {
+        let mut interpreter = Interpreter::new_without_env();
+        // Test that reasonable recursion depth works (50 levels, well under MAX_CALL_DEPTH of 64)
+        let source = r#"
+            fn count_down(n) {
+                if (n <= 0) {
+                    return 0;
+                }
+                return 1 + count_down(n - 1);
+            }
+            count_down(50);
+        "#;
+        let result = interpreter.run(source).unwrap();
+        assert_eq!(result, Value::Integer(50));
+    }
+
+    #[test]
+    fn test_array_literal() {
+        let result = run("[1, 2, 3];").unwrap();
+        assert_eq!(
+            result,
+            Value::Array(vec![
+                Value::Integer(1),
+                Value::Integer(2),
+                Value::Integer(3),
+            ])
+        );
+    }
+
+    #[test]
+    fn test_empty_array_literal() {
+        let result = run("[];").unwrap();
+        assert_eq!(result, Value::Array(vec![]));
+    }
+
+    #[test]
+    fn test_dictionary_literal() {
+        let result = run(r#"{"key": 42};"#).unwrap();
+        if let Value::Dictionary(dict) = result {
+            assert_eq!(dict.get("key"), Some(&Value::Integer(42)));
+        } else {
+            panic!("Expected dictionary");
+        }
+    }
+
+    #[test]
+    fn test_empty_dictionary_literal() {
+        let result = run("{};").unwrap();
+        assert_eq!(result, Value::Dictionary(IndexMap::new()));
+    }
+
+    #[test]
+    fn test_nested_literals() {
+        let result = run(r#"{"arr": [1, 2], "nested": {"a": 1}};"#).unwrap();
+        assert!(matches!(result, Value::Dictionary(_)));
+    }
+
+    #[test]
+    fn test_dictionary_preserves_insertion_order() {
+        // Test that dictionary maintains insertion order (IndexMap behavior)
+        let result = run(r#"{"z": 1, "a": 2, "m": 3};"#).unwrap();
+        if let Value::Dictionary(dict) = result {
+            let keys: Vec<&String> = dict.keys().collect();
+            assert_eq!(keys, vec!["z", "a", "m"]);
+        } else {
+            panic!("Expected dictionary");
+        }
+    }
+
+    #[test]
+    fn test_keys_preserves_insertion_order() {
+        let mut interpreter = Interpreter::new_without_env();
+        let result = interpreter
+            .run(r#"let d = {"third": 3, "first": 1, "second": 2}; keys(d);"#)
+            .unwrap();
+        // Keys should be in insertion order
+        assert_eq!(
+            result,
+            Value::Array(vec![
+                Value::String("third".to_string()),
+                Value::String("first".to_string()),
+                Value::String("second".to_string()),
+            ])
+        );
+    }
+
+    // Edge case tests (#15)
+
+    #[test]
+    fn test_max_integer() {
+        let max = i64::MAX;
+        let source = format!("{};", max);
+        let result = run(&source).unwrap();
+        assert_eq!(result, Value::Integer(max));
+    }
+
+    #[test]
+    fn test_min_integer() {
+        // Note: -9223372036854775808 would be parsed as negate(9223372036854775808)
+        // which overflows, so we use a slightly different approach
+        let min_plus_one = i64::MIN + 1;
+        let source = format!("{};", min_plus_one);
+        let result = run(&source).unwrap();
+        assert_eq!(result, Value::Integer(min_plus_one));
+    }
+
+    #[test]
+    fn test_unicode_strings() {
+        // Test various Unicode characters
+        let result = run(r#""Hello, 世界! 🎉 émojis";"#).unwrap();
+        assert_eq!(result, Value::String("Hello, 世界! 🎉 émojis".to_string()));
+    }
+
+    #[test]
+    fn test_unicode_string_concatenation() {
+        let result = run(r#""こんにちは" + " " + "世界";"#).unwrap();
+        assert_eq!(result, Value::String("こんにちは 世界".to_string()));
+    }
+
+    #[test]
+    fn test_deeply_nested_expressions() {
+        // Test deeply nested parenthesized expressions
+        // (1 + 2) = 3, * 3 = 9, - 4 = 5, / 2 = 2, + 1 = 3, * 2 = 6
+        let result = run("((((((1 + 2) * 3) - 4) / 2) + 1) * 2);").unwrap();
+        assert_eq!(result, Value::Integer(6));
+    }
+
+    #[test]
+    fn test_modulo_with_negative_dividend() {
+        let result = run("-7 % 3;").unwrap();
+        assert_eq!(result, Value::Integer(-1)); // Rust semantics: -7 % 3 = -1
+    }
+
+    #[test]
+    fn test_modulo_with_negative_divisor() {
+        let result = run("7 % -3;").unwrap();
+        assert_eq!(result, Value::Integer(1)); // Rust semantics: 7 % -3 = 1
+    }
+
+    #[test]
+    fn test_empty_string_falsy() {
+        let result = run(r#"if ("") { 1; } else { 0; }"#).unwrap();
+        assert_eq!(result, Value::Integer(0));
+    }
+
+    #[test]
+    fn test_nonempty_string_truthy() {
+        let result = run(r#"if ("x") { 1; } else { 0; }"#).unwrap();
+        assert_eq!(result, Value::Integer(1));
+    }
+
+    #[test]
+    fn test_zero_integer_falsy() {
+        let result = run("if (0) { 1; } else { 0; }").unwrap();
+        assert_eq!(result, Value::Integer(0));
+    }
+
+    #[test]
+    fn test_nonzero_integer_truthy() {
+        let result = run("if (-1) { 1; } else { 0; }").unwrap();
+        assert_eq!(result, Value::Integer(1));
+    }
+
+    #[test]
+    fn test_empty_array_falsy() {
+        let mut interpreter = Interpreter::new_without_env();
+        interpreter.set_variable_array("arr", vec![]);
+        let result = interpreter.run("if (arr) { 1; } else { 0; }").unwrap();
+        assert_eq!(result, Value::Integer(0));
+    }
+
+    #[test]
+    fn test_nonempty_array_truthy() {
+        let mut interpreter = Interpreter::new_without_env();
+        interpreter.set_variable_array("arr", vec![Value::Integer(1)]);
+        let result = interpreter.run("if (arr) { 1; } else { 0; }").unwrap();
+        assert_eq!(result, Value::Integer(1));
     }
 }

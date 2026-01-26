@@ -11,6 +11,7 @@ use crate::{Closer, Error, Processor};
 use async_trait::async_trait;
 use fiddler_macros::fiddler_registration_func;
 use fiddler_script::{Interpreter, Value};
+use indexmap::IndexMap;
 use serde::{Deserialize, Serialize};
 use serde_yaml::Value as YamlValue;
 use std::collections::HashMap;
@@ -30,7 +31,7 @@ pub struct FiddlerScriptProcessor {
 
 impl FiddlerScriptProcessor {
     /// Convert metadata from serde_yaml::Value to fiddler_script::Value
-    fn convert_metadata(metadata: &HashMap<String, serde_yaml::Value>) -> HashMap<String, Value> {
+    fn convert_metadata(metadata: &HashMap<String, serde_yaml::Value>) -> IndexMap<String, Value> {
         metadata
             .iter()
             .map(|(k, v)| (k.clone(), Self::yaml_to_script_value(v)))
@@ -56,7 +57,7 @@ impl FiddlerScriptProcessor {
                 Value::Array(seq.iter().map(Self::yaml_to_script_value).collect())
             }
             serde_yaml::Value::Mapping(map) => {
-                let dict: HashMap<String, Value> = map
+                let dict: IndexMap<String, Value> = map
                     .iter()
                     .filter_map(|(k, v)| {
                         k.as_str()

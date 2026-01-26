@@ -8,7 +8,7 @@ use crate::Value;
 /// Encode bytes to base64.
 pub fn builtin_base64_encode(args: Vec<Value>) -> Result<Value, RuntimeError> {
     if args.len() != 1 {
-        return Err(RuntimeError::WrongArgumentCount(1, args.len()));
+        return Err(RuntimeError::wrong_argument_count(1, args.len()));
     }
 
     let input = args[0].to_bytes();
@@ -19,14 +19,14 @@ pub fn builtin_base64_encode(args: Vec<Value>) -> Result<Value, RuntimeError> {
 /// Decode base64 to bytes.
 pub fn builtin_base64_decode(args: Vec<Value>) -> Result<Value, RuntimeError> {
     if args.len() != 1 {
-        return Err(RuntimeError::WrongArgumentCount(1, args.len()));
+        return Err(RuntimeError::wrong_argument_count(1, args.len()));
     }
 
     let input = match &args[0] {
         Value::String(s) => s.clone(),
         Value::Bytes(b) => String::from_utf8_lossy(b).into_owned(),
         _ => {
-            return Err(RuntimeError::InvalidArgument(
+            return Err(RuntimeError::invalid_argument(
                 "base64_decode() requires a string or bytes argument".to_string(),
             ))
         }
@@ -34,7 +34,7 @@ pub fn builtin_base64_decode(args: Vec<Value>) -> Result<Value, RuntimeError> {
 
     let decoded = BASE64_STANDARD
         .decode(&input)
-        .map_err(|e| RuntimeError::InvalidArgument(format!("base64 decode failed: {}", e)))?;
+        .map_err(|e| RuntimeError::invalid_argument(format!("base64 decode failed: {}", e)))?;
 
     Ok(Value::Bytes(decoded))
 }
@@ -56,6 +56,6 @@ mod tests {
     #[test]
     fn test_base64_decode_invalid() {
         let result = builtin_base64_decode(vec![Value::String("not valid base64!!!".to_string())]);
-        assert!(matches!(result, Err(RuntimeError::InvalidArgument(_))));
+        assert!(matches!(result, Err(RuntimeError::InvalidArgument { .. })));
     }
 }

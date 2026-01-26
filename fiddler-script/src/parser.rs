@@ -105,8 +105,13 @@ impl Parser {
             TokenKind::Return => self.parse_return_statement(),
             TokenKind::Fn => self.parse_function_definition(),
             TokenKind::LeftBrace => {
-                let block = self.parse_block()?;
-                Ok(Statement::Block(block))
+                // Check if this is a dictionary literal (expression) or a block statement
+                if self.is_dictionary_literal() {
+                    self.parse_expression_statement()
+                } else {
+                    let block = self.parse_block()?;
+                    Ok(Statement::Block(block))
+                }
             }
             _ => self.parse_expression_statement(),
         }
@@ -261,11 +266,22 @@ impl Parser {
 
         if !self.check(&TokenKind::RightParen) {
             loop {
+                let pos = self.peek().position;
                 let name = match &self.peek().kind {
                     TokenKind::Identifier(name) => name.clone(),
                     _ => return Err(ParseError::ExpectedIdentifier(self.peek().position)),
                 };
                 self.advance();
+
+                // Check for duplicate parameter
+                if params.contains(&name) {
+                    return Err(ParseError::UnexpectedToken(
+                        name,
+                        pos,
+                        "unique parameter name (duplicate parameter)".to_string(),
+                    ));
+                }
+
                 params.push(name);
 
                 if !self.match_token(&TokenKind::Comma) {
@@ -542,49 +558,39 @@ impl Parser {
 
     /// Parse primary expression.
     fn parse_primary(&mut self) -> Result<Expression, ParseError> {
-        let token = self.peek().clone();
+        let position = self.peek().position;
 
-        match &token.kind {
+        match &self.peek().kind {
             TokenKind::Integer(value) => {
                 let value = *value;
                 self.advance();
-                Ok(Expression::Integer {
-                    value,
-                    position: token.position,
-                })
+                Ok(Expression::Integer { value, position })
             }
             TokenKind::String(value) => {
                 let value = value.clone();
                 self.advance();
-                Ok(Expression::String {
-                    value,
-                    position: token.position,
-                })
+                Ok(Expression::String { value, position })
             }
             TokenKind::True => {
                 self.advance();
                 Ok(Expression::Boolean {
                     value: true,
-                    position: token.position,
+                    position,
                 })
             }
             TokenKind::False => {
                 self.advance();
                 Ok(Expression::Boolean {
                     value: false,
-                    position: token.position,
+                    position,
                 })
             }
             TokenKind::Identifier(name) => {
                 let name = name.clone();
                 self.advance();
-                Ok(Expression::Identifier {
-                    name,
-                    position: token.position,
-                })
+                Ok(Expression::Identifier { name, position })
             }
             TokenKind::LeftParen => {
-                let position = token.position;
                 self.advance();
                 let expression = self.parse_expression()?;
                 self.expect(&TokenKind::RightParen, ")")?;
@@ -593,9 +599,137 @@ impl Parser {
                     position,
                 })
             }
-            TokenKind::Eof => Err(ParseError::UnexpectedEof(token.position)),
-            _ => Err(ParseError::ExpectedExpression(token.position)),
+            TokenKind::LeftBracket => self.parse_array_literal(),
+            TokenKind::LeftBrace => {
+                // Check if this is a dictionary literal or a block
+                // Dictionary literals start with { followed by a string or }
+                // We need to peek ahead to distinguish
+                if self.is_dictionary_literal() {
+                    self.parse_dictionary_literal()
+                } else {
+                    Err(ParseError::ExpectedExpression(position))
+                }
+            }
+            TokenKind::Eof => Err(ParseError::UnexpectedEof(position)),
+            _ => Err(ParseError::ExpectedExpression(position)),
         }
+    }
+
+    /// Check if the current position starts a dictionary literal.
+    /// Dictionary literals are `{` followed by `}` or a string/identifier then `:`.
+    fn is_dictionary_literal(&self) -> bool {
+        if !self.check(&TokenKind::LeftBrace) {
+            return false;
+        }
+
+        // Look ahead: { } is empty dict, { "key": or { identifier: is dict
+        let mut lookahead = self.current + 1;
+
+        // Skip the {
+        if lookahead >= self.tokens.len() {
+            return false;
+        }
+
+        // Empty dict: {}
+        if matches!(
+            self.tokens.get(lookahead).map(|t| &t.kind),
+            Some(TokenKind::RightBrace)
+        ) {
+            return true;
+        }
+
+        // Check for string/identifier followed by colon
+        match self.tokens.get(lookahead).map(|t| &t.kind) {
+            Some(TokenKind::String(_)) | Some(TokenKind::Identifier(_)) => {
+                lookahead += 1;
+                matches!(
+                    self.tokens.get(lookahead).map(|t| &t.kind),
+                    Some(TokenKind::Colon)
+                )
+            }
+            _ => false,
+        }
+    }
+
+    /// Parse array literal: `[expr, expr, ...]`
+    fn parse_array_literal(&mut self) -> Result<Expression, ParseError> {
+        let position = self.peek().position;
+        self.expect(&TokenKind::LeftBracket, "[")?;
+
+        let mut elements = Vec::new();
+
+        if !self.check(&TokenKind::RightBracket) {
+            loop {
+                elements.push(self.parse_expression()?);
+                if !self.match_token(&TokenKind::Comma) {
+                    break;
+                }
+                // Allow trailing comma
+                if self.check(&TokenKind::RightBracket) {
+                    break;
+                }
+            }
+        }
+
+        self.expect(&TokenKind::RightBracket, "]")?;
+        Ok(Expression::ArrayLiteral { elements, position })
+    }
+
+    /// Parse dictionary literal: `{"key": value, "key2": value2, ...}`
+    fn parse_dictionary_literal(&mut self) -> Result<Expression, ParseError> {
+        let position = self.peek().position;
+        self.expect(&TokenKind::LeftBrace, "{")?;
+
+        let mut pairs = Vec::new();
+
+        if !self.check(&TokenKind::RightBrace) {
+            loop {
+                // Key must be a string or identifier
+                let key = match &self.peek().kind {
+                    TokenKind::String(s) => {
+                        let key_pos = self.peek().position;
+                        let s = s.clone();
+                        self.advance();
+                        Expression::String {
+                            value: s,
+                            position: key_pos,
+                        }
+                    }
+                    TokenKind::Identifier(name) => {
+                        // Allow identifier as shorthand for string key
+                        let key_pos = self.peek().position;
+                        let name = name.clone();
+                        self.advance();
+                        Expression::String {
+                            value: name,
+                            position: key_pos,
+                        }
+                    }
+                    _ => {
+                        return Err(ParseError::UnexpectedToken(
+                            self.peek().kind.to_string(),
+                            self.peek().position,
+                            "string key".to_string(),
+                        ))
+                    }
+                };
+
+                self.expect(&TokenKind::Colon, ":")?;
+                let value = self.parse_expression()?;
+                pairs.push((key, value));
+
+                if !self.match_token(&TokenKind::Comma) {
+                    break;
+                }
+                // Allow trailing comma
+                if self.check(&TokenKind::RightBrace) {
+                    break;
+                }
+            }
+        }
+
+        self.expect(&TokenKind::RightBrace, "}")?;
+        Ok(Expression::DictionaryLiteral { pairs, position })
     }
 }
 

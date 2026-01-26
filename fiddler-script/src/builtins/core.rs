@@ -25,7 +25,7 @@ pub fn builtin_print(args: Vec<Value>) -> Result<Value, RuntimeError> {
 /// - The length as an integer
 pub fn builtin_len(args: Vec<Value>) -> Result<Value, RuntimeError> {
     if args.len() != 1 {
-        return Err(RuntimeError::WrongArgumentCount(1, args.len()));
+        return Err(RuntimeError::wrong_argument_count(1, args.len()));
     }
 
     match &args[0] {
@@ -33,7 +33,7 @@ pub fn builtin_len(args: Vec<Value>) -> Result<Value, RuntimeError> {
         Value::Bytes(b) => Ok(Value::Integer(b.len() as i64)),
         Value::Array(a) => Ok(Value::Integer(a.len() as i64)),
         Value::Dictionary(d) => Ok(Value::Integer(d.len() as i64)),
-        _ => Err(RuntimeError::InvalidArgument(
+        _ => Err(RuntimeError::invalid_argument(
             "len() requires a string, bytes, array, or dictionary argument".to_string(),
         )),
     }
@@ -48,7 +48,7 @@ pub fn builtin_len(args: Vec<Value>) -> Result<Value, RuntimeError> {
 /// - The value as a string
 pub fn builtin_str(args: Vec<Value>) -> Result<Value, RuntimeError> {
     if args.len() != 1 {
-        return Err(RuntimeError::WrongArgumentCount(1, args.len()));
+        return Err(RuntimeError::wrong_argument_count(1, args.len()));
     }
 
     Ok(Value::String(args[0].to_string()))
@@ -63,19 +63,19 @@ pub fn builtin_str(args: Vec<Value>) -> Result<Value, RuntimeError> {
 /// - The parsed integer value
 pub fn builtin_int(args: Vec<Value>) -> Result<Value, RuntimeError> {
     if args.len() != 1 {
-        return Err(RuntimeError::WrongArgumentCount(1, args.len()));
+        return Err(RuntimeError::wrong_argument_count(1, args.len()));
     }
 
     match &args[0] {
         Value::String(s) => s.parse::<i64>().map(Value::Integer).map_err(|_| {
-            RuntimeError::InvalidArgument(format!("Cannot convert '{}' to integer", s))
+            RuntimeError::invalid_argument(format!("Cannot convert '{}' to integer", s))
         }),
         Value::Integer(n) => Ok(Value::Integer(*n)),
         Value::Boolean(b) => Ok(Value::Integer(if *b { 1 } else { 0 })),
         Value::Bytes(bytes) => {
             let s = String::from_utf8_lossy(bytes);
             s.parse::<i64>().map(Value::Integer).map_err(|_| {
-                RuntimeError::InvalidArgument("Cannot convert bytes to integer".to_string())
+                RuntimeError::invalid_argument("Cannot convert bytes to integer".to_string())
             })
         }
         Value::Array(a) => Ok(Value::Integer(a.len() as i64)),
@@ -93,13 +93,13 @@ pub fn builtin_int(args: Vec<Value>) -> Result<Value, RuntimeError> {
 /// - The value as a string, or null if not found
 pub fn builtin_getenv(args: Vec<Value>) -> Result<Value, RuntimeError> {
     if args.len() != 1 {
-        return Err(RuntimeError::WrongArgumentCount(1, args.len()));
+        return Err(RuntimeError::wrong_argument_count(1, args.len()));
     }
 
     let name = match &args[0] {
         Value::String(s) => s.clone(),
         _ => {
-            return Err(RuntimeError::InvalidArgument(
+            return Err(RuntimeError::invalid_argument(
                 "getenv() requires a string argument".to_string(),
             ))
         }
@@ -130,7 +130,7 @@ mod tests {
     #[test]
     fn test_builtin_len_wrong_type() {
         let result = builtin_len(vec![Value::Integer(42)]);
-        assert!(matches!(result, Err(RuntimeError::InvalidArgument(_))));
+        assert!(matches!(result, Err(RuntimeError::InvalidArgument { .. })));
     }
 
     #[test]
@@ -138,7 +138,11 @@ mod tests {
         let result = builtin_len(vec![]);
         assert!(matches!(
             result,
-            Err(RuntimeError::WrongArgumentCount(1, 0))
+            Err(RuntimeError::WrongArgumentCount {
+                expected: 1,
+                actual: 0,
+                ..
+            })
         ));
     }
 
@@ -177,7 +181,7 @@ mod tests {
     #[test]
     fn test_builtin_int_invalid() {
         let result = builtin_int(vec![Value::String("not a number".to_string())]);
-        assert!(matches!(result, Err(RuntimeError::InvalidArgument(_))));
+        assert!(matches!(result, Err(RuntimeError::InvalidArgument { .. })));
     }
 
     #[test]

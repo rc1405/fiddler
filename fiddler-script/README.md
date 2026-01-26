@@ -187,16 +187,16 @@ print(factorial(5));  // 120
 
 ## Built-in Functions
 
-| Function | Description |
-|----------|-------------|
-| `print(args...)` | Print values to stdout |
-| `len(value)` | Get the length of a string or bytes |
-| `str(value)` | Convert a value to a string |
-| `int(value)` | Convert a value to an integer |
-| `getenv(name)` | Get an environment variable by name (returns null if not found) |
-| `parse_json(bytes)` | Parse JSON from bytes or string |
-| `bytes_to_string(bytes)` | Convert bytes to a UTF-8 string |
-| `bytes(value)` | Convert any value to bytes |
+| Function                 | Description                                                     |
+| ------------------------ | --------------------------------------------------------------- |
+| `print(args...)`         | Print values to stdout                                          |
+| `len(value)`             | Get the length of a string or bytes                             |
+| `str(value)`             | Convert a value to a string                                     |
+| `int(value)`             | Convert a value to an integer                                   |
+| `getenv(name)`           | Get an environment variable by name (returns null if not found) |
+| `parse_json(bytes)`      | Parse JSON from bytes or string                                 |
+| `bytes_to_string(bytes)` | Convert bytes to a UTF-8 string                                 |
+| `bytes(value)`           | Convert any value to bytes                                      |
 
 ## Environment Variables
 
@@ -229,7 +229,3 @@ let text = bytes_to_string(raw_bytes);
 let b = bytes("hello");  // String to bytes
 let n = bytes(42);       // Integer to bytes (as string representation)
 ```
-
-## License
-
-MIT

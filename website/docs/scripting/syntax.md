@@ -72,25 +72,43 @@ let text = bytes_to_string(data);
 
 ### Arrays
 
-Ordered collections of values.
+Ordered collections of values. Arrays can be created using literal syntax or the `array()` function.
 
 ```fiddlerscript
-let arr = array(1, 2, 3);           // Create array
+// Array literal syntax
+let arr = [1, 2, 3];
+let mixed = ["hello", 42, true];
+let empty = [];
+
+// Or using array() function
+let arr2 = array(1, 2, 3);
+
+// Array operations
 let first = get(arr, 0);            // Get element at index
-let arr2 = push(arr, 4);            // Add element (returns new array)
+let arr3 = push(arr, 4);            // Add element (returns new array)
 let size = len(arr);                // Get length
 ```
 
 ### Dictionaries
 
-Key-value collections with string keys.
+Key-value collections with string keys. Dictionaries preserve insertion order when iterating.
 
 ```fiddlerscript
-let d = dict();                     // Create empty dictionary
-let d2 = set(d, "name", "Alice");   // Set key (returns new dict)
-let name = get(d2, "name");         // Get value by key
-let k = keys(d2);                   // Get array of keys
+// Dictionary literal syntax
+let person = {"name": "Alice", "age": 30};
+let nested = {"user": {"id": 1, "active": true}};
+let empty = {};
+
+// Or using dict() and set() functions
+let d = dict();
+let d2 = set(d, "name", "Alice");
+
+// Dictionary operations
+let name = get(person, "name");     // Get value by key
+let k = keys(person);               // Get array of keys (in insertion order)
 ```
+
+**Note:** Dictionary keys are always strings. When iterating with `keys()`, the order matches the order in which keys were inserted.
 
 ### Null
 
@@ -293,6 +311,8 @@ fn fibonacci(n) {
     return fibonacci(n - 1) + fibonacci(n - 2);
 }
 ```
+
+**Note:** FiddlerScript has a maximum recursion depth of 64 nested function calls to prevent stack overflow. Exceeding this limit will result in a runtime error.
 
 ## Blocks and Scope
 

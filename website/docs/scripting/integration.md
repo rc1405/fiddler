@@ -38,7 +38,7 @@ builtins.insert("double".to_string(), |args| {
     if let Some(Value::Integer(n)) = args.first() {
         Ok(Value::Integer(n * 2))
     } else {
-        Err(RuntimeError::InvalidArgument("Expected integer".to_string()))
+        Err(RuntimeError::invalid_argument("Expected integer"))
     }
 });
 
@@ -110,6 +110,7 @@ interpreter.run(r#"
 | `set_variable_int(name, i64)` | Set an integer |
 | `set_variable_string(name, impl Into<String>)` | Set a string |
 | `set_variable_bytes(name, Vec<u8>)` | Set bytes |
+| `set_variable_dict(name, IndexMap<String, Value>)` | Set a dictionary |
 
 ## Retrieving Variables
 
@@ -128,6 +129,8 @@ if let Some(value) = interpreter.get_value("result") {
         Value::String(s) => println!("String: {}", s),
         Value::Boolean(b) => println!("Boolean: {}", b),
         Value::Bytes(bytes) => println!("Bytes: {} bytes", bytes.len()),
+        Value::Array(arr) => println!("Array: {} elements", arr.len()),
+        Value::Dictionary(dict) => println!("Dictionary: {} keys", dict.len()),
         Value::Null => println!("Null"),
     }
 }
@@ -156,14 +159,20 @@ if interpreter.has_variable("result") {
 The `Value` enum represents all FiddlerScript values:
 
 ```rust
+use indexmap::IndexMap;
+
 pub enum Value {
     Integer(i64),
     String(String),
     Boolean(bool),
     Bytes(Vec<u8>),
+    Array(Vec<Value>),
+    Dictionary(IndexMap<String, Value>),
     Null,
 }
 ```
+
+Dictionaries use `IndexMap` to preserve insertion order when iterating over keys.
 
 ### Converting Values to Bytes
 

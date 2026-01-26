@@ -1,5 +1,7 @@
 //! JSON processing built-in functions.
 
+use indexmap::IndexMap;
+
 use crate::error::RuntimeError;
 use crate::Value;
 
@@ -12,21 +14,21 @@ use crate::Value;
 /// - Parsed value (string, integer, boolean, or null)
 pub fn builtin_parse_json(args: Vec<Value>) -> Result<Value, RuntimeError> {
     if args.len() != 1 {
-        return Err(RuntimeError::WrongArgumentCount(1, args.len()));
+        return Err(RuntimeError::wrong_argument_count(1, args.len()));
     }
 
     let bytes = match &args[0] {
         Value::Bytes(b) => b.clone(),
         Value::String(s) => s.as_bytes().to_vec(),
         _ => {
-            return Err(RuntimeError::InvalidArgument(
+            return Err(RuntimeError::invalid_argument(
                 "parse_json() requires bytes or string argument".to_string(),
             ))
         }
     };
 
     let json_value: serde_json::Value = serde_json::from_slice(&bytes)
-        .map_err(|e| RuntimeError::InvalidArgument(format!("Invalid JSON: {}", e)))?;
+        .map_err(|e| RuntimeError::invalid_argument(format!("Invalid JSON: {}", e)))?;
 
     Ok(json_to_value(json_value))
 }
@@ -49,7 +51,7 @@ pub fn json_to_value(json: serde_json::Value) -> Value {
         serde_json::Value::String(s) => Value::String(s),
         serde_json::Value::Array(arr) => Value::Array(arr.into_iter().map(json_to_value).collect()),
         serde_json::Value::Object(obj) => {
-            let dict: std::collections::HashMap<String, Value> = obj
+            let dict: IndexMap<String, Value> = obj
                 .into_iter()
                 .map(|(k, v)| (k, json_to_value(v)))
                 .collect();
@@ -103,6 +105,6 @@ mod tests {
     #[test]
     fn test_builtin_parse_json_invalid() {
         let result = builtin_parse_json(vec![Value::Bytes(b"not valid json".to_vec())]);
-        assert!(matches!(result, Err(RuntimeError::InvalidArgument(_))));
+        assert!(matches!(result, Err(RuntimeError::InvalidArgument { .. })));
     }
 }

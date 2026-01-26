@@ -12,7 +12,7 @@ use crate::Value;
 /// - The bytes interpreted as a UTF-8 string
 pub fn builtin_bytes_to_string(args: Vec<Value>) -> Result<Value, RuntimeError> {
     if args.len() != 1 {
-        return Err(RuntimeError::WrongArgumentCount(1, args.len()));
+        return Err(RuntimeError::wrong_argument_count(1, args.len()));
     }
 
     match &args[0] {
@@ -21,8 +21,8 @@ pub fn builtin_bytes_to_string(args: Vec<Value>) -> Result<Value, RuntimeError> 
             Ok(Value::String(s))
         }
         Value::String(s) => Ok(Value::String(s.clone())),
-        _ => Err(RuntimeError::InvalidArgument(
-            "bytes_to_string() requires bytes or string argument".to_string(),
+        _ => Err(RuntimeError::invalid_argument(
+            "bytes_to_string() requires bytes or string argument",
         )),
     }
 }
@@ -36,7 +36,7 @@ pub fn builtin_bytes_to_string(args: Vec<Value>) -> Result<Value, RuntimeError> 
 /// - The value as bytes
 pub fn builtin_bytes(args: Vec<Value>) -> Result<Value, RuntimeError> {
     if args.len() != 1 {
-        return Err(RuntimeError::WrongArgumentCount(1, args.len()));
+        return Err(RuntimeError::wrong_argument_count(1, args.len()));
     }
 
     Ok(Value::Bytes(args[0].to_bytes()))

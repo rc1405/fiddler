@@ -91,10 +91,16 @@ pub enum TokenKind {
     LeftBrace,
     /// `}`
     RightBrace,
+    /// `[`
+    LeftBracket,
+    /// `]`
+    RightBracket,
     /// `,`
     Comma,
     /// `;`
     Semicolon,
+    /// `:`
+    Colon,
 
     // Special
     /// End of file
@@ -134,8 +140,11 @@ impl std::fmt::Display for TokenKind {
             TokenKind::RightParen => write!(f, ")"),
             TokenKind::LeftBrace => write!(f, "{{"),
             TokenKind::RightBrace => write!(f, "}}"),
+            TokenKind::LeftBracket => write!(f, "["),
+            TokenKind::RightBracket => write!(f, "]"),
             TokenKind::Comma => write!(f, ","),
             TokenKind::Semicolon => write!(f, ";"),
+            TokenKind::Colon => write!(f, ":"),
             TokenKind::Eof => write!(f, "EOF"),
         }
     }
@@ -196,6 +205,13 @@ impl<'a> Lexer<'a> {
         self.chars.peek().map(|(_, ch)| *ch)
     }
 
+    /// Peek at the character after the current one without consuming.
+    fn peek_next(&self) -> Option<char> {
+        let mut iter = self.chars.clone();
+        iter.next(); // Skip current
+        iter.peek().map(|(_, ch)| *ch)
+    }
+
     /// Skip whitespace and comments.
     fn skip_whitespace_and_comments(&mut self) {
         loop {
@@ -208,22 +224,18 @@ impl<'a> Lexer<'a> {
                 }
             }
 
-            // Check for comment
-            if self.peek() == Some('/') {
-                let mut chars_clone = self.chars.clone();
-                chars_clone.next();
-                if chars_clone.peek().map(|(_, ch)| *ch) == Some('/') {
-                    // Skip until end of line
-                    self.advance(); // consume first /
-                    self.advance(); // consume second /
-                    while let Some(ch) = self.peek() {
-                        if ch == '\n' {
-                            break;
-                        }
-                        self.advance();
+            // Check for comment: // until end of line
+            if self.peek() == Some('/') && self.peek_next() == Some('/') {
+                // Skip until end of line
+                self.advance(); // consume first /
+                self.advance(); // consume second /
+                while let Some(ch) = self.peek() {
+                    if ch == '\n' {
+                        break;
                     }
-                    continue; // Check for more whitespace/comments
+                    self.advance();
                 }
+                continue; // Check for more whitespace/comments
             }
 
             break;
@@ -326,8 +338,11 @@ impl<'a> Lexer<'a> {
             ')' => TokenKind::RightParen,
             '{' => TokenKind::LeftBrace,
             '}' => TokenKind::RightBrace,
+            '[' => TokenKind::LeftBracket,
+            ']' => TokenKind::RightBracket,
             ',' => TokenKind::Comma,
             ';' => TokenKind::Semicolon,
+            ':' => TokenKind::Colon,
 
             // Potentially two-character tokens
             '=' => {

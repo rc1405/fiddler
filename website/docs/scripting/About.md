@@ -6,26 +6,42 @@ FiddlerScript is a minimal C-style scripting language with a Rust-based interpre
 
 FiddlerScript provides a lightweight alternative to Python for simple data transformations. It supports:
 
-- **Variables**: integers, strings, booleans, and bytes
+- **Data Types**: integers, strings, booleans, bytes, arrays, and dictionaries
+- **Literal Syntax**: array literals `[1, 2, 3]` and dictionary literals `{"key": value}`
 - **Control Flow**: `if-else` statements and `for` loops
 - **Functions**: user-defined functions with recursion support
-- **Built-ins**: `print()`, `len()`, `str()`, `int()`, `getenv()`, `parse_json()`, and more
+- **Built-ins**: `print()`, `len()`, `str()`, `int()`, `getenv()`, `parse_json()`, compression, base64, and more
 - **Comments**: single-line comments with `//`
 
 ## Quick Example
 
 ```fiddlerscript
-// Process a message
-let count = 0;
-for (let i = 0; i < len(message); i = i + 1) {
-    count = count + 1;
+// Process a JSON message
+let data = parse_json(this);
+let name = get(data, "name");
+
+if (name) {
+    print("Processing user:", name);
+} else {
+    print("Unknown user");
 }
 
-if (count > 100) {
-    print("Large message:", count, "bytes");
-} else {
-    print("Small message");
+// Create a response
+let response = {"status": "ok", "processed": true};
+this = bytes(response);
+```
+
+```fiddlerscript
+// Split message into multiple outputs
+let lines = lines(this);
+let results = [];
+for (let i = 0; i < len(lines); i = i + 1) {
+    let line = get(lines, i);
+    if (len(line) > 0) {
+        results = push(results, bytes(line));
+    }
 }
+this = results;
 ```
 
 ## Environment Variables

@@ -38,7 +38,7 @@
 //!     if let Some(Value::Integer(n)) = args.first() {
 //!         Ok(Value::Integer(n * 2))
 //!     } else {
-//!         Err(RuntimeError::InvalidArgument("Expected integer".to_string()))
+//!         Err(RuntimeError::invalid_argument("Expected integer"))
 //!     }
 //! });
 //!
@@ -51,6 +51,8 @@ pub mod error;
 pub mod interpreter;
 pub mod lexer;
 pub mod parser;
+
+use indexmap::IndexMap;
 
 // Re-export main types for convenience
 pub use ast::{Expression, Program, Statement};
@@ -73,8 +75,8 @@ pub enum Value {
     Bytes(Vec<u8>),
     /// Array value (list of values)
     Array(Vec<Value>),
-    /// Dictionary value (key-value pairs)
-    Dictionary(std::collections::HashMap<String, Value>),
+    /// Dictionary value (key-value pairs with insertion order preserved)
+    Dictionary(IndexMap<String, Value>),
     /// Represents no value (e.g., from a function with no return)
     Null,
 }
@@ -88,21 +90,25 @@ impl std::fmt::Display for Value {
             Value::Bytes(bytes) => write!(f, "<bytes: {} bytes>", bytes.len()),
             Value::Array(arr) => {
                 write!(f, "[")?;
-                for (i, v) in arr.iter().enumerate() {
-                    if i > 0 {
+                let mut first = true;
+                for v in arr {
+                    if !first {
                         write!(f, ", ")?;
                     }
                     write!(f, "{}", v)?;
+                    first = false;
                 }
                 write!(f, "]")
             }
             Value::Dictionary(dict) => {
                 write!(f, "{{")?;
-                for (i, (k, v)) in dict.iter().enumerate() {
-                    if i > 0 {
+                let mut first = true;
+                for (k, v) in dict {
+                    if !first {
                         write!(f, ", ")?;
                     }
                     write!(f, "{}: {}", k, v)?;
+                    first = false;
                 }
                 write!(f, "}}")
             }
@@ -129,6 +135,21 @@ impl Value {
         Value::Bytes(bytes)
     }
 
+    /// Convert to string, handling both String and Bytes variants.
+    ///
+    /// Returns an error if the value is not a String or Bytes type.
+    /// For Bytes, invalid UTF-8 sequences are replaced with the Unicode
+    /// replacement character.
+    pub fn as_string_lossy(&self) -> Result<String, RuntimeError> {
+        match self {
+            Value::String(s) => Ok(s.clone()),
+            Value::Bytes(b) => Ok(String::from_utf8_lossy(b).into_owned()),
+            _ => Err(RuntimeError::invalid_argument(
+                "Expected string or bytes value",
+            )),
+        }
+    }
+
     /// Check if the value is an array.
     pub fn is_array(&self) -> bool {
         matches!(self, Value::Array(_))
@@ -148,7 +169,7 @@ impl Value {
     }
 
     /// Get as dictionary if this value is a dictionary.
-    pub fn as_dictionary(&self) -> Option<&std::collections::HashMap<String, Value>> {
+    pub fn as_dictionary(&self) -> Option<&IndexMap<String, Value>> {
         match self {
             Value::Dictionary(dict) => Some(dict),
             _ => None,

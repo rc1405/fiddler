@@ -6,14 +6,14 @@ use crate::Value;
 /// Split bytes/string into lines.
 pub fn builtin_lines(args: Vec<Value>) -> Result<Value, RuntimeError> {
     if args.len() != 1 {
-        return Err(RuntimeError::WrongArgumentCount(1, args.len()));
+        return Err(RuntimeError::wrong_argument_count(1, args.len()));
     }
 
     let input = match &args[0] {
         Value::String(s) => s.clone(),
         Value::Bytes(b) => String::from_utf8_lossy(b).into_owned(),
         _ => {
-            return Err(RuntimeError::InvalidArgument(
+            return Err(RuntimeError::invalid_argument(
                 "lines() requires a string or bytes argument".to_string(),
             ))
         }
@@ -30,14 +30,14 @@ pub fn builtin_lines(args: Vec<Value>) -> Result<Value, RuntimeError> {
 /// Capitalize the first character of a string.
 pub fn builtin_capitalize(args: Vec<Value>) -> Result<Value, RuntimeError> {
     if args.len() != 1 {
-        return Err(RuntimeError::WrongArgumentCount(1, args.len()));
+        return Err(RuntimeError::wrong_argument_count(1, args.len()));
     }
 
     let s = match &args[0] {
         Value::String(s) => s.clone(),
         Value::Bytes(b) => String::from_utf8_lossy(b).into_owned(),
         _ => {
-            return Err(RuntimeError::InvalidArgument(
+            return Err(RuntimeError::invalid_argument(
                 "capitalize() requires a string argument".to_string(),
             ))
         }
@@ -55,14 +55,14 @@ pub fn builtin_capitalize(args: Vec<Value>) -> Result<Value, RuntimeError> {
 /// Convert a string to lowercase.
 pub fn builtin_lowercase(args: Vec<Value>) -> Result<Value, RuntimeError> {
     if args.len() != 1 {
-        return Err(RuntimeError::WrongArgumentCount(1, args.len()));
+        return Err(RuntimeError::wrong_argument_count(1, args.len()));
     }
 
     let s = match &args[0] {
         Value::String(s) => s.clone(),
         Value::Bytes(b) => String::from_utf8_lossy(b).into_owned(),
         _ => {
-            return Err(RuntimeError::InvalidArgument(
+            return Err(RuntimeError::invalid_argument(
                 "lowercase() requires a string argument".to_string(),
             ))
         }
@@ -74,14 +74,14 @@ pub fn builtin_lowercase(args: Vec<Value>) -> Result<Value, RuntimeError> {
 /// Convert a string to uppercase.
 pub fn builtin_uppercase(args: Vec<Value>) -> Result<Value, RuntimeError> {
     if args.len() != 1 {
-        return Err(RuntimeError::WrongArgumentCount(1, args.len()));
+        return Err(RuntimeError::wrong_argument_count(1, args.len()));
     }
 
     let s = match &args[0] {
         Value::String(s) => s.clone(),
         Value::Bytes(b) => String::from_utf8_lossy(b).into_owned(),
         _ => {
-            return Err(RuntimeError::InvalidArgument(
+            return Err(RuntimeError::invalid_argument(
                 "uppercase() requires a string argument".to_string(),
             ))
         }
@@ -93,14 +93,14 @@ pub fn builtin_uppercase(args: Vec<Value>) -> Result<Value, RuntimeError> {
 /// Trim whitespace from both ends of a string.
 pub fn builtin_trim(args: Vec<Value>) -> Result<Value, RuntimeError> {
     if args.len() != 1 {
-        return Err(RuntimeError::WrongArgumentCount(1, args.len()));
+        return Err(RuntimeError::wrong_argument_count(1, args.len()));
     }
 
     let s = match &args[0] {
         Value::String(s) => s.clone(),
         Value::Bytes(b) => String::from_utf8_lossy(b).into_owned(),
         _ => {
-            return Err(RuntimeError::InvalidArgument(
+            return Err(RuntimeError::invalid_argument(
                 "trim() requires a string argument".to_string(),
             ))
         }
@@ -112,14 +112,14 @@ pub fn builtin_trim(args: Vec<Value>) -> Result<Value, RuntimeError> {
 /// Remove a prefix from a string.
 pub fn builtin_trim_prefix(args: Vec<Value>) -> Result<Value, RuntimeError> {
     if args.len() != 2 {
-        return Err(RuntimeError::WrongArgumentCount(2, args.len()));
+        return Err(RuntimeError::wrong_argument_count(2, args.len()));
     }
 
     let s = match &args[0] {
         Value::String(s) => s.clone(),
         Value::Bytes(b) => String::from_utf8_lossy(b).into_owned(),
         _ => {
-            return Err(RuntimeError::InvalidArgument(
+            return Err(RuntimeError::invalid_argument(
                 "trim_prefix() requires a string as first argument".to_string(),
             ))
         }
@@ -128,7 +128,7 @@ pub fn builtin_trim_prefix(args: Vec<Value>) -> Result<Value, RuntimeError> {
     let prefix = match &args[1] {
         Value::String(s) => s.clone(),
         _ => {
-            return Err(RuntimeError::InvalidArgument(
+            return Err(RuntimeError::invalid_argument(
                 "trim_prefix() requires a string as second argument".to_string(),
             ))
         }
@@ -141,14 +141,14 @@ pub fn builtin_trim_prefix(args: Vec<Value>) -> Result<Value, RuntimeError> {
 /// Remove a suffix from a string.
 pub fn builtin_trim_suffix(args: Vec<Value>) -> Result<Value, RuntimeError> {
     if args.len() != 2 {
-        return Err(RuntimeError::WrongArgumentCount(2, args.len()));
+        return Err(RuntimeError::wrong_argument_count(2, args.len()));
     }
 
     let s = match &args[0] {
         Value::String(s) => s.clone(),
         Value::Bytes(b) => String::from_utf8_lossy(b).into_owned(),
         _ => {
-            return Err(RuntimeError::InvalidArgument(
+            return Err(RuntimeError::invalid_argument(
                 "trim_suffix() requires a string as first argument".to_string(),
             ))
         }
@@ -157,7 +157,7 @@ pub fn builtin_trim_suffix(args: Vec<Value>) -> Result<Value, RuntimeError> {
     let suffix = match &args[1] {
         Value::String(s) => s.clone(),
         _ => {
-            return Err(RuntimeError::InvalidArgument(
+            return Err(RuntimeError::invalid_argument(
                 "trim_suffix() requires a string as second argument".to_string(),
             ))
         }
@@ -170,14 +170,14 @@ pub fn builtin_trim_suffix(args: Vec<Value>) -> Result<Value, RuntimeError> {
 /// Check if a string starts with a prefix.
 pub fn builtin_has_prefix(args: Vec<Value>) -> Result<Value, RuntimeError> {
     if args.len() != 2 {
-        return Err(RuntimeError::WrongArgumentCount(2, args.len()));
+        return Err(RuntimeError::wrong_argument_count(2, args.len()));
     }
 
     let s = match &args[0] {
         Value::String(s) => s.clone(),
         Value::Bytes(b) => String::from_utf8_lossy(b).into_owned(),
         _ => {
-            return Err(RuntimeError::InvalidArgument(
+            return Err(RuntimeError::invalid_argument(
                 "has_prefix() requires a string as first argument".to_string(),
             ))
         }
@@ -186,7 +186,7 @@ pub fn builtin_has_prefix(args: Vec<Value>) -> Result<Value, RuntimeError> {
     let prefix = match &args[1] {
         Value::String(s) => s.clone(),
         _ => {
-            return Err(RuntimeError::InvalidArgument(
+            return Err(RuntimeError::invalid_argument(
                 "has_prefix() requires a string as second argument".to_string(),
             ))
         }
@@ -198,14 +198,14 @@ pub fn builtin_has_prefix(args: Vec<Value>) -> Result<Value, RuntimeError> {
 /// Check if a string ends with a suffix.
 pub fn builtin_has_suffix(args: Vec<Value>) -> Result<Value, RuntimeError> {
     if args.len() != 2 {
-        return Err(RuntimeError::WrongArgumentCount(2, args.len()));
+        return Err(RuntimeError::wrong_argument_count(2, args.len()));
     }
 
     let s = match &args[0] {
         Value::String(s) => s.clone(),
         Value::Bytes(b) => String::from_utf8_lossy(b).into_owned(),
         _ => {
-            return Err(RuntimeError::InvalidArgument(
+            return Err(RuntimeError::invalid_argument(
                 "has_suffix() requires a string as first argument".to_string(),
             ))
         }
@@ -214,7 +214,7 @@ pub fn builtin_has_suffix(args: Vec<Value>) -> Result<Value, RuntimeError> {
     let suffix = match &args[1] {
         Value::String(s) => s.clone(),
         _ => {
-            return Err(RuntimeError::InvalidArgument(
+            return Err(RuntimeError::invalid_argument(
                 "has_suffix() requires a string as second argument".to_string(),
             ))
         }
@@ -226,14 +226,14 @@ pub fn builtin_has_suffix(args: Vec<Value>) -> Result<Value, RuntimeError> {
 /// Split a string by a delimiter.
 pub fn builtin_split(args: Vec<Value>) -> Result<Value, RuntimeError> {
     if args.len() != 2 {
-        return Err(RuntimeError::WrongArgumentCount(2, args.len()));
+        return Err(RuntimeError::wrong_argument_count(2, args.len()));
     }
 
     let s = match &args[0] {
         Value::String(s) => s.clone(),
         Value::Bytes(b) => String::from_utf8_lossy(b).into_owned(),
         _ => {
-            return Err(RuntimeError::InvalidArgument(
+            return Err(RuntimeError::invalid_argument(
                 "split() requires a string as first argument".to_string(),
             ))
         }
@@ -242,7 +242,7 @@ pub fn builtin_split(args: Vec<Value>) -> Result<Value, RuntimeError> {
     let delimiter = match &args[1] {
         Value::String(s) => s.clone(),
         _ => {
-            return Err(RuntimeError::InvalidArgument(
+            return Err(RuntimeError::invalid_argument(
                 "split() requires a string as second argument".to_string(),
             ))
         }
@@ -259,7 +259,7 @@ pub fn builtin_split(args: Vec<Value>) -> Result<Value, RuntimeError> {
 /// Reverse a string, array, or bytes.
 pub fn builtin_reverse(args: Vec<Value>) -> Result<Value, RuntimeError> {
     if args.len() != 1 {
-        return Err(RuntimeError::WrongArgumentCount(1, args.len()));
+        return Err(RuntimeError::wrong_argument_count(1, args.len()));
     }
 
     match &args[0] {
@@ -275,7 +275,7 @@ pub fn builtin_reverse(args: Vec<Value>) -> Result<Value, RuntimeError> {
             let reversed: Vec<u8> = b.iter().rev().cloned().collect();
             Ok(Value::Bytes(reversed))
         }
-        _ => Err(RuntimeError::InvalidArgument(
+        _ => Err(RuntimeError::invalid_argument(
             "reverse() requires a string, array, or bytes argument".to_string(),
         )),
     }
