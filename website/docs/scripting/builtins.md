@@ -2,6 +2,8 @@
 
 FiddlerScript provides a set of built-in functions for common operations.
 
+**Note:** Most built-in functions can be called using either function syntax `func(value, args)` or method syntax `value.func(args)`. Both are equivalent. Method syntax is useful for chaining operations.
+
 ## Output
 
 ### `print(args...)`
@@ -19,19 +21,21 @@ print("a", "b", "c");              // a b c
 
 ## String and Bytes Operations
 
-### `len(value)`
+### `len(value)` / `value.len()`
 
-Get the length of a string or bytes.
+Get the length of a string, bytes, array, or dictionary.
 
-**Arguments:** A string or bytes value
+**Arguments:** A string, bytes, array, or dictionary value
 **Returns:** Integer (length)
 
 ```fiddlerscript
+// Function syntax
 let s = "hello";
 print(len(s));          // 5
 
-let b = bytes("test");
-print(len(b));          // 4
+// Method syntax
+print(s.len());         // 5
+print([1, 2, 3].len()); // 3
 ```
 
 ### `str(value)`
@@ -62,7 +66,7 @@ let n = bytes(42);          // "42" as bytes
 let f = bytes(true);        // "true" as bytes
 ```
 
-### `bytes_to_string(bytes)`
+### `bytes_to_string(bytes)` / `bytes.bytes_to_string()`
 
 Convert bytes to a UTF-8 string.
 
@@ -70,8 +74,11 @@ Convert bytes to a UTF-8 string.
 **Returns:** String
 
 ```fiddlerscript
+// Function syntax
 let text = bytes_to_string(data);
-print(text);
+
+// Method syntax
+let text = data.bytes_to_string();
 ```
 
 Invalid UTF-8 sequences are replaced with the Unicode replacement character.
@@ -299,7 +306,9 @@ let arr2 = delete(arr, 1);   // array(1, 3)
 
 ## String Operations
 
-### `capitalize(string)`
+All string operations support both function and method syntax.
+
+### `capitalize(string)` / `string.capitalize()`
 
 Capitalize the first character of a string.
 
@@ -307,11 +316,11 @@ Capitalize the first character of a string.
 **Returns:** String with first character uppercased
 
 ```fiddlerscript
-let s = capitalize("hello");  // "Hello"
-let s2 = capitalize("HELLO"); // "HELLO"
+let s = "hello".capitalize();  // "Hello"
+let s2 = capitalize("HELLO");  // "HELLO"
 ```
 
-### `lowercase(string)`
+### `lowercase(string)` / `string.lowercase()`
 
 Convert a string to lowercase.
 
@@ -319,10 +328,10 @@ Convert a string to lowercase.
 **Returns:** Lowercase string
 
 ```fiddlerscript
-let s = lowercase("Hello World");  // "hello world"
+let s = "Hello World".lowercase();  // "hello world"
 ```
 
-### `uppercase(string)`
+### `uppercase(string)` / `string.uppercase()`
 
 Convert a string to uppercase.
 
@@ -330,10 +339,10 @@ Convert a string to uppercase.
 **Returns:** Uppercase string
 
 ```fiddlerscript
-let s = uppercase("Hello World");  // "HELLO WORLD"
+let s = "Hello World".uppercase();  // "HELLO WORLD"
 ```
 
-### `trim(string)`
+### `trim(string)` / `string.trim()`
 
 Remove leading and trailing whitespace from a string.
 
@@ -341,7 +350,7 @@ Remove leading and trailing whitespace from a string.
 **Returns:** Trimmed string
 
 ```fiddlerscript
-let s = trim("  hello  ");  // "hello"
+let s = "  hello  ".trim();  // "hello"
 ```
 
 ### `trim_prefix(string, prefix)`
@@ -392,7 +401,7 @@ let check = has_suffix("hello.txt", ".txt");  // true
 let check2 = has_suffix("hello", ".txt");     // false
 ```
 
-### `split(string, delimiter)`
+### `split(string, delimiter)` / `string.split(delimiter)`
 
 Split a string by a delimiter.
 
@@ -400,8 +409,8 @@ Split a string by a delimiter.
 **Returns:** Array of strings
 
 ```fiddlerscript
-let parts = split("a,b,c", ",");  // array("a", "b", "c")
-let words = split("hello world", " ");  // array("hello", "world")
+let parts = "a,b,c".split(",");  // ["a", "b", "c"]
+let words = "hello world".split(" ");  // ["hello", "world"]
 ```
 
 ### `reverse(string)`

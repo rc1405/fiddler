@@ -101,6 +101,8 @@ pub enum TokenKind {
     Semicolon,
     /// `:`
     Colon,
+    /// `.`
+    Dot,
 
     // Special
     /// End of file
@@ -145,6 +147,7 @@ impl std::fmt::Display for TokenKind {
             TokenKind::Comma => write!(f, ","),
             TokenKind::Semicolon => write!(f, ";"),
             TokenKind::Colon => write!(f, ":"),
+            TokenKind::Dot => write!(f, "."),
             TokenKind::Eof => write!(f, "EOF"),
         }
     }
@@ -343,6 +346,7 @@ impl<'a> Lexer<'a> {
             ',' => TokenKind::Comma,
             ';' => TokenKind::Semicolon,
             ':' => TokenKind::Colon,
+            '.' => TokenKind::Dot,
 
             // Potentially two-character tokens
             '=' => {
@@ -552,5 +556,23 @@ mod tests {
         let mut lexer = Lexer::new("@");
         let result = lexer.next_token();
         assert!(matches!(result, Err(LexError::UnexpectedCharacter('@', _))));
+    }
+
+    #[test]
+    fn test_dot_token() {
+        let mut lexer = Lexer::new(".");
+        let tokens = lexer.tokenize().unwrap();
+        assert!(matches!(tokens[0].kind, TokenKind::Dot));
+    }
+
+    #[test]
+    fn test_method_call_tokens() {
+        let mut lexer = Lexer::new("foo.bar()");
+        let tokens = lexer.tokenize().unwrap();
+        assert!(matches!(&tokens[0].kind, TokenKind::Identifier(s) if s == "foo"));
+        assert!(matches!(tokens[1].kind, TokenKind::Dot));
+        assert!(matches!(&tokens[2].kind, TokenKind::Identifier(s) if s == "bar"));
+        assert!(matches!(tokens[3].kind, TokenKind::LeftParen));
+        assert!(matches!(tokens[4].kind, TokenKind::RightParen));
     }
 }

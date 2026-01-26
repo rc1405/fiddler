@@ -470,6 +470,13 @@ impl Interpreter {
                 ..
             } => self.call_function(function, arguments),
 
+            Expression::MethodCall {
+                receiver,
+                method,
+                arguments,
+                ..
+            } => self.call_method(receiver, method, arguments),
+
             Expression::Grouped { expression, .. } => self.evaluate_expression(expression),
 
             Expression::ArrayLiteral { elements, .. } => {
@@ -619,6 +626,34 @@ impl Interpreter {
         }
     }
 
+    /// Capture output for the print function with truncation support.
+    ///
+    /// This is used for testing to capture print output. Output is truncated
+    /// if it exceeds MAX_OUTPUT_LINES or MAX_OUTPUT_BYTES.
+    fn capture_print_output(&mut self, args: &[Value]) {
+        if self.output_truncated {
+            return;
+        }
+
+        let output_str = args
+            .iter()
+            .map(|v| format!("{}", v))
+            .collect::<Vec<_>>()
+            .join(" ");
+
+        let new_bytes = self.output_bytes + output_str.len();
+        let new_lines = self.output.len() + 1;
+
+        if new_lines > MAX_OUTPUT_LINES || new_bytes > MAX_OUTPUT_BYTES {
+            self.output.push("[truncated]".to_string());
+            self.output_truncated = true;
+        } else {
+            self.output_bytes = new_bytes;
+            self.output.push(output_str);
+        }
+    }
+
+    /// Call a built-in or user-defined function by name.
     fn call_function(
         &mut self,
         name: &str,
@@ -630,72 +665,126 @@ impl Interpreter {
             .map(|arg| self.evaluate_expression(arg))
             .collect::<Result<_, _>>()?;
 
-        // Check for built-in function
-        if let Some(builtin) = self.builtins.get(name) {
-            // Capture print output for testing (with truncation)
-            if name == "print" && !self.output_truncated {
-                let output_str = args
-                    .iter()
-                    .map(|v| format!("{}", v))
-                    .collect::<Vec<_>>()
-                    .join(" ");
-
-                // Check if adding this output would exceed limits
-                let new_bytes = self.output_bytes + output_str.len();
-                let new_lines = self.output.len() + 1;
-
-                if new_lines > MAX_OUTPUT_LINES || new_bytes > MAX_OUTPUT_BYTES {
-                    self.output.push("[truncated]".to_string());
-                    self.output_truncated = true;
-                } else {
-                    self.output_bytes = new_bytes;
-                    self.output.push(output_str);
-                }
+        // Check for built-in function (copy the fn pointer to avoid borrow issues)
+        if let Some(&builtin) = self.builtins.get(name) {
+            if name == "print" {
+                self.capture_print_output(&args);
             }
-            let result = builtin(args)?;
-            return Ok(result);
+            return builtin(args);
         }
 
         // Check for user-defined function
         if let Some(func) = self.functions.get(name).cloned() {
-            // Check recursion depth
-            if self.call_depth >= MAX_CALL_DEPTH {
-                return Err(RuntimeError::StackOverflow {
-                    max_depth: MAX_CALL_DEPTH,
-                });
-            }
-
-            if args.len() != func.params.len() {
-                return Err(RuntimeError::WrongArgumentCount {
-                    expected: func.params.len(),
-                    actual: args.len(),
-                    position: None,
-                });
-            }
-
-            // Increment call depth
-            self.call_depth += 1;
-
-            // Create new scope for function
-            self.push_scope();
-
-            // Bind arguments to parameters
-            for (param, arg) in func.params.iter().zip(args) {
-                self.define_variable(param.clone(), arg);
-            }
-
-            // Execute function body
-            let result = self.execute_block(&func.body);
-
-            self.pop_scope();
-
-            // Decrement call depth (even on error)
-            self.call_depth -= 1;
-
-            return result.map(|cf| cf.into_value());
+            return self.call_user_function(&func, args);
         }
 
         Err(RuntimeError::undefined_function(name))
+    }
+
+    /// Call a method on a receiver expression.
+    ///
+    /// This implements method call syntax as syntactic sugar over function calls.
+    /// Method calls like `receiver.method(arg1, arg2)` are transformed into regular
+    /// function calls with the receiver prepended: `method(receiver, arg1, arg2)`.
+    ///
+    /// # Examples
+    ///
+    /// ```text
+    /// "hello".len()        -> len("hello")
+    /// arr.push(42)         -> push(arr, 42)
+    /// "hi".split(",")      -> split("hi", ",")
+    /// ```
+    ///
+    /// # Arguments
+    ///
+    /// * `receiver` - The expression before the dot (e.g., `"hello"` in `"hello".len()`)
+    /// * `method` - The method name to call (e.g., `"len"`)
+    /// * `arguments` - The arguments passed to the method (empty for `len()`)
+    ///
+    /// # Returns
+    ///
+    /// Returns the result of calling the builtin or user-defined function with
+    /// the receiver prepended to the argument list.
+    ///
+    /// # Errors
+    ///
+    /// Returns `RuntimeError::UndefinedFunction` if no builtin or user function
+    /// with the given method name exists.
+    fn call_method(
+        &mut self,
+        receiver: &Expression,
+        method: &str,
+        arguments: &[Expression],
+    ) -> Result<Value, RuntimeError> {
+        // Evaluate receiver first
+        let receiver_value = self.evaluate_expression(receiver)?;
+
+        // Pre-allocate with correct capacity and build args in order
+        // This avoids the O(n) cost of insert(0, ...)
+        let mut args = Vec::with_capacity(arguments.len() + 1);
+        args.push(receiver_value);
+
+        for arg in arguments {
+            args.push(self.evaluate_expression(arg)?);
+        }
+
+        // Check for built-in function (copy the fn pointer to avoid borrow issues)
+        if let Some(&builtin) = self.builtins.get(method) {
+            if method == "print" {
+                self.capture_print_output(&args);
+            }
+            return builtin(args);
+        }
+
+        // Check for user-defined function
+        if let Some(func) = self.functions.get(method).cloned() {
+            return self.call_user_function(&func, args);
+        }
+
+        Err(RuntimeError::undefined_function(method))
+    }
+
+    /// Call a user-defined function with pre-evaluated arguments.
+    fn call_user_function(
+        &mut self,
+        func: &UserFunction,
+        args: Vec<Value>,
+    ) -> Result<Value, RuntimeError> {
+        // Check recursion depth
+        if self.call_depth >= MAX_CALL_DEPTH {
+            return Err(RuntimeError::StackOverflow {
+                max_depth: MAX_CALL_DEPTH,
+            });
+        }
+
+        if args.len() != func.params.len() {
+            return Err(RuntimeError::WrongArgumentCount {
+                expected: func.params.len(),
+                actual: args.len(),
+                position: None,
+            });
+        }
+
+        // Increment call depth
+        self.call_depth += 1;
+
+        // Create new scope for function
+        self.push_scope();
+
+        // Bind arguments to parameters
+        for (param, arg) in func.params.iter().zip(args) {
+            self.define_variable(param.clone(), arg);
+        }
+
+        // Execute function body
+        let result = self.execute_block(&func.body);
+
+        self.pop_scope();
+
+        // Decrement call depth (even on error)
+        self.call_depth -= 1;
+
+        result.map(|cf| cf.into_value())
     }
 }
 
@@ -1237,5 +1326,166 @@ mod tests {
         interpreter.set_variable_array("arr", vec![Value::Integer(1)]);
         let result = interpreter.run("if (arr) { 1; } else { 0; }").unwrap();
         assert_eq!(result, Value::Integer(1));
+    }
+
+    // Method call syntax tests
+
+    #[test]
+    fn test_method_call_string_len() {
+        let result = run(r#""hello".len();"#).unwrap();
+        assert_eq!(result, Value::Integer(5));
+    }
+
+    #[test]
+    fn test_method_call_string_lowercase() {
+        let result = run(r#""HELLO".lowercase();"#).unwrap();
+        assert_eq!(result, Value::String("hello".to_string()));
+    }
+
+    #[test]
+    fn test_method_call_string_uppercase() {
+        let result = run(r#""hello".uppercase();"#).unwrap();
+        assert_eq!(result, Value::String("HELLO".to_string()));
+    }
+
+    #[test]
+    fn test_method_call_array_len() {
+        let result = run("[1, 2, 3].len();").unwrap();
+        assert_eq!(result, Value::Integer(3));
+    }
+
+    #[test]
+    fn test_method_call_array_push() {
+        let result = run("[1, 2].push(3);").unwrap();
+        assert_eq!(
+            result,
+            Value::Array(vec![
+                Value::Integer(1),
+                Value::Integer(2),
+                Value::Integer(3)
+            ])
+        );
+    }
+
+    #[test]
+    fn test_method_call_array_get() {
+        let result = run(r#"["a", "b", "c"].get(1);"#).unwrap();
+        assert_eq!(result, Value::String("b".to_string()));
+    }
+
+    #[test]
+    fn test_method_call_dict_get() {
+        let result = run(r#"{"name": "Alice"}.get("name");"#).unwrap();
+        assert_eq!(result, Value::String("Alice".to_string()));
+    }
+
+    #[test]
+    fn test_method_call_dict_keys() {
+        let result = run(r#"{"a": 1, "b": 2}.keys();"#).unwrap();
+        assert_eq!(
+            result,
+            Value::Array(vec![
+                Value::String("a".to_string()),
+                Value::String("b".to_string())
+            ])
+        );
+    }
+
+    #[test]
+    fn test_method_call_chaining() {
+        // Test method chaining: trim then lowercase
+        let result = run(r#""  HELLO  ".trim().lowercase();"#).unwrap();
+        assert_eq!(result, Value::String("hello".to_string()));
+    }
+
+    #[test]
+    fn test_method_call_chain_array() {
+        // Test array method chaining: push twice then get length
+        let result = run("[1].push(2).push(3).len();").unwrap();
+        assert_eq!(result, Value::Integer(3));
+    }
+
+    #[test]
+    fn test_method_call_on_variable() {
+        let result = run(r#"let s = "HELLO"; s.lowercase();"#).unwrap();
+        assert_eq!(result, Value::String("hello".to_string()));
+    }
+
+    #[test]
+    fn test_method_call_backwards_compatibility() {
+        // Both syntaxes should produce the same result
+        let func_result = run(r#"len("hello");"#).unwrap();
+        let method_result = run(r#""hello".len();"#).unwrap();
+        assert_eq!(func_result, method_result);
+    }
+
+    #[test]
+    fn test_method_call_split() {
+        let result = run(r#""a,b,c".split(",");"#).unwrap();
+        assert_eq!(
+            result,
+            Value::Array(vec![
+                Value::String("a".to_string()),
+                Value::String("b".to_string()),
+                Value::String("c".to_string())
+            ])
+        );
+    }
+
+    #[test]
+    fn test_method_call_trim_prefix() {
+        let result = run(r#""/path/file".trim_prefix("/path");"#).unwrap();
+        assert_eq!(result, Value::String("/file".to_string()));
+    }
+
+    #[test]
+    fn test_method_call_has_prefix() {
+        let result = run(r#""hello world".has_prefix("hello");"#).unwrap();
+        assert_eq!(result, Value::Boolean(true));
+    }
+
+    #[test]
+    fn test_method_call_on_grouped_expression() {
+        let result = run(r#"("hello" + " world").len();"#).unwrap();
+        assert_eq!(result, Value::Integer(11));
+    }
+
+    #[test]
+    fn test_method_call_undefined_method() {
+        let result = run(r#""hello".nonexistent();"#);
+        assert!(matches!(
+            result,
+            Err(crate::FiddlerError::Runtime(
+                RuntimeError::UndefinedFunction { .. }
+            ))
+        ));
+    }
+
+    #[test]
+    fn test_method_call_with_function_call_args() {
+        // Test method with arguments that are function calls
+        let result = run(r#""hello".get(len("ab"));"#).unwrap();
+        assert_eq!(result, Value::String("l".to_string()));
+    }
+
+    #[test]
+    fn test_method_call_complex_chain() {
+        // Test deeply nested method chains
+        let result = run(r#""  HELLO WORLD  ".trim().lowercase().split(" ").len();"#).unwrap();
+        assert_eq!(result, Value::Integer(2));
+    }
+
+    #[test]
+    fn test_method_call_on_function_result() {
+        // Call method on result of a function call
+        let result = run(r#"str(42).len();"#).unwrap();
+        assert_eq!(result, Value::Integer(2));
+    }
+
+    #[test]
+    fn test_method_and_function_mixed() {
+        // Mix method and function syntax in same expression
+        let result = run(r#"len("hello".uppercase());"#).unwrap();
+        assert_eq!(result, Value::Integer(5));
     }
 }

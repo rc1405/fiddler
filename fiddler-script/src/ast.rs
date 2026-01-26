@@ -195,6 +195,18 @@ pub enum Expression {
         position: Position,
     },
 
+    /// Method call: `expr.method(args)`
+    MethodCall {
+        /// The receiver expression (object the method is called on)
+        receiver: Box<Expression>,
+        /// The method name
+        method: String,
+        /// The argument expressions
+        arguments: Vec<Expression>,
+        /// Source position
+        position: Position,
+    },
+
     /// Grouped expression: `(expr)`
     Grouped {
         /// The inner expression
@@ -232,6 +244,7 @@ impl Expression {
             | Expression::Unary { position, .. }
             | Expression::Assignment { position, .. }
             | Expression::Call { position, .. }
+            | Expression::MethodCall { position, .. }
             | Expression::Grouped { position, .. }
             | Expression::ArrayLiteral { position, .. }
             | Expression::DictionaryLiteral { position, .. } => *position,

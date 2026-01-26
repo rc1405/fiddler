@@ -519,25 +519,90 @@ impl Parser {
         self.parse_call()
     }
 
-    /// Parse function call.
+    /// Parse function call or method call.
+    ///
+    /// Handles both regular function calls `func(args)` and method calls `expr.method(args)`.
+    /// Method calls can be chained: `expr.method1().method2()`.
     fn parse_call(&mut self) -> Result<Expression, ParseError> {
-        let expr = self.parse_primary()?;
+        let mut expr = self.parse_primary()?;
 
-        // Check if this is a function call
-        if let Expression::Identifier { name, position } = expr {
-            if self.match_token(&TokenKind::LeftParen) {
-                let arguments = self.parse_arguments()?;
-                self.expect(&TokenKind::RightParen, ")")?;
-                return Ok(Expression::Call {
-                    function: name,
-                    arguments,
-                    position,
-                });
+        loop {
+            if self.match_token(&TokenKind::Dot) {
+                // Parse method call: expr.method(args)
+                expr = self.parse_method_call_continuation(expr)?;
+            } else if self.is_function_call_start(&expr) {
+                // Parse function call: identifier(args)
+                expr = self.parse_function_call_continuation(expr)?;
+            } else {
+                // No more calls/method calls
+                break;
             }
-            return Ok(Expression::Identifier { name, position });
         }
 
         Ok(expr)
+    }
+
+    /// Check if the current position starts a function call on an identifier.
+    fn is_function_call_start(&self, expr: &Expression) -> bool {
+        matches!(expr, Expression::Identifier { .. }) && self.check(&TokenKind::LeftParen)
+    }
+
+    /// Parse the continuation of a method call after the dot has been consumed.
+    ///
+    /// Expects: `method(args)` where the dot has already been consumed.
+    fn parse_method_call_continuation(
+        &mut self,
+        receiver: Expression,
+    ) -> Result<Expression, ParseError> {
+        let method_pos = self.previous().position;
+
+        // Expect method name (identifier) with context-specific error
+        let method = match &self.peek().kind {
+            TokenKind::Identifier(name) => name.clone(),
+            _ => {
+                return Err(ParseError::UnexpectedToken(
+                    self.peek().kind.to_string(),
+                    self.peek().position,
+                    "method name".to_string(),
+                ))
+            }
+        };
+        self.advance();
+
+        // Expect opening parenthesis
+        self.expect(&TokenKind::LeftParen, "(")?;
+        let arguments = self.parse_arguments()?;
+        self.expect(&TokenKind::RightParen, ")")?;
+
+        Ok(Expression::MethodCall {
+            receiver: Box::new(receiver),
+            method,
+            arguments,
+            position: method_pos,
+        })
+    }
+
+    /// Parse the continuation of a function call on an identifier.
+    ///
+    /// Expects: `(args)` where the identifier has already been parsed.
+    fn parse_function_call_continuation(
+        &mut self,
+        expr: Expression,
+    ) -> Result<Expression, ParseError> {
+        let Expression::Identifier { name, position } = expr else {
+            // This should not happen if is_function_call_start was checked first
+            return Err(ParseError::ExpectedIdentifier(self.peek().position));
+        };
+
+        self.advance(); // consume LeftParen
+        let arguments = self.parse_arguments()?;
+        self.expect(&TokenKind::RightParen, ")")?;
+
+        Ok(Expression::Call {
+            function: name,
+            arguments,
+            position,
+        })
     }
 
     /// Parse function arguments.
@@ -886,5 +951,94 @@ mod tests {
             &program.statements[0],
             Statement::Return { value: None, .. }
         ));
+    }
+
+    #[test]
+    fn test_method_call() {
+        let program = parse(r#""hello".len();"#).unwrap();
+        if let Statement::Expression { expression, .. } = &program.statements[0] {
+            assert!(matches!(
+                expression,
+                Expression::MethodCall { method, .. } if method == "len"
+            ));
+        } else {
+            panic!("Expected expression statement with method call");
+        }
+    }
+
+    #[test]
+    fn test_method_call_with_args() {
+        let program = parse(r#"arr.push(1);"#).unwrap();
+        if let Statement::Expression { expression, .. } = &program.statements[0] {
+            if let Expression::MethodCall {
+                method, arguments, ..
+            } = expression
+            {
+                assert_eq!(method, "push");
+                assert_eq!(arguments.len(), 1);
+            } else {
+                panic!("Expected method call");
+            }
+        } else {
+            panic!("Expected expression statement");
+        }
+    }
+
+    #[test]
+    fn test_chained_method_calls() {
+        let program = parse(r#"arr.push(1).len();"#).unwrap();
+        if let Statement::Expression { expression, .. } = &program.statements[0] {
+            // The outer call should be .len()
+            if let Expression::MethodCall {
+                method, receiver, ..
+            } = expression
+            {
+                assert_eq!(method, "len");
+                // The receiver should be .push(1)
+                assert!(matches!(
+                    receiver.as_ref(),
+                    Expression::MethodCall { method, .. } if method == "push"
+                ));
+            } else {
+                panic!("Expected method call");
+            }
+        } else {
+            panic!("Expected expression statement");
+        }
+    }
+
+    #[test]
+    fn test_method_call_on_literal() {
+        let program = parse(r#"[1, 2, 3].len();"#).unwrap();
+        if let Statement::Expression { expression, .. } = &program.statements[0] {
+            if let Expression::MethodCall {
+                method, receiver, ..
+            } = expression
+            {
+                assert_eq!(method, "len");
+                assert!(matches!(receiver.as_ref(), Expression::ArrayLiteral { .. }));
+            } else {
+                panic!("Expected method call");
+            }
+        } else {
+            panic!("Expected expression statement");
+        }
+    }
+
+    #[test]
+    fn test_method_call_invalid_method_name_error() {
+        // Test that invalid method name gives helpful error message
+        let result = parse(r#""hello".123();"#);
+        assert!(matches!(
+            result,
+            Err(ParseError::UnexpectedToken(_, _, expected)) if expected == "method name"
+        ));
+    }
+
+    #[test]
+    fn test_method_call_missing_parens_error() {
+        // Test that missing parentheses gives error
+        let result = parse(r#""hello".len;"#);
+        assert!(matches!(result, Err(ParseError::UnexpectedToken(_, _, _))));
     }
 }

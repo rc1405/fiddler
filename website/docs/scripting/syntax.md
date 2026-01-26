@@ -83,10 +83,15 @@ let empty = [];
 // Or using array() function
 let arr2 = array(1, 2, 3);
 
-// Array operations
-let first = get(arr, 0);            // Get element at index
-let arr3 = push(arr, 4);            // Add element (returns new array)
-let size = len(arr);                // Get length
+// Array operations (function or method syntax)
+let first = arr.get(0);             // Get element at index
+let arr3 = arr.push(4);             // Add element (returns new array)
+let size = arr.len();               // Get length
+
+// Equivalent function syntax
+let first = get(arr, 0);
+let arr3 = push(arr, 4);
+let size = len(arr);
 ```
 
 ### Dictionaries
@@ -101,11 +106,15 @@ let empty = {};
 
 // Or using dict() and set() functions
 let d = dict();
-let d2 = set(d, "name", "Alice");
+let d2 = d.set("name", "Alice");
 
-// Dictionary operations
-let name = get(person, "name");     // Get value by key
-let k = keys(person);               // Get array of keys (in insertion order)
+// Dictionary operations (method syntax)
+let name = person.get("name");      // Get value by key
+let k = person.keys();              // Get array of keys (in insertion order)
+
+// Equivalent function syntax
+let name = get(person, "name");
+let k = keys(person);
 ```
 
 **Note:** Dictionary keys are always strings. When iterating with `keys()`, the order matches the order in which keys were inserted.
@@ -272,6 +281,48 @@ fn add(a, b) {
 let result = add(5, 3);  // 8
 print(result);
 ```
+
+### Method Call Syntax
+
+FiddlerScript supports method call syntax for built-in functions. Instead of passing a value as the first argument, you can call the function as a method on that value:
+
+```fiddlerscript
+// Function syntax (traditional)
+let length = len("hello");
+let lower = lowercase("HELLO");
+
+// Method syntax (equivalent)
+let length = "hello".len();
+let lower = "HELLO".lowercase();
+```
+
+Both syntaxes are equivalent and can be used interchangeably. Method syntax is particularly useful for chaining operations:
+
+```fiddlerscript
+// Method chaining
+let result = "  HELLO WORLD  "
+    .trim()
+    .lowercase()
+    .split(" ");
+// result is ["hello", "world"]
+
+// Array method chaining
+let arr = [1, 2, 3]
+    .push(4)
+    .push(5);
+// arr is [1, 2, 3, 4, 5]
+
+let length = arr.len();  // 5
+```
+
+**Available methods:**
+
+| Type | Methods |
+|------|---------|
+| String | `len()`, `lowercase()`, `uppercase()`, `capitalize()`, `trim()`, `trim_prefix(s)`, `trim_suffix(s)`, `has_prefix(s)`, `has_suffix(s)`, `split(delim)`, `reverse()`, `lines()` |
+| Array | `len()`, `get(index)`, `set(index, value)`, `push(value)`, `delete(index)`, `reverse()` |
+| Dictionary | `len()`, `get(key)`, `set(key, value)`, `delete(key)`, `keys()` |
+| Bytes | `len()`, `bytes_to_string()` |
 
 ### Return Statement
 
