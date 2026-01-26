@@ -98,8 +98,40 @@ Each element in the array becomes a separate message in the pipeline.
 | `push(array, value)` | Add value to array (returns new array) |
 | `get(collection, key)` | Get value by index/key |
 | `set(collection, key, value)` | Set value (returns new collection) |
+| `delete(collection, key)` | Remove element by index/key |
 | `keys(dict)` | Get array of dictionary keys |
 | `len(value)` | Get length of string/bytes/array/dict |
+
+### String Operations
+| Function | Description |
+|----------|-------------|
+| `capitalize(str)` | Capitalize first character |
+| `lowercase(str)` | Convert to lowercase |
+| `uppercase(str)` | Convert to uppercase |
+| `trim(str)` | Remove leading/trailing whitespace |
+| `trim_prefix(str, prefix)` | Remove prefix if present |
+| `trim_suffix(str, suffix)` | Remove suffix if present |
+| `has_prefix(str, prefix)` | Check if starts with prefix |
+| `has_suffix(str, suffix)` | Check if ends with suffix |
+| `split(str, delim)` | Split by delimiter into array |
+| `reverse(str)` | Reverse string |
+| `lines(value)` | Split string/bytes into lines |
+
+### Compression
+| Function | Description |
+|----------|-------------|
+| `gzip_compress(data)` | Compress with gzip |
+| `gzip_decompress(data)` | Decompress gzip data |
+| `zlib_compress(data)` | Compress with zlib |
+| `zlib_decompress(data)` | Decompress zlib data |
+| `deflate_compress(data)` | Compress with deflate |
+| `deflate_decompress(data)` | Decompress deflate data |
+
+### Encoding
+| Function | Description |
+|----------|-------------|
+| `base64_encode(data)` | Encode as base64 string |
+| `base64_decode(data)` | Decode from base64 to bytes |
 
 ### JSON
 | Function | Description |
@@ -207,6 +239,84 @@ processors:
         }
 ```
 
+### Decompress and Process
+```yml
+processors:
+  - fiddlerscript:
+      code: |
+        // Decompress gzip data
+        let decompressed = gzip_decompress(this);
+        let text = bytes_to_string(decompressed);
+
+        // Process and recompress
+        let processed = uppercase(text);
+        this = gzip_compress(processed);
+```
+
+### Base64 Decode and Parse
+```yml
+processors:
+  - fiddlerscript:
+      code: |
+        // Decode base64 payload
+        let decoded = base64_decode(this);
+        let json = parse_json(decoded);
+        let message = get(json, "message");
+        this = bytes(message);
+```
+
+### Split Lines into Messages
+```yml
+processors:
+  - fiddlerscript:
+      code: |
+        // Split multi-line input into separate messages
+        let all_lines = lines(this);
+        let messages = array();
+        for (let i = 0; i < len(all_lines); i = i + 1) {
+            let line = get(all_lines, i);
+            let trimmed = trim(line);
+            if (len(trimmed) > 0) {
+                messages = push(messages, bytes(trimmed));
+            }
+        }
+        this = messages;
+```
+
+### String Manipulation
+```yml
+processors:
+  - fiddlerscript:
+      code: |
+        let text = bytes_to_string(this);
+
+        // Remove prefix and normalize
+        if (has_prefix(text, "LOG:")) {
+            text = trim_prefix(text, "LOG:");
+            text = trim(text);
+            text = uppercase(text);
+        }
+
+        this = bytes(text);
+```
+
+### CSV Line Parsing
+```yml
+processors:
+  - fiddlerscript:
+      code: |
+        let text = bytes_to_string(this);
+        let fields = split(text, ",");
+
+        // Create JSON from CSV fields
+        let json = "{";
+        json = json + "\"name\": \"" + trim(get(fields, 0)) + "\", ";
+        json = json + "\"value\": \"" + trim(get(fields, 1)) + "\"";
+        json = json + "}";
+
+        this = bytes(json);
+```
+
 ## Language Reference
 
 For complete FiddlerScript language documentation, see:
@@ -224,15 +334,21 @@ For complete FiddlerScript language documentation, see:
 | Syntax | C-style | Python |
 | External libraries | No | Yes |
 | Variable name | `this` | `root` |
+| Compression | gzip, zlib, deflate | Any library |
+| Encoding | Base64 | Any encoding |
+| String methods | Built-in | Full Python |
 
 Use FiddlerScript for:
-- Simple transformations
+- Simple to moderate transformations
 - JSON parsing and extraction
 - Message splitting
+- Compression/decompression (gzip, zlib, deflate)
+- Base64 encoding/decoding
+- String manipulation (trim, split, case conversion)
 - When you want no external dependencies
 
 Use Python for:
 - Complex data processing
 - When you need external libraries
-- Advanced string manipulation
 - Regular expressions
+- Advanced numeric operations

@@ -44,7 +44,9 @@ impl Parser {
     /// Get the current token without consuming it.
     fn peek(&self) -> &Token {
         self.tokens.get(self.current).unwrap_or_else(|| {
-            self.tokens.last().expect("Token stream should have at least EOF")
+            self.tokens
+                .last()
+                .expect("Token stream should have at least EOF")
         })
     }
 
@@ -634,7 +636,13 @@ mod tests {
         let program = parse("1 + 2 * 3;").unwrap();
         // Should parse as 1 + (2 * 3) due to precedence
         if let Statement::Expression { expression, .. } = &program.statements[0] {
-            assert!(matches!(expression, Expression::Binary { operator: BinaryOp::Add, .. }));
+            assert!(matches!(
+                expression,
+                Expression::Binary {
+                    operator: BinaryOp::Add,
+                    ..
+                }
+            ));
         } else {
             panic!("Expected expression statement");
         }
@@ -687,7 +695,13 @@ mod tests {
     fn test_unary_expression() {
         let program = parse("-42;").unwrap();
         if let Statement::Expression { expression, .. } = &program.statements[0] {
-            assert!(matches!(expression, Expression::Unary { operator: UnaryOp::Negate, .. }));
+            assert!(matches!(
+                expression,
+                Expression::Unary {
+                    operator: UnaryOp::Negate,
+                    ..
+                }
+            ));
         } else {
             panic!("Expected expression statement");
         }
@@ -697,7 +711,12 @@ mod tests {
     fn test_grouped_expression() {
         let program = parse("(1 + 2) * 3;").unwrap();
         if let Statement::Expression { expression, .. } = &program.statements[0] {
-            if let Expression::Binary { left, operator: BinaryOp::Multiply, .. } = expression {
+            if let Expression::Binary {
+                left,
+                operator: BinaryOp::Multiply,
+                ..
+            } = expression
+            {
                 assert!(matches!(left.as_ref(), Expression::Grouped { .. }));
             } else {
                 panic!("Expected multiply expression");

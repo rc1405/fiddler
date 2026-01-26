@@ -102,28 +102,16 @@ impl Block {
 #[derive(Debug, Clone, PartialEq)]
 pub enum Expression {
     /// Integer literal: `42`
-    Integer {
-        value: i64,
-        position: Position,
-    },
+    Integer { value: i64, position: Position },
 
     /// String literal: `"hello"`
-    String {
-        value: String,
-        position: Position,
-    },
+    String { value: String, position: Position },
 
     /// Boolean literal: `true` or `false`
-    Boolean {
-        value: bool,
-        position: Position,
-    },
+    Boolean { value: bool, position: Position },
 
     /// Variable reference: `x`
-    Identifier {
-        name: String,
-        position: Position,
-    },
+    Identifier { name: String, position: Position },
 
     /// Binary operation: `a + b`
     Binary {
@@ -267,7 +255,10 @@ mod tests {
     #[test]
     fn test_expression_position() {
         let pos = Position::new(1, 1, 0);
-        let expr = Expression::Integer { value: 42, position: pos };
+        let expr = Expression::Integer {
+            value: 42,
+            position: pos,
+        };
         assert_eq!(expr.position(), pos);
     }
 }

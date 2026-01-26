@@ -30,9 +30,7 @@ pub struct FiddlerScriptProcessor {
 
 impl FiddlerScriptProcessor {
     /// Convert metadata from serde_yaml::Value to fiddler_script::Value
-    fn convert_metadata(
-        metadata: &HashMap<String, serde_yaml::Value>,
-    ) -> HashMap<String, Value> {
+    fn convert_metadata(metadata: &HashMap<String, serde_yaml::Value>) -> HashMap<String, Value> {
         metadata
             .iter()
             .map(|(k, v)| (k.clone(), Self::yaml_to_script_value(v)))
@@ -61,7 +59,8 @@ impl FiddlerScriptProcessor {
                 let dict: HashMap<String, Value> = map
                     .iter()
                     .filter_map(|(k, v)| {
-                        k.as_str().map(|key| (key.to_string(), Self::yaml_to_script_value(v)))
+                        k.as_str()
+                            .map(|key| (key.to_string(), Self::yaml_to_script_value(v)))
                     })
                     .collect();
                 Value::Dictionary(dict)
@@ -112,7 +111,10 @@ impl FiddlerScriptProcessor {
     }
 
     /// Create a message from a Value and original metadata
-    fn create_message(value: &Value, original_metadata: &HashMap<String, serde_yaml::Value>) -> Message {
+    fn create_message(
+        value: &Value,
+        original_metadata: &HashMap<String, serde_yaml::Value>,
+    ) -> Message {
         Message {
             bytes: Self::value_to_bytes(value),
             metadata: original_metadata.clone(),
@@ -140,9 +142,9 @@ impl Processor for FiddlerScriptProcessor {
             .map_err(|e| Error::ProcessingError(format!("FiddlerScript error: {}", e)))?;
 
         // Get the result from 'this'
-        let result = interpreter
-            .get_value("this")
-            .ok_or_else(|| Error::ProcessingError("'this' variable not found after script execution".to_string()))?;
+        let result = interpreter.get_value("this").ok_or_else(|| {
+            Error::ProcessingError("'this' variable not found after script execution".to_string())
+        })?;
 
         // Check if result is an array (multiple messages) or single value
         match &result {

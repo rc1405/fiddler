@@ -24,8 +24,12 @@ path = "src/bin.rs"
 [dependencies]
 async-trait = "0.1.79"
 clap = { version = "4.5.3", features = ["derive"] }
-fiddler = { version = "2.2.0", path = "../fiddler", features = ["all"] }
-fiddler-macros = { version = "1.0.0", path = "../fiddler-macros"}
+fiddler = { version = "2.2.0", path = "../fiddler", features = [
+    "elasticsearch",
+    "aws",
+    "prometheus",
+] }
+fiddler-macros = { version = "1.0.0", path = "../fiddler-macros" }
 futures = "0.3.30"
 inline_colorization = "0.1.6"
 prettytable-rs = "0.10.0"

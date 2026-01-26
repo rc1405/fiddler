@@ -522,8 +522,12 @@ impl Interpreter {
             },
 
             // Logical
-            BinaryOp::And => Ok(Value::Boolean(self.is_truthy(&left) && self.is_truthy(&right))),
-            BinaryOp::Or => Ok(Value::Boolean(self.is_truthy(&left) || self.is_truthy(&right))),
+            BinaryOp::And => Ok(Value::Boolean(
+                self.is_truthy(&left) && self.is_truthy(&right),
+            )),
+            BinaryOp::Or => Ok(Value::Boolean(
+                self.is_truthy(&left) || self.is_truthy(&right),
+            )),
         }
     }
 
@@ -575,7 +579,10 @@ impl Interpreter {
         // Check for user-defined function
         if let Some(func) = self.functions.get(name).cloned() {
             if args.len() != func.params.len() {
-                return Err(RuntimeError::WrongArgumentCount(func.params.len(), args.len()));
+                return Err(RuntimeError::WrongArgumentCount(
+                    func.params.len(),
+                    args.len(),
+                ));
             }
 
             // Create new scope for function

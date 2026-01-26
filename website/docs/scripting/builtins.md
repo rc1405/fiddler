@@ -272,7 +272,253 @@ let check = is_dict(d);     // true
 let check2 = is_dict(42);   // false
 ```
 
+### `delete(collection, key)`
+
+Remove an element from a dictionary or array.
+
+**Arguments:**
+- For dictionaries: dictionary, string key
+- For arrays: array, integer index
+
+**Returns:** A new collection with the element removed
+
+```fiddlerscript
+let d = set(dict(), "name", "Alice");
+let d2 = delete(d, "name");  // Empty dictionary
+
+let arr = array(1, 2, 3);
+let arr2 = delete(arr, 1);   // array(1, 3)
+```
+
+## String Operations
+
+### `capitalize(string)`
+
+Capitalize the first character of a string.
+
+**Arguments:** String
+**Returns:** String with first character uppercased
+
+```fiddlerscript
+let s = capitalize("hello");  // "Hello"
+let s2 = capitalize("HELLO"); // "HELLO"
+```
+
+### `lowercase(string)`
+
+Convert a string to lowercase.
+
+**Arguments:** String
+**Returns:** Lowercase string
+
+```fiddlerscript
+let s = lowercase("Hello World");  // "hello world"
+```
+
+### `uppercase(string)`
+
+Convert a string to uppercase.
+
+**Arguments:** String
+**Returns:** Uppercase string
+
+```fiddlerscript
+let s = uppercase("Hello World");  // "HELLO WORLD"
+```
+
+### `trim(string)`
+
+Remove leading and trailing whitespace from a string.
+
+**Arguments:** String
+**Returns:** Trimmed string
+
+```fiddlerscript
+let s = trim("  hello  ");  // "hello"
+```
+
+### `trim_prefix(string, prefix)`
+
+Remove a prefix from a string if present.
+
+**Arguments:** String, prefix string
+**Returns:** String with prefix removed (or original if no match)
+
+```fiddlerscript
+let s = trim_prefix("hello world", "hello ");  // "world"
+let s2 = trim_prefix("hello", "bye");          // "hello"
+```
+
+### `trim_suffix(string, suffix)`
+
+Remove a suffix from a string if present.
+
+**Arguments:** String, suffix string
+**Returns:** String with suffix removed (or original if no match)
+
+```fiddlerscript
+let s = trim_suffix("hello.txt", ".txt");  // "hello"
+let s2 = trim_suffix("hello", ".txt");     // "hello"
+```
+
+### `has_prefix(string, prefix)`
+
+Check if a string starts with a prefix.
+
+**Arguments:** String, prefix string
+**Returns:** Boolean
+
+```fiddlerscript
+let check = has_prefix("hello world", "hello");  // true
+let check2 = has_prefix("hello", "bye");         // false
+```
+
+### `has_suffix(string, suffix)`
+
+Check if a string ends with a suffix.
+
+**Arguments:** String, suffix string
+**Returns:** Boolean
+
+```fiddlerscript
+let check = has_suffix("hello.txt", ".txt");  // true
+let check2 = has_suffix("hello", ".txt");     // false
+```
+
+### `split(string, delimiter)`
+
+Split a string by a delimiter.
+
+**Arguments:** String, delimiter string
+**Returns:** Array of strings
+
+```fiddlerscript
+let parts = split("a,b,c", ",");  // array("a", "b", "c")
+let words = split("hello world", " ");  // array("hello", "world")
+```
+
+### `reverse(string)`
+
+Reverse a string.
+
+**Arguments:** String
+**Returns:** Reversed string
+
+```fiddlerscript
+let s = reverse("hello");  // "olleh"
+```
+
+### `lines(value)`
+
+Split a string or bytes into lines.
+
+**Arguments:** String or bytes
+**Returns:** Array of strings (one per line)
+
+```fiddlerscript
+let text = "line1\nline2\nline3";
+let arr = lines(text);  // array("line1", "line2", "line3")
+```
+
+Handles both Unix (`\n`) and Windows (`\r\n`) line endings.
+
+## Compression
+
+### `gzip_compress(data)`
+
+Compress data using gzip.
+
+**Arguments:** String or bytes
+**Returns:** Compressed bytes
+
+```fiddlerscript
+let compressed = gzip_compress("hello world");
+```
+
+### `gzip_decompress(data)`
+
+Decompress gzip-compressed data.
+
+**Arguments:** Bytes
+**Returns:** Decompressed bytes
+
+```fiddlerscript
+let original = gzip_decompress(compressed);
+let text = bytes_to_string(original);
+```
+
+### `zlib_compress(data)`
+
+Compress data using zlib.
+
+**Arguments:** String or bytes
+**Returns:** Compressed bytes
+
+```fiddlerscript
+let compressed = zlib_compress("hello world");
+```
+
+### `zlib_decompress(data)`
+
+Decompress zlib-compressed data.
+
+**Arguments:** Bytes
+**Returns:** Decompressed bytes
+
+```fiddlerscript
+let original = zlib_decompress(compressed);
+```
+
+### `deflate_compress(data)`
+
+Compress data using raw deflate.
+
+**Arguments:** String or bytes
+**Returns:** Compressed bytes
+
+```fiddlerscript
+let compressed = deflate_compress("hello world");
+```
+
+### `deflate_decompress(data)`
+
+Decompress raw deflate-compressed data.
+
+**Arguments:** Bytes
+**Returns:** Decompressed bytes
+
+```fiddlerscript
+let original = deflate_decompress(compressed);
+```
+
+## Encoding
+
+### `base64_encode(data)`
+
+Encode data as base64.
+
+**Arguments:** String or bytes
+**Returns:** Base64-encoded string
+
+```fiddlerscript
+let encoded = base64_encode("hello");  // "aGVsbG8="
+```
+
+### `base64_decode(data)`
+
+Decode base64-encoded data.
+
+**Arguments:** String or bytes
+**Returns:** Decoded bytes
+
+```fiddlerscript
+let decoded = base64_decode("aGVsbG8=");
+let text = bytes_to_string(decoded);  // "hello"
+```
+
 ## Summary Table
+
+### Core Functions
 
 | Function | Arguments | Returns | Description |
 |----------|-----------|---------|-------------|
@@ -284,11 +530,51 @@ let check2 = is_dict(42);   // false
 | `bytes_to_string(value)` | Bytes or string | String | Convert bytes to string |
 | `getenv(name)` | String | String or null | Get environment variable |
 | `parse_json(data)` | Bytes or string | Any | Parse JSON data |
+
+### Collections
+
+| Function | Arguments | Returns | Description |
+|----------|-----------|---------|-------------|
 | `array(args...)` | Any values | Array | Create array |
 | `push(arr, val)` | Array, any | Array | Append to array |
 | `get(coll, key)` | Collection, key | Any | Get by index/key |
 | `set(coll, key, val)` | Collection, key, any | Collection | Set by index/key |
+| `delete(coll, key)` | Collection, key | Collection | Remove by index/key |
 | `dict()` | None | Dictionary | Create empty dict |
 | `keys(dict)` | Dictionary | Array | Get dictionary keys |
 | `is_array(val)` | Any | Boolean | Check if array |
 | `is_dict(val)` | Any | Boolean | Check if dictionary |
+
+### String Operations
+
+| Function | Arguments | Returns | Description |
+|----------|-----------|---------|-------------|
+| `capitalize(str)` | String | String | Capitalize first character |
+| `lowercase(str)` | String | String | Convert to lowercase |
+| `uppercase(str)` | String | String | Convert to uppercase |
+| `trim(str)` | String | String | Remove leading/trailing whitespace |
+| `trim_prefix(str, prefix)` | String, String | String | Remove prefix if present |
+| `trim_suffix(str, suffix)` | String, String | String | Remove suffix if present |
+| `has_prefix(str, prefix)` | String, String | Boolean | Check if starts with prefix |
+| `has_suffix(str, suffix)` | String, String | Boolean | Check if ends with suffix |
+| `split(str, delim)` | String, String | Array | Split by delimiter |
+| `reverse(str)` | String | String | Reverse string |
+| `lines(value)` | String or bytes | Array | Split into lines |
+
+### Compression
+
+| Function | Arguments | Returns | Description |
+|----------|-----------|---------|-------------|
+| `gzip_compress(data)` | String or bytes | Bytes | Gzip compress |
+| `gzip_decompress(data)` | Bytes | Bytes | Gzip decompress |
+| `zlib_compress(data)` | String or bytes | Bytes | Zlib compress |
+| `zlib_decompress(data)` | Bytes | Bytes | Zlib decompress |
+| `deflate_compress(data)` | String or bytes | Bytes | Deflate compress |
+| `deflate_decompress(data)` | Bytes | Bytes | Deflate decompress |
+
+### Encoding
+
+| Function | Arguments | Returns | Description |
+|----------|-----------|---------|-------------|
+| `base64_encode(data)` | String or bytes | String | Encode as base64 |
+| `base64_decode(data)` | String or bytes | Bytes | Decode from base64 |
