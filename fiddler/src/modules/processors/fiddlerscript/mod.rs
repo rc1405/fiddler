@@ -47,7 +47,7 @@ impl FiddlerScriptProcessor {
                 if let Some(i) = n.as_i64() {
                     Value::Integer(i)
                 } else if let Some(f) = n.as_f64() {
-                    Value::Integer(f as i64)
+                    Value::Float(f)
                 } else {
                     Value::Null
                 }
@@ -77,6 +77,7 @@ impl FiddlerScriptProcessor {
             Value::Null => serde_yaml::Value::Null,
             Value::Boolean(b) => serde_yaml::Value::Bool(*b),
             Value::Integer(n) => serde_yaml::Value::Number((*n).into()),
+            Value::Float(f) => serde_yaml::Value::Number(serde_yaml::Number::from(*f)),
             Value::String(s) => serde_yaml::Value::String(s.clone()),
             Value::Bytes(b) => {
                 // Convert bytes to string if valid UTF-8, otherwise base64
@@ -339,5 +340,81 @@ mod test {
 
         let result = processor.process(message).await.unwrap();
         assert_eq!(result.len(), 3);
+    }
+
+    #[tokio::test]
+    async fn test_float_metadata() {
+        let processor = FiddlerScriptProcessor {
+            code: r#"
+                let price = get(metadata, "price");
+                let tax = price * 0.1;
+                this = bytes(str(tax));
+            "#
+            .to_string(),
+        };
+
+        let mut metadata = HashMap::new();
+        metadata.insert(
+            "price".to_string(),
+            serde_yaml::Value::Number(serde_yaml::Number::from(99.99)),
+        );
+
+        let message = Message {
+            bytes: b"original".to_vec(),
+            metadata,
+            ..Default::default()
+        };
+
+        let result = processor.process(message).await.unwrap();
+        assert_eq!(result.len(), 1);
+        // 99.99 * 0.1 = 9.999
+        let result_str = String::from_utf8(result[0].bytes.clone()).unwrap();
+        assert!(result_str.starts_with("9.999"));
+    }
+
+    #[tokio::test]
+    async fn test_float_arithmetic() {
+        let processor = FiddlerScriptProcessor {
+            code: r#"
+                let a = 3.14;
+                let b = 2.0;
+                let result = a * b;
+                this = bytes(str(result));
+            "#
+            .to_string(),
+        };
+
+        let message = Message {
+            bytes: b"original".to_vec(),
+            ..Default::default()
+        };
+
+        let result = processor.process(message).await.unwrap();
+        assert_eq!(result.len(), 1);
+        let result_str = String::from_utf8(result[0].bytes.clone()).unwrap();
+        assert!(result_str.starts_with("6.28"));
+    }
+
+    #[tokio::test]
+    async fn test_float_math_functions() {
+        let processor = FiddlerScriptProcessor {
+            code: r#"
+                let x = 3.7;
+                let c = ceil(x);
+                let f = floor(x);
+                let r = round(x);
+                this = bytes(str(c) + "," + str(f) + "," + str(r));
+            "#
+            .to_string(),
+        };
+
+        let message = Message {
+            bytes: b"original".to_vec(),
+            ..Default::default()
+        };
+
+        let result = processor.process(message).await.unwrap();
+        assert_eq!(result.len(), 1);
+        assert_eq!(result[0].bytes, b"4,3,4");
     }
 }

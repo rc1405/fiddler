@@ -435,6 +435,7 @@ impl Interpreter {
     fn evaluate_expression(&mut self, expr: &Expression) -> Result<Value, RuntimeError> {
         match expr {
             Expression::Integer { value, .. } => Ok(Value::Integer(*value)),
+            Expression::Float { value, .. } => Ok(Value::Float(*value)),
             Expression::String { value, .. } => Ok(Value::String(value.clone())),
             Expression::Boolean { value, .. } => Ok(Value::Boolean(*value)),
 
@@ -513,9 +514,12 @@ impl Interpreter {
         right: Value,
     ) -> Result<Value, RuntimeError> {
         match op {
-            // Arithmetic (integers only, except + for strings)
+            // Arithmetic operations with float support
             BinaryOp::Add => match (&left, &right) {
                 (Value::Integer(a), Value::Integer(b)) => Ok(Value::Integer(a + b)),
+                (Value::Float(a), Value::Float(b)) => Ok(Value::Float(a + b)),
+                (Value::Integer(a), Value::Float(b)) => Ok(Value::Float(*a as f64 + b)),
+                (Value::Float(a), Value::Integer(b)) => Ok(Value::Float(a + *b as f64)),
                 (Value::String(a), Value::String(b)) => Ok(Value::String(format!("{}{}", a, b))),
                 _ => Err(RuntimeError::type_mismatch(format!(
                     "Cannot add {:?} and {:?}",
@@ -524,14 +528,20 @@ impl Interpreter {
             },
             BinaryOp::Subtract => match (&left, &right) {
                 (Value::Integer(a), Value::Integer(b)) => Ok(Value::Integer(a - b)),
+                (Value::Float(a), Value::Float(b)) => Ok(Value::Float(a - b)),
+                (Value::Integer(a), Value::Float(b)) => Ok(Value::Float(*a as f64 - b)),
+                (Value::Float(a), Value::Integer(b)) => Ok(Value::Float(a - *b as f64)),
                 _ => Err(RuntimeError::type_mismatch(
-                    "Subtraction requires integers".to_string(),
+                    "Subtraction requires numeric types".to_string(),
                 )),
             },
             BinaryOp::Multiply => match (&left, &right) {
                 (Value::Integer(a), Value::Integer(b)) => Ok(Value::Integer(a * b)),
+                (Value::Float(a), Value::Float(b)) => Ok(Value::Float(a * b)),
+                (Value::Integer(a), Value::Float(b)) => Ok(Value::Float(*a as f64 * b)),
+                (Value::Float(a), Value::Integer(b)) => Ok(Value::Float(a * *b as f64)),
                 _ => Err(RuntimeError::type_mismatch(
-                    "Multiplication requires integers".to_string(),
+                    "Multiplication requires numeric types".to_string(),
                 )),
             },
             BinaryOp::Divide => match (&left, &right) {
@@ -539,8 +549,11 @@ impl Interpreter {
                     Err(RuntimeError::DivisionByZero { position: None })
                 }
                 (Value::Integer(a), Value::Integer(b)) => Ok(Value::Integer(a / b)),
+                (Value::Float(a), Value::Float(b)) => Ok(Value::Float(a / b)), // IEEE 754: /0 = Inf
+                (Value::Integer(a), Value::Float(b)) => Ok(Value::Float(*a as f64 / b)),
+                (Value::Float(a), Value::Integer(b)) => Ok(Value::Float(a / *b as f64)),
                 _ => Err(RuntimeError::type_mismatch(
-                    "Division requires integers".to_string(),
+                    "Division requires numeric types".to_string(),
                 )),
             },
             BinaryOp::Modulo => match (&left, &right) {
@@ -548,8 +561,11 @@ impl Interpreter {
                     Err(RuntimeError::DivisionByZero { position: None })
                 }
                 (Value::Integer(a), Value::Integer(b)) => Ok(Value::Integer(a % b)),
+                (Value::Float(a), Value::Float(b)) => Ok(Value::Float(a % b)),
+                (Value::Integer(a), Value::Float(b)) => Ok(Value::Float(*a as f64 % b)),
+                (Value::Float(a), Value::Integer(b)) => Ok(Value::Float(a % *b as f64)),
                 _ => Err(RuntimeError::type_mismatch(
-                    "Modulo requires integers".to_string(),
+                    "Modulo requires numeric types".to_string(),
                 )),
             },
 
@@ -586,6 +602,34 @@ impl Interpreter {
                 BinaryOp::GreaterEqual => a >= b,
                 _ => unreachable!(),
             },
+            (Value::Float(a), Value::Float(b)) => match op {
+                BinaryOp::LessThan => a < b,
+                BinaryOp::LessEqual => a <= b,
+                BinaryOp::GreaterThan => a > b,
+                BinaryOp::GreaterEqual => a >= b,
+                _ => unreachable!(),
+            },
+            // Mixed numeric comparisons (promote integer to float)
+            (Value::Integer(a), Value::Float(b)) => {
+                let a_float = *a as f64;
+                match op {
+                    BinaryOp::LessThan => a_float < *b,
+                    BinaryOp::LessEqual => a_float <= *b,
+                    BinaryOp::GreaterThan => a_float > *b,
+                    BinaryOp::GreaterEqual => a_float >= *b,
+                    _ => unreachable!(),
+                }
+            }
+            (Value::Float(a), Value::Integer(b)) => {
+                let b_float = *b as f64;
+                match op {
+                    BinaryOp::LessThan => *a < b_float,
+                    BinaryOp::LessEqual => *a <= b_float,
+                    BinaryOp::GreaterThan => *a > b_float,
+                    BinaryOp::GreaterEqual => *a >= b_float,
+                    _ => unreachable!(),
+                }
+            }
             (Value::String(a), Value::String(b)) => match op {
                 BinaryOp::LessThan => a < b,
                 BinaryOp::LessEqual => a <= b,
@@ -595,7 +639,7 @@ impl Interpreter {
             },
             _ => {
                 return Err(RuntimeError::type_mismatch(
-                    "Comparison requires matching types".to_string(),
+                    "Comparison requires matching or numeric types".to_string(),
                 ))
             }
         };
@@ -607,8 +651,9 @@ impl Interpreter {
             UnaryOp::Not => Ok(Value::Boolean(!self.is_truthy(&operand))),
             UnaryOp::Negate => match operand {
                 Value::Integer(n) => Ok(Value::Integer(-n)),
+                Value::Float(f) => Ok(Value::Float(-f)),
                 _ => Err(RuntimeError::type_mismatch(
-                    "Negation requires integer".to_string(),
+                    "Negation requires numeric type".to_string(),
                 )),
             },
         }
@@ -618,6 +663,7 @@ impl Interpreter {
         match value {
             Value::Boolean(b) => *b,
             Value::Integer(n) => *n != 0,
+            Value::Float(f) => *f != 0.0 && !f.is_nan(),
             Value::String(s) => !s.is_empty(),
             Value::Bytes(b) => !b.is_empty(),
             Value::Array(a) => !a.is_empty(),
@@ -1487,5 +1533,322 @@ mod tests {
         // Mix method and function syntax in same expression
         let result = run(r#"len("hello".uppercase());"#).unwrap();
         assert_eq!(result, Value::Integer(5));
+    }
+
+    // === Contains tests ===
+
+    #[test]
+    fn test_array_contains_found() {
+        let result = run(r#"[1, 2, 3].contains(2);"#).unwrap();
+        assert_eq!(result, Value::Boolean(true));
+    }
+
+    #[test]
+    fn test_array_contains_not_found() {
+        let result = run(r#"[1, 2, 3].contains(5);"#).unwrap();
+        assert_eq!(result, Value::Boolean(false));
+    }
+
+    #[test]
+    fn test_array_contains_string() {
+        let result = run(r#"["apple", "banana"].contains("banana");"#).unwrap();
+        assert_eq!(result, Value::Boolean(true));
+    }
+
+    #[test]
+    fn test_dict_contains_key() {
+        let result = run(r#"{"name": "Alice", "age": 30}.contains("name");"#).unwrap();
+        assert_eq!(result, Value::Boolean(true));
+    }
+
+    #[test]
+    fn test_dict_contains_key_not_found() {
+        let result = run(r#"{"name": "Alice"}.contains("email");"#).unwrap();
+        assert_eq!(result, Value::Boolean(false));
+    }
+
+    #[test]
+    fn test_contains_function_syntax() {
+        let result = run(r#"contains([1, 2, 3], 2);"#).unwrap();
+        assert_eq!(result, Value::Boolean(true));
+    }
+
+    // === Math function tests ===
+
+    #[test]
+    fn test_abs_positive() {
+        let result = run("abs(42);").unwrap();
+        assert_eq!(result, Value::Integer(42));
+    }
+
+    #[test]
+    fn test_abs_negative() {
+        let result = run("abs(-42);").unwrap();
+        assert_eq!(result, Value::Integer(42));
+    }
+
+    #[test]
+    fn test_abs_method_syntax() {
+        let result = run("let x = -10; x.abs();").unwrap();
+        assert_eq!(result, Value::Integer(10));
+    }
+
+    #[test]
+    fn test_ceil_identity() {
+        let result = run("ceil(42);").unwrap();
+        assert_eq!(result, Value::Integer(42));
+    }
+
+    #[test]
+    fn test_floor_identity() {
+        let result = run("floor(42);").unwrap();
+        assert_eq!(result, Value::Integer(42));
+    }
+
+    #[test]
+    fn test_round_identity() {
+        let result = run("round(42);").unwrap();
+        assert_eq!(result, Value::Integer(42));
+    }
+
+    #[test]
+    fn test_math_method_syntax() {
+        let result = run("42.ceil();").unwrap();
+        assert_eq!(result, Value::Integer(42));
+    }
+
+    // === Timestamp function tests ===
+
+    #[test]
+    fn test_timestamp() {
+        let result = run("timestamp();").unwrap();
+        if let Value::Integer(ts) = result {
+            // Should be after Jan 1, 2020
+            assert!(ts > 1577836800);
+        } else {
+            panic!("Expected integer");
+        }
+    }
+
+    #[test]
+    fn test_epoch_alias() {
+        let result = run("epoch();").unwrap();
+        if let Value::Integer(ts) = result {
+            assert!(ts > 1577836800);
+        } else {
+            panic!("Expected integer");
+        }
+    }
+
+    #[test]
+    fn test_timestamp_millis() {
+        let result = run("timestamp_millis();").unwrap();
+        if let Value::Integer(ts) = result {
+            // Should be after Jan 1, 2020 in milliseconds
+            assert!(ts > 1577836800000);
+        } else {
+            panic!("Expected integer");
+        }
+    }
+
+    #[test]
+    fn test_timestamp_micros() {
+        let result = run("timestamp_micros();").unwrap();
+        if let Value::Integer(ts) = result {
+            // Should be after Jan 1, 2020 in microseconds
+            assert!(ts > 1577836800000000);
+        } else {
+            panic!("Expected integer");
+        }
+    }
+
+    #[test]
+    fn test_timestamp_iso8601() {
+        let result = run("timestamp_iso8601();").unwrap();
+        if let Value::String(s) = result {
+            // Should be ISO 8601 format
+            assert!(s.contains('T'));
+            assert!(s.contains('-'));
+            assert!(s.contains(':'));
+        } else {
+            panic!("Expected string");
+        }
+    }
+
+    #[test]
+    fn test_timestamp_in_calculation() {
+        // Test that timestamps can be used in arithmetic
+        let result =
+            run("let start = timestamp_millis(); let end = timestamp_millis(); end - start >= 0;")
+                .unwrap();
+        assert_eq!(result, Value::Boolean(true));
+    }
+
+    // === Float tests ===
+
+    #[test]
+    fn test_float_literal() {
+        let result = run("3.14;").unwrap();
+        assert_eq!(result, Value::Float(3.14));
+    }
+
+    #[test]
+    fn test_float_arithmetic() {
+        let result = run("3.5 + 2.0;").unwrap();
+        assert_eq!(result, Value::Float(5.5));
+    }
+
+    #[test]
+    fn test_float_subtraction() {
+        let result = run("10.5 - 3.2;").unwrap();
+        if let Value::Float(f) = result {
+            assert!((f - 7.3).abs() < 1e-10);
+        } else {
+            panic!("Expected float");
+        }
+    }
+
+    #[test]
+    fn test_float_multiplication() {
+        let result = run("2.5 * 4.0;").unwrap();
+        assert_eq!(result, Value::Float(10.0));
+    }
+
+    #[test]
+    fn test_float_division() {
+        let result = run("7.5 / 2.5;").unwrap();
+        assert_eq!(result, Value::Float(3.0));
+    }
+
+    #[test]
+    fn test_mixed_arithmetic_int_float() {
+        let result = run("10 + 3.5;").unwrap();
+        assert_eq!(result, Value::Float(13.5));
+    }
+
+    #[test]
+    fn test_mixed_arithmetic_float_int() {
+        let result = run("2.5 * 4;").unwrap();
+        assert_eq!(result, Value::Float(10.0));
+    }
+
+    #[test]
+    fn test_float_comparison() {
+        let result = run("3.14 > 3.0;").unwrap();
+        assert_eq!(result, Value::Boolean(true));
+    }
+
+    #[test]
+    fn test_float_equality() {
+        let result = run("2.5 == 2.5;").unwrap();
+        assert_eq!(result, Value::Boolean(true));
+    }
+
+    #[test]
+    fn test_cross_type_equality() {
+        let result = run("1.0 == 1;").unwrap();
+        assert_eq!(result, Value::Boolean(true));
+    }
+
+    #[test]
+    fn test_float_negation() {
+        let result = run("-3.14;").unwrap();
+        assert_eq!(result, Value::Float(-3.14));
+    }
+
+    #[test]
+    fn test_float_truthy() {
+        let result = run("if (1.5) { 1; } else { 0; }").unwrap();
+        assert_eq!(result, Value::Integer(1));
+    }
+
+    #[test]
+    fn test_float_zero_falsy() {
+        let result = run("if (0.0) { 1; } else { 0; }").unwrap();
+        assert_eq!(result, Value::Integer(0));
+    }
+
+    #[test]
+    fn test_float_conversion() {
+        let result = run("float(42);").unwrap();
+        assert_eq!(result, Value::Float(42.0));
+    }
+
+    #[test]
+    fn test_float_conversion_from_string() {
+        let result = run(r#"float("3.14");"#).unwrap();
+        assert_eq!(result, Value::Float(3.14));
+    }
+
+    #[test]
+    fn test_int_from_float() {
+        let result = run("int(3.99);").unwrap();
+        assert_eq!(result, Value::Integer(3));
+    }
+
+    #[test]
+    fn test_ceil_float() {
+        let result = run("ceil(3.14);").unwrap();
+        assert_eq!(result, Value::Integer(4));
+    }
+
+    #[test]
+    fn test_floor_float() {
+        let result = run("floor(3.99);").unwrap();
+        assert_eq!(result, Value::Integer(3));
+    }
+
+    #[test]
+    fn test_round_float() {
+        let result = run("round(3.5);").unwrap();
+        assert_eq!(result, Value::Integer(4));
+    }
+
+    #[test]
+    fn test_abs_float() {
+        let result = run("abs(-3.14);").unwrap();
+        assert_eq!(result, Value::Float(3.14));
+    }
+
+    #[test]
+    fn test_float_method_syntax() {
+        let result = run("let x = -2.5; x.abs();").unwrap();
+        assert_eq!(result, Value::Float(2.5));
+    }
+
+    #[test]
+    fn test_float_in_variable() {
+        let result = run("let pi = 3.14159; pi * 2.0;").unwrap();
+        if let Value::Float(f) = result {
+            assert!((f - 6.28318).abs() < 1e-5);
+        } else {
+            panic!("Expected float");
+        }
+    }
+
+    #[test]
+    fn test_float_division_by_zero() {
+        let result = run("1.0 / 0.0;").unwrap();
+        if let Value::Float(f) = result {
+            assert!(f.is_infinite() && f.is_sign_positive());
+        } else {
+            panic!("Expected float infinity");
+        }
+    }
+
+    #[test]
+    fn test_nan_creation() {
+        let result = run("0.0 / 0.0;").unwrap();
+        if let Value::Float(f) = result {
+            assert!(f.is_nan());
+        } else {
+            panic!("Expected NaN");
+        }
+    }
+
+    #[test]
+    fn test_mixed_comparison() {
+        let result = run("1 < 1.5;").unwrap();
+        assert_eq!(result, Value::Boolean(true));
     }
 }

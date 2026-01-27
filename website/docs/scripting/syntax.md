@@ -33,6 +33,34 @@ let b = -10;
 let c = 0;
 ```
 
+### Floats
+
+64-bit floating-point numbers (IEEE 754 double precision).
+
+```fiddlerscript
+let pi = 3.14159;
+let half = 0.5;
+let negative = -2.5;
+let whole = 2.0;      // Float, not integer (has decimal point)
+```
+
+**Arithmetic with floats:**
+
+```fiddlerscript
+let a = 3.5 + 2.0;    // 5.5
+let b = 10.0 / 4.0;   // 2.5
+let c = 10 + 3.5;     // 13.5 (mixed: integer promoted to float)
+let d = 2.5 * 4;      // 10.0 (mixed: result is float)
+```
+
+**Special values:**
+
+```fiddlerscript
+let inf = 1.0 / 0.0;     // Infinity
+let neg_inf = -1.0 / 0.0; // -Infinity
+let nan = 0.0 / 0.0;      // NaN (Not a Number)
+```
+
 ### Strings
 
 UTF-8 strings with escape sequence support.
@@ -320,8 +348,9 @@ let length = arr.len();  // 5
 | Type | Methods |
 |------|---------|
 | String | `len()`, `lowercase()`, `uppercase()`, `capitalize()`, `trim()`, `trim_prefix(s)`, `trim_suffix(s)`, `has_prefix(s)`, `has_suffix(s)`, `split(delim)`, `reverse()`, `lines()` |
-| Array | `len()`, `get(index)`, `set(index, value)`, `push(value)`, `delete(index)`, `reverse()` |
-| Dictionary | `len()`, `get(key)`, `set(key, value)`, `delete(key)`, `keys()` |
+| Integer | `abs()`, `ceil()`, `floor()`, `round()` |
+| Array | `len()`, `get(index)`, `set(index, value)`, `push(value)`, `delete(index)`, `contains(value)`, `reverse()` |
+| Dictionary | `len()`, `get(key)`, `set(key, value)`, `delete(key)`, `contains(key)`, `keys()` |
 | Bytes | `len()`, `bytes_to_string()` |
 
 ### Return Statement

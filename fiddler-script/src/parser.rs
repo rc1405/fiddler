@@ -631,6 +631,11 @@ impl Parser {
                 self.advance();
                 Ok(Expression::Integer { value, position })
             }
+            TokenKind::Float(value) => {
+                let value = *value;
+                self.advance();
+                Ok(Expression::Float { value, position })
+            }
             TokenKind::String(value) => {
                 let value = value.clone();
                 self.advance();

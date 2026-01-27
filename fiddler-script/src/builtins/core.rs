@@ -54,13 +54,13 @@ pub fn builtin_str(args: Vec<Value>) -> Result<Value, RuntimeError> {
     Ok(Value::String(args[0].to_string()))
 }
 
-/// Convert a string to an integer.
+/// Convert a value to an integer.
 ///
 /// # Arguments
-/// - A string containing a valid integer
+/// - A string, integer, float, boolean, bytes, array, dictionary, or null value
 ///
 /// # Returns
-/// - The parsed integer value
+/// - The value as an integer (floats are truncated)
 pub fn builtin_int(args: Vec<Value>) -> Result<Value, RuntimeError> {
     if args.len() != 1 {
         return Err(RuntimeError::wrong_argument_count(1, args.len()));
@@ -71,6 +71,7 @@ pub fn builtin_int(args: Vec<Value>) -> Result<Value, RuntimeError> {
             RuntimeError::invalid_argument(format!("Cannot convert '{}' to integer", s))
         }),
         Value::Integer(n) => Ok(Value::Integer(*n)),
+        Value::Float(f) => Ok(Value::Integer(f.trunc() as i64)),
         Value::Boolean(b) => Ok(Value::Integer(if *b { 1 } else { 0 })),
         Value::Bytes(bytes) => {
             let s = String::from_utf8_lossy(bytes);
@@ -81,6 +82,45 @@ pub fn builtin_int(args: Vec<Value>) -> Result<Value, RuntimeError> {
         Value::Array(a) => Ok(Value::Integer(a.len() as i64)),
         Value::Dictionary(d) => Ok(Value::Integer(d.len() as i64)),
         Value::Null => Ok(Value::Integer(0)),
+    }
+}
+
+/// Convert a value to a float.
+///
+/// # Arguments
+/// - A numeric, string, or boolean value
+///
+/// # Returns
+/// - The value as a float (f64)
+///
+/// # Examples
+/// ```ignore
+/// float(42);         // 42.0
+/// float("3.14");     // 3.14
+/// float(true);       // 1.0
+/// float(false);      // 0.0
+/// ```
+pub fn builtin_float(args: Vec<Value>) -> Result<Value, RuntimeError> {
+    if args.len() != 1 {
+        return Err(RuntimeError::wrong_argument_count(1, args.len()));
+    }
+
+    match &args[0] {
+        Value::Float(f) => Ok(Value::Float(*f)),
+        Value::Integer(n) => Ok(Value::Float(*n as f64)),
+        Value::Boolean(b) => Ok(Value::Float(if *b { 1.0 } else { 0.0 })),
+        Value::String(s) => s.parse::<f64>().map(Value::Float).map_err(|_| {
+            RuntimeError::invalid_argument(format!("Cannot convert '{}' to float", s))
+        }),
+        Value::Bytes(bytes) => {
+            let s = String::from_utf8_lossy(bytes);
+            s.parse::<f64>().map(Value::Float).map_err(|_| {
+                RuntimeError::invalid_argument("Cannot convert bytes to float".to_string())
+            })
+        }
+        _ => Err(RuntimeError::invalid_argument(
+            "Cannot convert value to float".to_string(),
+        )),
     }
 }
 

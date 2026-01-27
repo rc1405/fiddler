@@ -9,7 +9,9 @@ mod compression;
 mod core;
 mod encoding;
 mod json;
+mod math;
 mod strings;
+mod time;
 
 use std::collections::HashMap;
 
@@ -31,7 +33,30 @@ pub fn get_default_builtins() -> HashMap<String, BuiltinFn> {
     builtins.insert("len".to_string(), core::builtin_len);
     builtins.insert("str".to_string(), core::builtin_str);
     builtins.insert("int".to_string(), core::builtin_int);
+    builtins.insert("float".to_string(), core::builtin_float);
     builtins.insert("getenv".to_string(), core::builtin_getenv);
+
+    // Math functions
+    builtins.insert("abs".to_string(), math::builtin_abs);
+    builtins.insert("ceil".to_string(), math::builtin_ceil);
+    builtins.insert("floor".to_string(), math::builtin_floor);
+    builtins.insert("round".to_string(), math::builtin_round);
+
+    // Time functions
+    builtins.insert("timestamp".to_string(), time::builtin_timestamp);
+    builtins.insert("epoch".to_string(), time::builtin_epoch);
+    builtins.insert(
+        "timestamp_millis".to_string(),
+        time::builtin_timestamp_millis,
+    );
+    builtins.insert(
+        "timestamp_micros".to_string(),
+        time::builtin_timestamp_micros,
+    );
+    builtins.insert(
+        "timestamp_iso8601".to_string(),
+        time::builtin_timestamp_iso8601,
+    );
 
     // JSON
     builtins.insert("parse_json".to_string(), json::builtin_parse_json);
@@ -53,6 +78,7 @@ pub fn get_default_builtins() -> HashMap<String, BuiltinFn> {
     builtins.insert("is_array".to_string(), collections::builtin_is_array);
     builtins.insert("is_dict".to_string(), collections::builtin_is_dict);
     builtins.insert("delete".to_string(), collections::builtin_delete);
+    builtins.insert("contains".to_string(), collections::builtin_contains);
 
     // Compression
     builtins.insert(
@@ -115,6 +141,19 @@ mod tests {
         assert!(builtins.contains_key("int"));
         assert!(builtins.contains_key("getenv"));
 
+        // Math
+        assert!(builtins.contains_key("abs"));
+        assert!(builtins.contains_key("ceil"));
+        assert!(builtins.contains_key("floor"));
+        assert!(builtins.contains_key("round"));
+
+        // Time
+        assert!(builtins.contains_key("timestamp"));
+        assert!(builtins.contains_key("epoch"));
+        assert!(builtins.contains_key("timestamp_millis"));
+        assert!(builtins.contains_key("timestamp_micros"));
+        assert!(builtins.contains_key("timestamp_iso8601"));
+
         // JSON
         assert!(builtins.contains_key("parse_json"));
 
@@ -132,6 +171,7 @@ mod tests {
         assert!(builtins.contains_key("is_array"));
         assert!(builtins.contains_key("is_dict"));
         assert!(builtins.contains_key("delete"));
+        assert!(builtins.contains_key("contains"));
 
         // Compression
         assert!(builtins.contains_key("gzip_compress"));

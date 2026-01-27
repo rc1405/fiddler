@@ -129,6 +129,14 @@ pub enum Expression {
         position: Position,
     },
 
+    /// Float literal: `3.14`
+    Float {
+        /// The float value
+        value: f64,
+        /// Source position
+        position: Position,
+    },
+
     /// String literal: `"hello"`
     String {
         /// The string value
@@ -237,6 +245,7 @@ impl Expression {
     pub fn position(&self) -> Position {
         match self {
             Expression::Integer { position, .. }
+            | Expression::Float { position, .. }
             | Expression::String { position, .. }
             | Expression::Boolean { position, .. }
             | Expression::Identifier { position, .. }

@@ -264,3 +264,42 @@ pub fn builtin_delete(args: Vec<Value>) -> Result<Value, RuntimeError> {
         )),
     }
 }
+
+/// Check if a collection contains a value or key.
+///
+/// # Arguments
+/// - For arrays: An array and a value to search for
+/// - For dictionaries: A dictionary and a key to search for
+///
+/// # Returns
+/// - `true` if the value/key exists, `false` otherwise
+///
+/// # Examples
+/// ```ignore
+/// let arr = [1, 2, 3];
+/// contains(arr, 2);      // true
+/// arr.contains(2);       // true (method syntax)
+///
+/// let dict = {"name": "Alice", "age": 30};
+/// contains(dict, "name");  // true
+/// dict.contains("name");   // true (method syntax)
+/// ```
+pub fn builtin_contains(args: Vec<Value>) -> Result<Value, RuntimeError> {
+    if args.len() != 2 {
+        return Err(RuntimeError::wrong_argument_count(2, args.len()));
+    }
+
+    match (&args[0], &args[1]) {
+        (Value::Array(arr), search_value) => {
+            let found = arr.iter().any(|v| v == search_value);
+            Ok(Value::Boolean(found))
+        }
+        (Value::Dictionary(dict), Value::String(key)) => Ok(Value::Boolean(dict.contains_key(key))),
+        (Value::Dictionary(_), _) => Err(RuntimeError::invalid_argument(
+            "Dictionary contains() requires a string key as second argument".to_string(),
+        )),
+        _ => Err(RuntimeError::invalid_argument(
+            "contains() requires an array or dictionary as first argument".to_string(),
+        )),
+    }
+}

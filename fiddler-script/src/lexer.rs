@@ -27,6 +27,8 @@ pub enum TokenKind {
     // Literals
     /// Integer literal
     Integer(i64),
+    /// Float literal
+    Float(f64),
     /// String literal
     String(String),
 
@@ -113,6 +115,7 @@ impl std::fmt::Display for TokenKind {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             TokenKind::Integer(n) => write!(f, "{}", n),
+            TokenKind::Float(fl) => write!(f, "{}", fl),
             TokenKind::String(s) => write!(f, "\"{}\"", s),
             TokenKind::Identifier(s) => write!(f, "{}", s),
             TokenKind::Let => write!(f, "let"),
@@ -273,22 +276,48 @@ impl<'a> Lexer<'a> {
         Token::new(kind, start_pos)
     }
 
-    /// Tokenize a number literal.
+    /// Tokenize a number literal (integer or float).
     fn scan_number(&mut self, first_char: char, start_pos: Position) -> Result<Token, LexError> {
         let start_offset = self.offset - first_char.len_utf8();
+        let mut has_decimal = false;
 
+        // Scan digits and optional decimal part
         while let Some(ch) = self.peek() {
             if ch.is_ascii_digit() {
                 self.advance();
+            } else if ch == '.' && !has_decimal {
+                // Look ahead to ensure '.' is followed by a digit (not a method call)
+                if let Some(next_ch) = self.peek_next() {
+                    if next_ch.is_ascii_digit() {
+                        has_decimal = true;
+                        self.advance(); // consume '.'
+                    } else {
+                        // '.' not part of number (could be method call like 3.abs())
+                        break;
+                    }
+                } else {
+                    // '.' at end of input, not part of number
+                    break;
+                }
             } else {
                 break;
             }
         }
 
         let text = &self.source[start_offset..self.offset];
-        match text.parse::<i64>() {
-            Ok(value) => Ok(Token::new(TokenKind::Integer(value), start_pos)),
-            Err(_) => Err(LexError::InvalidNumber(start_pos)),
+
+        if has_decimal {
+            // Parse as float
+            match text.parse::<f64>() {
+                Ok(value) => Ok(Token::new(TokenKind::Float(value), start_pos)),
+                Err(_) => Err(LexError::InvalidNumber(start_pos)),
+            }
+        } else {
+            // Parse as integer
+            match text.parse::<i64>() {
+                Ok(value) => Ok(Token::new(TokenKind::Integer(value), start_pos)),
+                Err(_) => Err(LexError::InvalidNumber(start_pos)),
+            }
         }
     }
 

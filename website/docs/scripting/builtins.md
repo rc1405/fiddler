@@ -89,7 +89,7 @@ Invalid UTF-8 sequences are replaced with the Unicode replacement character.
 
 Convert a value to an integer.
 
-**Arguments:** String, integer, boolean, bytes, or null
+**Arguments:** String, integer, float, boolean, bytes, or null
 **Returns:** Integer
 
 ```fiddlerscript
@@ -97,9 +97,25 @@ let n = int("42");      // 42
 let b = int(true);      // 1
 let f = int(false);     // 0
 let z = int(null);      // 0
+let t = int(3.99);      // 3 (truncates float)
+let neg = int(-2.7);    // -2 (truncates toward zero)
 ```
 
 Strings must contain valid integer representations, or a runtime error occurs.
+
+### `float(value)`
+
+Convert a value to a float.
+
+**Arguments:** String, integer, float, or boolean
+**Returns:** Float
+
+```fiddlerscript
+let f = float(42);          // 42.0
+let pi = float("3.14159");  // 3.14159
+let one = float(true);      // 1.0
+let zero = float(false);    // 0.0
+```
 
 ## Environment Variables
 
@@ -302,6 +318,38 @@ let d2 = delete(d, "name");  // Empty dictionary
 
 let arr = array(1, 2, 3);
 let arr2 = delete(arr, 1);   // array(1, 3)
+```
+
+### `contains(collection, item)` / `collection.contains(item)`
+
+Check if a collection contains a value or key.
+
+**Arguments:**
+- For arrays: array, value to search for
+- For dictionaries: dictionary, string key to check
+
+**Returns:** Boolean (`true` if found, `false` otherwise)
+
+```fiddlerscript
+// Array examples
+let numbers = [1, 2, 3, 4, 5];
+numbers.contains(3);           // true
+numbers.contains(10);          // false
+contains(numbers, 2);          // true (function syntax)
+
+let fruits = ["apple", "banana"];
+fruits.contains("banana");     // true
+
+// Dictionary examples
+let user = {"name": "Alice", "age": 30};
+user.contains("name");         // true
+user.contains("email");        // false
+contains(user, "age");         // true (function syntax)
+
+// In conditionals
+if (users.contains("admin")) {
+    print("Admin exists");
+}
 ```
 
 ## String Operations
@@ -545,6 +593,150 @@ let decoded = base64_decode("aGVsbG8=");
 let text = bytes_to_string(decoded);  // "hello"
 ```
 
+## Math Functions
+
+### `abs(value)` / `value.abs()`
+
+Get the absolute value of a number.
+
+**Arguments:** Integer or float
+**Returns:** Same type as input (absolute value)
+
+```fiddlerscript
+abs(-42);          // 42
+abs(-3.14);        // 3.14
+
+let x = -10;
+x.abs();           // 10 (method syntax)
+
+let y = -2.5;
+y.abs();           // 2.5 (method syntax)
+```
+
+### `ceil(value)` / `value.ceil()`
+
+Ceiling function - rounds up to the nearest integer.
+
+**Arguments:** Integer or float
+**Returns:** Integer
+
+```fiddlerscript
+ceil(42);          // 42 (integers unchanged)
+ceil(3.14);        // 4
+ceil(-3.14);       // -3
+
+let x = 2.5;
+x.ceil();          // 3 (method syntax)
+```
+
+### `floor(value)` / `value.floor()`
+
+Floor function - rounds down to the nearest integer.
+
+**Arguments:** Integer or float
+**Returns:** Integer
+
+```fiddlerscript
+floor(42);         // 42 (integers unchanged)
+floor(3.99);       // 3
+floor(-3.14);      // -4
+
+let x = 2.5;
+x.floor();         // 2 (method syntax)
+```
+
+### `round(value)` / `value.round()`
+
+Round function - rounds to the nearest integer.
+
+**Arguments:** Integer or float
+**Returns:** Integer
+
+```fiddlerscript
+round(42);         // 42 (integers unchanged)
+round(3.4);        // 3
+round(3.5);        // 4
+round(-3.5);       // -4
+
+let x = 2.5;
+x.round();         // 3 (method syntax)
+```
+
+## Time Functions
+
+### `timestamp()`
+
+Get the current Unix timestamp in seconds.
+
+**Arguments:** None
+**Returns:** Integer (seconds since Unix epoch)
+
+```fiddlerscript
+let now = timestamp();
+print("Current time:", now);  // e.g., 1706284800
+```
+
+### `epoch()`
+
+Alias for `timestamp()`. Get the current Unix timestamp in seconds.
+
+**Arguments:** None
+**Returns:** Integer (seconds since Unix epoch)
+
+```fiddlerscript
+let now = epoch();
+```
+
+### `timestamp_millis()`
+
+Get the current Unix timestamp in milliseconds.
+
+**Arguments:** None
+**Returns:** Integer (milliseconds since Unix epoch)
+
+```fiddlerscript
+let now_ms = timestamp_millis();
+print("Milliseconds:", now_ms);  // e.g., 1706284800123
+
+// Measure elapsed time
+let start = timestamp_millis();
+// ... do work ...
+let elapsed = timestamp_millis() - start;
+print("Took", elapsed, "ms");
+```
+
+### `timestamp_micros()`
+
+Get the current Unix timestamp in microseconds.
+
+**Arguments:** None
+**Returns:** Integer (microseconds since Unix epoch)
+
+```fiddlerscript
+let now_us = timestamp_micros();
+print("Microseconds:", now_us);  // e.g., 1706284800123456
+```
+
+### `timestamp_iso8601()`
+
+Get the current time as an ISO 8601 formatted string (RFC 3339).
+
+**Arguments:** None
+**Returns:** String in ISO 8601 format
+
+```fiddlerscript
+let now = timestamp_iso8601();
+print("Current time:", now);  // e.g., "2024-01-26T12:34:56.789+00:00"
+
+// Use in logging
+fn log(message) {
+    let ts = timestamp_iso8601();
+    print("[" + ts + "]", message);
+}
+
+log("Application started");
+```
+
 ## Summary Table
 
 ### Core Functions
@@ -554,7 +746,8 @@ let text = bytes_to_string(decoded);  // "hello"
 | `print(args...)` | Any values | `null` | Print to stdout |
 | `len(value)` | String, bytes, array, or dict | Integer | Get length |
 | `str(value)` | Any | String | Convert to string |
-| `int(value)` | Any | Integer | Convert to integer |
+| `int(value)` | Any | Integer | Convert to integer (truncates floats) |
+| `float(value)` | Numeric, string, or boolean | Float | Convert to float |
 | `bytes(value)` | Any | Bytes | Convert to bytes |
 | `bytes_to_string(value)` | Bytes or string | String | Convert bytes to string |
 | `getenv(name)` | String | String or null | Get environment variable |
@@ -569,6 +762,7 @@ let text = bytes_to_string(decoded);  // "hello"
 | `get(coll, key)` | Collection, key | Any | Get by index/key |
 | `set(coll, key, val)` | Collection, key, any | Collection | Set by index/key |
 | `delete(coll, key)` | Collection, key | Collection | Remove by index/key |
+| `contains(coll, item)` | Collection, item | Boolean | Check if item/key exists |
 | `dict()` | None | Dictionary | Create empty dict |
 | `keys(dict)` | Dictionary | Array | Get keys (insertion order) |
 | `is_array(val)` | Any | Boolean | Check if array |
@@ -607,3 +801,22 @@ let text = bytes_to_string(decoded);  // "hello"
 |----------|-----------|---------|-------------|
 | `base64_encode(data)` | String or bytes | String | Encode as base64 |
 | `base64_decode(data)` | String or bytes | Bytes | Decode from base64 |
+
+### Math
+
+| Function | Arguments | Returns | Description |
+|----------|-----------|---------|-------------|
+| `abs(val)` | Integer or float | Same type as input | Absolute value |
+| `ceil(val)` | Integer or float | Integer | Ceiling (rounds up) |
+| `floor(val)` | Integer or float | Integer | Floor (rounds down) |
+| `round(val)` | Integer or float | Integer | Round to nearest |
+
+### Time
+
+| Function | Arguments | Returns | Description |
+|----------|-----------|---------|-------------|
+| `timestamp()` | None | Integer | Unix timestamp in seconds |
+| `epoch()` | None | Integer | Alias for timestamp() |
+| `timestamp_millis()` | None | Integer | Unix timestamp in milliseconds |
+| `timestamp_micros()` | None | Integer | Unix timestamp in microseconds |
+| `timestamp_iso8601()` | None | String | Current time in ISO 8601 format |
