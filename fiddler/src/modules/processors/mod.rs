@@ -2,6 +2,7 @@ use crate::Error;
 pub mod compression;
 pub mod decode;
 pub mod exception;
+pub mod fiddlerscript;
 pub mod lines;
 pub mod noop;
 #[cfg(feature = "python")]
@@ -27,6 +28,7 @@ pub(crate) fn register_plugins() -> Result<(), Error> {
     compression::register_compress()?;
     decode::register_decode()?;
     exception::register_try()?;
+    fiddlerscript::register_fiddlerscript()?;
     Ok(())
 }
 
