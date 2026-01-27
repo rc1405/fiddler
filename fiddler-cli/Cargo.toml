@@ -1,6 +1,6 @@
 [package]
 name = "fiddler-cli"
-version = "2.2.0"
+version = "3.0.0"
 edition = "2021"
 exclude = ["tests"]
 license-file = "../LICENSE"
@@ -24,7 +24,7 @@ path = "src/bin.rs"
 [dependencies]
 async-trait = "0.1.79"
 clap = { version = "4.5.3", features = ["derive"] }
-fiddler = { version = "2.2.0", path = "../fiddler", features = [
+fiddler = { version = "3.0.0", path = "../fiddler", features = [
     "elasticsearch",
     "aws",
     "prometheus",

@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [3.0.0](https://github.com/rc1405/fiddler/compare/fiddler-v2.2.0...fiddler-v3.0.0) - 2026-01-25
+
+### Added
+
+- several performance and quality improvements along with metrics ([#64](https://github.com/rc1405/fiddler/pull/64))
+
 ## [2.2.0](https://github.com/rc1405/fiddler/compare/fiddler-v2.1.0...fiddler-v2.2.0) - 2025-05-14
 
 ### Added
