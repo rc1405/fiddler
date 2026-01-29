@@ -121,6 +121,7 @@ pub(crate) struct Item {
 ///
 /// ```yaml
 /// metrics:
+///   interval: 30  # Record metrics every 30 seconds (default)
 ///   prometheus: {}
 /// ```
 #[derive(Debug, Deserialize, Serialize, Clone, Default)]
@@ -128,9 +129,20 @@ pub struct MetricsConfig {
     /// Optional label for the metrics configuration
     pub label: Option<String>,
 
+    /// Interval in seconds at which metrics are recorded (default: 30)
+    #[serde(default = "MetricsConfig::default_interval")]
+    pub interval: u64,
+
     /// Dynamic configuration for the metrics backend
     #[serde(flatten)]
     pub extra: HashMap<String, Value>,
+}
+
+impl MetricsConfig {
+    /// Default metrics recording interval (30 seconds)
+    fn default_interval() -> u64 {
+        30
+    }
 }
 
 /// Unparsed fiddler configuration

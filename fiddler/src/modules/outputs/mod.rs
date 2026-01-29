@@ -33,14 +33,18 @@ pub(crate) async fn run_output(
         match input.recv_async().await {
             Ok(msg) => {
                 trace!("received output message");
-                match o.write(msg.message.clone()).await {
+                // Extract fields before moving message to avoid clone
+                let stream_id = msg.message.stream_id.clone();
+                let message_id = msg.message_id;
+
+                match o.write(msg.message).await {
                     Ok(_) => {
                         trace!("sending message");
                         state
                             .send_async(InternalMessageState {
-                                message_id: msg.message_id,
+                                message_id,
                                 status: MessageStatus::Output,
-                                stream_id: msg.message.stream_id.clone(),
+                                stream_id,
                                 ..Default::default()
                             })
                             .await
@@ -54,9 +58,9 @@ pub(crate) async fn run_output(
                             trace!("sending state");
                             state
                                 .send_async(InternalMessageState {
-                                    message_id: msg.message_id,
+                                    message_id,
                                     status: MessageStatus::OutputError(format!("{e}")),
-                                    stream_id: msg.message.stream_id.clone(),
+                                    stream_id,
                                     ..Default::default()
                                 })
                                 .await
@@ -141,19 +145,26 @@ async fn process_batch(
     state: &Sender<InternalMessageState>,
     internal_msg_batch: Vec<InternalMessage>,
 ) -> Result<(), Error> {
-    let msg_batch: Vec<crate::Message> = internal_msg_batch
+    // Extract metadata before moving messages to avoid clones
+    let metadata: Vec<(String, Option<String>)> = internal_msg_batch
         .iter()
-        .map(|i| i.message.clone())
+        .map(|i| (i.message_id.clone(), i.message.stream_id.clone()))
+        .collect();
+
+    // Move messages instead of cloning
+    let msg_batch: Vec<crate::Message> = internal_msg_batch
+        .into_iter()
+        .map(|i| i.message)
         .collect();
 
     match o.write_batch(msg_batch).await {
         Ok(_) => {
-            for msg in internal_msg_batch {
+            for (message_id, stream_id) in metadata {
                 state
                     .send_async(InternalMessageState {
-                        message_id: msg.message_id,
+                        message_id,
                         status: MessageStatus::Output,
-                        stream_id: msg.message.stream_id.clone(),
+                        stream_id,
                         ..Default::default()
                     })
                     .await
@@ -165,12 +176,12 @@ async fn process_batch(
                 debug!("conditional check failed for output");
             }
             _ => {
-                for msg in internal_msg_batch {
+                for (message_id, stream_id) in metadata {
                     state
                         .send_async(InternalMessageState {
-                            message_id: msg.message_id,
+                            message_id,
                             status: MessageStatus::OutputError(format!("{e}")),
-                            stream_id: msg.message.stream_id.clone(),
+                            stream_id,
                             ..Default::default()
                         })
                         .await
