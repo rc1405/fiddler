@@ -136,7 +136,12 @@ use crate::modules::register_plugins;
 use crate::MessageType;
 use crate::Status;
 
+use once_cell::sync::Lazy;
+use std::sync::Mutex;
+
 static REGISTER: Once = Once::new();
+/// Stores any error that occurred during plugin registration
+static REGISTER_ERROR: Lazy<Mutex<Option<String>>> = Lazy::new(|| Mutex::new(None));
 
 /// Represents a single data pipeline configuration Runtime to run
 pub struct Runtime {
@@ -214,9 +219,21 @@ impl Runtime {
     /// ```
     pub async fn from_config(config: &str) -> Result<Self, Error> {
         REGISTER.call_once(|| {
-            #[allow(clippy::unwrap_used)]
-            register_plugins().unwrap();
+            if let Err(e) = register_plugins() {
+                if let Ok(mut err) = REGISTER_ERROR.lock() {
+                    *err = Some(format!("{e}"));
+                }
+            }
         });
+
+        // Check if registration failed
+        if let Ok(err_lock) = REGISTER_ERROR.lock() {
+            if let Some(ref e) = *err_lock {
+                return Err(Error::ExecutionError(format!(
+                    "Plugin registration failed: {e}"
+                )));
+            }
+        }
         trace!("plugins registered");
 
         let conf: Config = Config::from_str(config)?;
@@ -447,11 +464,12 @@ impl Runtime {
         info!(label = self.config.label, "pipeline started");
 
         if let Some(d) = self.timeout {
+            let timeout_ks_send = ks_send.clone();
             handles.spawn(async move {
                 sleep(d).await;
                 trace!("sending kill signal");
-                if !ks_send.is_disconnected() {
-                    if let Err(e) = ks_send.send(()) {
+                if !timeout_ks_send.is_disconnected() {
+                    if let Err(e) = timeout_ks_send.send(()) {
                         debug!(error = ?e, "Failed to send kill signal, receiver may have been dropped");
                     }
                 }
@@ -459,8 +477,40 @@ impl Runtime {
             });
         }
 
-        while let Some(res) = handles.join_next().await {
-            res.map_err(|e| Error::ProcessingError(format!("{e}")))??;
+        // Main loop: wait for tasks to complete or Ctrl+C signal
+        loop {
+            tokio::select! {
+                // Handle task completion
+                res = handles.join_next() => {
+                    match res {
+                        Some(Ok(Ok(()))) => {
+                            // Task completed successfully, continue waiting for others
+                        }
+                        Some(Ok(Err(e))) => {
+                            // Task returned an error
+                            return Err(e);
+                        }
+                        Some(Err(e)) => {
+                            // Task panicked or was cancelled
+                            return Err(Error::ProcessingError(format!("{e}")));
+                        }
+                        None => {
+                            // All tasks completed
+                            break;
+                        }
+                    }
+                }
+                // Handle Ctrl+C signal for graceful shutdown
+                _ = tokio::signal::ctrl_c() => {
+                    info!("Received shutdown signal (Ctrl+C), initiating graceful shutdown");
+                    if !ks_send.is_disconnected() {
+                        if let Err(e) = ks_send.send(()) {
+                            debug!(error = ?e, "Failed to send kill signal from signal handler");
+                        }
+                    }
+                    // Continue the loop to let tasks shut down gracefully
+                }
+            }
         }
 
         info!("pipeline finished");
@@ -1145,5 +1195,126 @@ mod tests {
         let mut backend = NoOpMetrics::new();
         metrics.record(&mut backend, 10);
         // No assertion needed - just verify it doesn't panic
+    }
+
+    #[test]
+    fn test_process_state_unknown_message_id() {
+        let mut handles = FxHashMap::default();
+        let mut closed_outputs = 0;
+        let mut metrics = MessageMetrics::new();
+
+        // Try to process a status for a non-existent message
+        let result = process_state(
+            &mut handles,
+            &1,
+            &mut closed_outputs,
+            InternalMessageState {
+                message_id: "unknown_id".to_string(),
+                status: MessageStatus::Processed,
+                stream_id: None,
+                is_stream: false,
+            },
+            &mut metrics,
+        );
+
+        // Should return an error for unknown message ID
+        assert!(result.is_err());
+        match result {
+            Err(Error::ExecutionError(msg)) => {
+                assert!(msg.contains("does not exist"));
+            }
+            _ => panic!("Expected ExecutionError"),
+        }
+    }
+
+    #[test]
+    fn test_process_state_shutdown_signal() {
+        let mut handles = FxHashMap::default();
+        let mut closed_outputs = 0;
+        let mut metrics = MessageMetrics::new();
+        let output_ct = 1; // Single output
+
+        // Process shutdown signal
+        let result = process_state(
+            &mut handles,
+            &output_ct,
+            &mut closed_outputs,
+            InternalMessageState {
+                message_id: crate::SHUTDOWN_MESSAGE_ID.to_string(),
+                status: MessageStatus::Shutdown,
+                stream_id: None,
+                is_stream: false,
+            },
+            &mut metrics,
+        );
+
+        // Should return EndOfInput when all outputs have shut down
+        assert!(result.is_err());
+        assert!(matches!(result, Err(Error::EndOfInput)));
+        assert_eq!(closed_outputs, 1);
+    }
+
+    #[test]
+    fn test_process_state_tracks_errors() {
+        let mut handles = FxHashMap::default();
+        let mut closed_outputs = 0;
+        let mut metrics = MessageMetrics::new();
+        let message_id = "test_msg".to_string();
+
+        // Add a message to handles
+        handles.insert(
+            message_id.clone(),
+            State {
+                instance_count: 1,
+                processed_count: 0,
+                processed_error_count: 0,
+                output_count: 0,
+                output_error_count: 0,
+                closure: None,
+                errors: Vec::new(),
+                stream_id: None,
+                stream_closed: Some(true),
+                created_at: std::time::Instant::now(),
+            },
+        );
+
+        // Process an error status
+        let result = process_state(
+            &mut handles,
+            &1,
+            &mut closed_outputs,
+            InternalMessageState {
+                message_id: message_id.clone(),
+                status: MessageStatus::ProcessError("test error".to_string()),
+                stream_id: None,
+                is_stream: false,
+            },
+            &mut metrics,
+        );
+
+        assert!(result.is_ok());
+        assert_eq!(metrics.total_process_errors, 1);
+        // Message should be removed since stream_closed is true and counts match
+        assert!(!handles.contains_key(&message_id));
+    }
+
+    #[test]
+    fn test_message_status_display() {
+        assert_eq!(format!("{}", MessageStatus::New), "New");
+        assert_eq!(format!("{}", MessageStatus::Processed), "Processed");
+        assert_eq!(
+            format!("{}", MessageStatus::ProcessError("err".into())),
+            "ProcessError"
+        );
+        assert_eq!(format!("{}", MessageStatus::Output), "Output");
+        assert_eq!(
+            format!("{}", MessageStatus::OutputError("err".into())),
+            "OutputError"
+        );
+        assert_eq!(format!("{}", MessageStatus::Shutdown), "Shutdown");
+        assert_eq!(
+            format!("{}", MessageStatus::StreamComplete),
+            "StreamComplete"
+        );
     }
 }

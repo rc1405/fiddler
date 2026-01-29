@@ -27,7 +27,10 @@ fn create_stdout(_conf: Value) -> Result<ExecutionType, Error> {
 }
 
 pub(super) fn register_stdout() -> Result<(), Error> {
-    let config = "type: object";
+    let config = r#"
+type: object
+additionalProperties: false
+"#;
     let conf_spec = ConfigSpec::from_schema(config)?;
 
     register_plugin("stdout".into(), ItemType::Output, conf_spec, create_stdout)

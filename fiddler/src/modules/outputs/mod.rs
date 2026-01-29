@@ -1,17 +1,14 @@
-use crate::Error;
+use crate::runtime::{InternalMessage, InternalMessageState, MessageStatus};
+use crate::{Error, Output, OutputBatch, SHUTDOWN_MESSAGE_ID};
+use flume::{Receiver, Sender};
+use tokio::time::{timeout, Instant};
+use tracing::{debug, error, trace};
+
 pub mod drop;
 #[cfg(feature = "elasticsearch")]
 pub mod elasticsearch;
 pub mod stdout;
 pub mod switch;
-use crate::runtime::{InternalMessage, InternalMessageState, MessageStatus};
-use crate::{Output, OutputBatch};
-use flume::{Receiver, Sender};
-use tokio::time::{timeout, Instant};
-use tracing::{debug, error, trace};
-
-/// Message ID used for shutdown signals
-const SHUTDOWN_MESSAGE_ID: &str = "SHUTDOWN_SIGNAL";
 
 pub(crate) fn register_plugins() -> Result<(), Error> {
     drop::register_drop()?;
@@ -152,10 +149,8 @@ async fn process_batch(
         .collect();
 
     // Move messages instead of cloning
-    let msg_batch: Vec<crate::Message> = internal_msg_batch
-        .into_iter()
-        .map(|i| i.message)
-        .collect();
+    let msg_batch: Vec<crate::Message> =
+        internal_msg_batch.into_iter().map(|i| i.message).collect();
 
     match o.write_batch(msg_batch).await {
         Ok(_) => {

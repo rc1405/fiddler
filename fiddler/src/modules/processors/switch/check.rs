@@ -17,7 +17,6 @@ struct CheckConfig {
 }
 
 pub struct Check {
-    _label: Option<String>,
     condition: String,
     processors: Vec<Box<dyn Processor + Send + Sync>>,
 }
@@ -28,17 +27,22 @@ fn perform_check(condition: &str, json_str: String) -> Result<(), Error> {
     let expr = runtime
         .compile(condition)
         .map_err(|e| Error::ProcessingError(format!("{e}")))?;
-    // convert to string if this is nothing.
     let data = jmespath::Variable::from_json(&json_str)
         .map_err(|e| Error::ProcessingError(format!("{e}")))?;
 
     let result = expr
         .search(data)
         .map_err(|e| Error::ProcessingError(format!("{e}")))?;
-    if !result.as_boolean().unwrap_or(false) {
-        return Err(Error::ConditionalCheckfailed);
-    };
-    Ok(())
+
+    // Explicitly check that result is a boolean type
+    match result.as_boolean() {
+        Some(true) => Ok(()),
+        Some(false) => Err(Error::ConditionalCheckfailed),
+        None => Err(Error::ProcessingError(format!(
+            "Condition '{}' did not return a boolean value, got: {:?}",
+            condition, result
+        ))),
+    }
 }
 
 #[async_trait]
@@ -88,7 +92,6 @@ fn create_check(conf: Value) -> Result<ExecutionType, Error> {
     }
 
     let s = Check {
-        _label: c.label,
         condition: c.condition,
         processors: steps,
     };
