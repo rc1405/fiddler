@@ -429,13 +429,13 @@ impl Runtime {
         // Create metrics backend based on configuration
         let metrics_backend = create_metrics(self.config.metrics.as_ref()).await?;
 
-        // Get metrics recording interval from config, or use default (30 seconds)
+        // Get metrics recording interval from config, or use default (300 seconds)
         let metrics_interval = self
             .config
             .metrics
             .as_ref()
             .map(|m| m.interval)
-            .unwrap_or(30);
+            .unwrap_or(300);
 
         let (msg_tx, msg_rx) = bounded(CHANNEL_CAPACITY);
         let msg_state = message_handler(
