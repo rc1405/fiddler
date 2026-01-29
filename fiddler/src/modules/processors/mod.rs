@@ -11,13 +11,8 @@ pub mod switch;
 
 use crate::config::{ExecutionType, ParsedRegisteredItem};
 use crate::runtime::{InternalMessage, InternalMessageState, MessageStatus};
-use flume::{Receiver, Sender, TryRecvError};
-use tokio::task::yield_now;
-use tokio::time::{sleep, Duration};
+use flume::{Receiver, Sender};
 use tracing::{debug, error, trace};
-
-/// Backoff duration when channel is empty (in milliseconds)
-const EMPTY_CHANNEL_BACKOFF_MS: u64 = 250;
 
 pub(crate) fn register_plugins() -> Result<(), Error> {
     lines::register_lines()?;
@@ -49,7 +44,7 @@ pub(crate) async fn run_processor(
     };
 
     loop {
-        match input.try_recv() {
+        match input.recv_async().await {
             Ok(msg) => {
                 trace!("received processing message");
                 let stream_id = msg.message.stream_id.clone();
@@ -111,15 +106,12 @@ pub(crate) async fn run_processor(
                     },
                 }
             }
-            Err(e) => match e {
-                TryRecvError::Disconnected => {
-                    p.close().await?;
-                    debug!("processor closed");
-                    return Ok(());
-                }
-                TryRecvError::Empty => sleep(Duration::from_millis(EMPTY_CHANNEL_BACKOFF_MS)).await,
-            },
-        };
-        yield_now().await;
+            Err(_) => {
+                // Channel disconnected - clean shutdown
+                p.close().await?;
+                debug!("processor closed");
+                return Ok(());
+            }
+        }
     }
 }

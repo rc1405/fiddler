@@ -25,6 +25,10 @@ const STALE_MESSAGE_TIMEOUT_SECS: u64 = 3600;
 /// Interval for cleaning up stale entries (5 minutes)
 const STALE_CLEANUP_INTERVAL_SECS: u64 = 300;
 
+/// Default capacity for internal message channels.
+/// Higher values allow more buffering and parallelism but use more memory.
+const CHANNEL_CAPACITY: usize = 10_000;
+
 /// Tracks message processing statistics for observability.
 ///
 /// This struct maintains counters for various message processing events
@@ -230,7 +234,7 @@ impl Runtime {
         let conf: Config = Config::from_str(config)?;
         let parsed_conf = conf.validate().await?;
 
-        let (state_tx, state_rx) = bounded(0);
+        let (state_tx, state_rx) = bounded(CHANNEL_CAPACITY);
 
         debug!("Runtime is ready");
         Ok(Runtime {
@@ -420,7 +424,7 @@ impl Runtime {
         // Create metrics backend based on configuration
         let metrics_backend = create_metrics(self.config.metrics.as_ref()).await?;
 
-        let (msg_tx, msg_rx) = bounded(0);
+        let (msg_tx, msg_rx) = bounded(CHANNEL_CAPACITY);
         let msg_state = message_handler(
             msg_rx,
             self.state_rx.clone(),
@@ -436,7 +440,8 @@ impl Runtime {
 
         let processors = self.pipeline(output, &mut handles).await?;
 
-        let (ks_send, ks_recv) = bounded(0);
+        // Kill switch only needs capacity of 1 - it's a signal channel
+        let (ks_send, ks_recv) = bounded(1);
 
         let input = input(self.config.input.clone(), processors, msg_tx, ks_recv);
 
@@ -481,7 +486,7 @@ impl Runtime {
         for (i, v) in processors.iter().enumerate() {
             let p = v.clone();
 
-            let (tx, rx) = bounded(0);
+            let (tx, rx) = bounded(CHANNEL_CAPACITY);
 
             for n in 0..self.config.num_threads {
                 let proc = processors::run_processor(
@@ -506,7 +511,7 @@ impl Runtime {
     ) -> Result<Sender<InternalMessage>, Error> {
         trace!("started output");
 
-        let (tx, rx) = bounded(0);
+        let (tx, rx) = bounded(CHANNEL_CAPACITY);
 
         for i in 0..self.config.num_threads {
             let item = (output.creator)(output.config.clone()).await?;

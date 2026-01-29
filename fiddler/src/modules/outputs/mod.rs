@@ -6,16 +6,12 @@ pub mod stdout;
 pub mod switch;
 use crate::runtime::{InternalMessage, InternalMessageState, MessageStatus};
 use crate::{Output, OutputBatch};
-use flume::{Receiver, Sender, TryRecvError};
-use std::time;
-use tokio::time::{sleep, Duration};
+use flume::{Receiver, Sender};
+use tokio::time::{timeout, Instant};
 use tracing::{debug, error, trace};
 
 /// Message ID used for shutdown signals
 const SHUTDOWN_MESSAGE_ID: &str = "SHUTDOWN_SIGNAL";
-
-/// Backoff duration when channel is empty (in milliseconds)
-const EMPTY_CHANNEL_BACKOFF_MS: u64 = 250;
 
 pub(crate) fn register_plugins() -> Result<(), Error> {
     drop::register_drop()?;
@@ -34,7 +30,7 @@ pub(crate) async fn run_output(
     debug!("output connected");
 
     loop {
-        match input.try_recv() {
+        match input.recv_async().await {
             Ok(msg) => {
                 trace!("received output message");
                 match o.write(msg.message.clone()).await {
@@ -69,23 +65,21 @@ pub(crate) async fn run_output(
                     },
                 }
             }
-            Err(e) => match e {
-                TryRecvError::Disconnected => {
-                    o.close().await?;
-                    debug!("output closed");
-                    state
-                        .send_async(InternalMessageState {
-                            message_id: SHUTDOWN_MESSAGE_ID.into(),
-                            status: MessageStatus::Shutdown,
-                            ..Default::default()
-                        })
-                        .await
-                        .map_err(|e| Error::UnableToSendToChannel(format!("{e}")))?;
-                    return Ok(());
-                }
-                TryRecvError::Empty => sleep(Duration::from_millis(EMPTY_CHANNEL_BACKOFF_MS)).await,
-            },
-        };
+            Err(_) => {
+                // Channel disconnected - clean shutdown
+                o.close().await?;
+                debug!("output closed");
+                state
+                    .send_async(InternalMessageState {
+                        message_id: SHUTDOWN_MESSAGE_ID.into(),
+                        status: MessageStatus::Shutdown,
+                        ..Default::default()
+                    })
+                    .await
+                    .map_err(|e| Error::UnableToSendToChannel(format!("{e}")))?;
+                return Ok(());
+            }
+        }
     }
 }
 
@@ -98,82 +92,92 @@ pub(crate) async fn run_output_batch(
 
     let batch_size = o.batch_size().await;
     let interval = o.interval().await;
-    let mut now = time::Instant::now();
 
     loop {
-        if input.is_disconnected() {
-            break;
-        };
+        let deadline = Instant::now() + interval;
+        let mut internal_msg_batch: Vec<InternalMessage> = Vec::with_capacity(batch_size);
 
-        let mut internal_msg_batch: Vec<InternalMessage> = Vec::new();
-        while (now.elapsed() < interval) && (internal_msg_batch.len() < batch_size) {
-            match input.try_recv() {
-                Ok(i) => internal_msg_batch.push(i),
-                Err(e) => match e {
-                    TryRecvError::Disconnected => break,
-                    TryRecvError::Empty => {
-                        sleep(Duration::from_millis(EMPTY_CHANNEL_BACKOFF_MS)).await
+        // Collect messages until batch is full or timeout reached
+        while internal_msg_batch.len() < batch_size {
+            let remaining = deadline.saturating_duration_since(Instant::now());
+            if remaining.is_zero() {
+                break;
+            }
+
+            match timeout(remaining, input.recv_async()).await {
+                Ok(Ok(msg)) => internal_msg_batch.push(msg),
+                Ok(Err(_)) => {
+                    // Channel disconnected - process remaining batch and exit
+                    if !internal_msg_batch.is_empty() {
+                        process_batch(&mut o, &state, internal_msg_batch).await?;
                     }
-                },
+                    o.close().await?;
+                    match state
+                        .send_async(InternalMessageState {
+                            message_id: SHUTDOWN_MESSAGE_ID.into(),
+                            status: MessageStatus::Shutdown,
+                            ..Default::default()
+                        })
+                        .await
+                    {
+                        Ok(_) => debug!("exited successfully"),
+                        Err(e) => error!("unable to exit {e}"),
+                    }
+                    return Ok(());
+                }
+                Err(_) => break, // Timeout reached
             }
         }
 
         if !internal_msg_batch.is_empty() {
-            let msg_batch: Vec<crate::Message> = internal_msg_batch
-                .iter()
-                .map(|i| i.message.clone())
-                .collect();
-            match o.write_batch(msg_batch).await {
-                Ok(_) => {
-                    now = time::Instant::now();
-
-                    for msg in internal_msg_batch {
-                        state
-                            .send_async(InternalMessageState {
-                                message_id: msg.message_id,
-                                status: MessageStatus::Output,
-                                stream_id: msg.message.stream_id.clone(),
-                                ..Default::default()
-                            })
-                            .await
-                            .map_err(|e| Error::UnableToSendToChannel(format!("{e}")))?;
-                    }
-                }
-                Err(e) => match e {
-                    Error::ConditionalCheckfailed => {
-                        debug!("conditional check failed for output");
-                    }
-                    _ => {
-                        for msg in internal_msg_batch {
-                            state
-                                .send_async(InternalMessageState {
-                                    message_id: msg.message_id,
-                                    status: MessageStatus::OutputError(format!("{e}")),
-                                    stream_id: msg.message.stream_id.clone(),
-                                    ..Default::default()
-                                })
-                                .await
-                                .map_err(|e| Error::UnableToSendToChannel(format!("{e}")))?;
-                        }
-                    }
-                },
-            };
-        } else {
-            now = time::Instant::now();
+            process_batch(&mut o, &state, internal_msg_batch).await?;
         }
     }
+}
 
-    o.close().await?;
-    match state
-        .send_async(InternalMessageState {
-            message_id: SHUTDOWN_MESSAGE_ID.into(),
-            status: MessageStatus::Shutdown,
-            ..Default::default()
-        })
-        .await
-    {
-        Ok(_) => debug!("exited successfully"),
-        Err(e) => error!("unable to exit {e}"),
+/// Helper function to process a batch of messages
+async fn process_batch(
+    o: &mut Box<dyn OutputBatch + Send + Sync>,
+    state: &Sender<InternalMessageState>,
+    internal_msg_batch: Vec<InternalMessage>,
+) -> Result<(), Error> {
+    let msg_batch: Vec<crate::Message> = internal_msg_batch
+        .iter()
+        .map(|i| i.message.clone())
+        .collect();
+
+    match o.write_batch(msg_batch).await {
+        Ok(_) => {
+            for msg in internal_msg_batch {
+                state
+                    .send_async(InternalMessageState {
+                        message_id: msg.message_id,
+                        status: MessageStatus::Output,
+                        stream_id: msg.message.stream_id.clone(),
+                        ..Default::default()
+                    })
+                    .await
+                    .map_err(|e| Error::UnableToSendToChannel(format!("{e}")))?;
+            }
+        }
+        Err(e) => match e {
+            Error::ConditionalCheckfailed => {
+                debug!("conditional check failed for output");
+            }
+            _ => {
+                for msg in internal_msg_batch {
+                    state
+                        .send_async(InternalMessageState {
+                            message_id: msg.message_id,
+                            status: MessageStatus::OutputError(format!("{e}")),
+                            stream_id: msg.message.stream_id.clone(),
+                            ..Default::default()
+                        })
+                        .await
+                        .map_err(|e| Error::UnableToSendToChannel(format!("{e}")))?;
+                }
+            }
+        },
     }
     Ok(())
 }
