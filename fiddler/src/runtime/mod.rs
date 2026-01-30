@@ -1,29 +1,37 @@
 use flume::{bounded, Receiver, Sender};
+use rustc_hash::FxHashMap;
 use serde::Deserialize;
 use serde::Serialize;
 use serde_yaml::Value;
 use std::collections::hash_map::Entry;
+use std::collections::HashMap;
 use std::fmt;
 use std::future::Future;
 use std::time::Instant;
 use tokio::task::JoinSet;
+use tokio::time::{interval, sleep, Duration, MissedTickBehavior};
 use tracing::{debug, error, info, trace, warn};
 
 use crate::MetricEntry;
-use std::collections::HashMap;
 use std::str::FromStr;
 use std::sync::Once;
-use tokio::time::{sleep, Duration};
 use uuid::Uuid;
 
-/// Backoff duration when no input is available (in milliseconds)
-const NO_INPUT_BACKOFF_MS: u64 = 1500;
+/// Minimum backoff duration when no input is available (in microseconds)
+const NO_INPUT_BACKOFF_MIN_US: u64 = 1;
+
+/// Maximum backoff duration when no input is available (in milliseconds)
+const NO_INPUT_BACKOFF_MAX_MS: u64 = 10;
 
 /// Timeout for stale message entries in the state tracker (1 hour)
 const STALE_MESSAGE_TIMEOUT_SECS: u64 = 3600;
 
 /// Interval for cleaning up stale entries (5 minutes)
 const STALE_CLEANUP_INTERVAL_SECS: u64 = 300;
+
+/// Default capacity for internal message channels.
+/// Higher values allow more buffering and parallelism but use more memory.
+const CHANNEL_CAPACITY: usize = 10_000;
 
 /// Tracks message processing statistics for observability.
 ///
@@ -104,29 +112,13 @@ impl MessageMetrics {
     }
 }
 
-/// Creates a new single-threaded tokio runtime with the given thread name.
-/// This helper reduces code duplication across the codebase.
-fn create_runtime(thread_name: impl Into<String>) -> Result<tokio::runtime::Runtime, Error> {
-    tokio::runtime::Builder::new_multi_thread()
-        .enable_all()
-        .thread_name(thread_name)
-        .worker_threads(1)
-        .build()
-        .map_err(|e| Error::ExecutionError(format!("Failed to create tokio runtime: {e}")))
-}
-
-/// Spawns a blocking task that creates its own runtime and runs the given future.
-fn spawn_runtime_task<F>(
-    handles: &mut JoinSet<Result<(), Error>>,
-    thread_name: impl Into<String> + Send + 'static,
-    task: F,
-) where
+/// Spawns an async task on the shared tokio runtime.
+/// Using the shared runtime enables work-stealing across all tasks for better CPU utilization.
+fn spawn_task<F>(handles: &mut JoinSet<Result<(), Error>>, task: F)
+where
     F: Future<Output = Result<(), Error>> + Send + 'static,
 {
-    handles.spawn_blocking(move || {
-        let runtime = create_runtime(thread_name)?;
-        runtime.block_on(task)
-    });
+    handles.spawn(task);
 }
 
 use super::CallbackChan;
@@ -144,7 +136,12 @@ use crate::modules::register_plugins;
 use crate::MessageType;
 use crate::Status;
 
+use once_cell::sync::Lazy;
+use std::sync::Mutex;
+
 static REGISTER: Once = Once::new();
+/// Stores any error that occurred during plugin registration
+static REGISTER_ERROR: Lazy<Mutex<Option<String>>> = Lazy::new(|| Mutex::new(None));
 
 /// Represents a single data pipeline configuration Runtime to run
 pub struct Runtime {
@@ -222,15 +219,27 @@ impl Runtime {
     /// ```
     pub async fn from_config(config: &str) -> Result<Self, Error> {
         REGISTER.call_once(|| {
-            #[allow(clippy::unwrap_used)]
-            register_plugins().unwrap();
+            if let Err(e) = register_plugins() {
+                if let Ok(mut err) = REGISTER_ERROR.lock() {
+                    *err = Some(format!("{e}"));
+                }
+            }
         });
+
+        // Check if registration failed
+        if let Ok(err_lock) = REGISTER_ERROR.lock() {
+            if let Some(ref e) = *err_lock {
+                return Err(Error::ExecutionError(format!(
+                    "Plugin registration failed: {e}"
+                )));
+            }
+        }
         trace!("plugins registered");
 
         let conf: Config = Config::from_str(config)?;
         let parsed_conf = conf.validate().await?;
 
-        let (state_tx, state_rx) = bounded(0);
+        let (state_tx, state_rx) = bounded(CHANNEL_CAPACITY);
 
         debug!("Runtime is ready");
         Ok(Runtime {
@@ -420,15 +429,24 @@ impl Runtime {
         // Create metrics backend based on configuration
         let metrics_backend = create_metrics(self.config.metrics.as_ref()).await?;
 
-        let (msg_tx, msg_rx) = bounded(0);
+        // Get metrics recording interval from config, or use default (300 seconds)
+        let metrics_interval = self
+            .config
+            .metrics
+            .as_ref()
+            .map(|m| m.interval)
+            .unwrap_or(300);
+
+        let (msg_tx, msg_rx) = bounded(CHANNEL_CAPACITY);
         let msg_state = message_handler(
             msg_rx,
             self.state_rx.clone(),
             self.config.num_threads,
             metrics_backend,
+            metrics_interval,
         );
 
-        spawn_runtime_task(&mut handles, "state", msg_state);
+        spawn_task(&mut handles, msg_state);
 
         let output = self
             .output(self.config.output.clone(), &mut handles)
@@ -436,21 +454,22 @@ impl Runtime {
 
         let processors = self.pipeline(output, &mut handles).await?;
 
-        let (ks_send, ks_recv) = bounded(0);
+        // Kill switch only needs capacity of 1 - it's a signal channel
+        let (ks_send, ks_recv) = bounded(1);
 
         let input = input(self.config.input.clone(), processors, msg_tx, ks_recv);
 
-        spawn_runtime_task(&mut handles, "input", input);
+        spawn_task(&mut handles, input);
 
         info!(label = self.config.label, "pipeline started");
 
         if let Some(d) = self.timeout {
-            handles.spawn_blocking(move || {
-                let runtime = create_runtime("timeout")?;
-                runtime.block_on(sleep(d));
+            let timeout_ks_send = ks_send.clone();
+            handles.spawn(async move {
+                sleep(d).await;
                 trace!("sending kill signal");
-                if !ks_send.is_disconnected() {
-                    if let Err(e) = ks_send.send(()) {
+                if !timeout_ks_send.is_disconnected() {
+                    if let Err(e) = timeout_ks_send.send(()) {
                         debug!(error = ?e, "Failed to send kill signal, receiver may have been dropped");
                     }
                 }
@@ -458,8 +477,40 @@ impl Runtime {
             });
         }
 
-        while let Some(res) = handles.join_next().await {
-            res.map_err(|e| Error::ProcessingError(format!("{e}")))??;
+        // Main loop: wait for tasks to complete or Ctrl+C signal
+        loop {
+            tokio::select! {
+                // Handle task completion
+                res = handles.join_next() => {
+                    match res {
+                        Some(Ok(Ok(()))) => {
+                            // Task completed successfully, continue waiting for others
+                        }
+                        Some(Ok(Err(e))) => {
+                            // Task returned an error
+                            return Err(e);
+                        }
+                        Some(Err(e)) => {
+                            // Task panicked or was cancelled
+                            return Err(Error::ProcessingError(format!("{e}")));
+                        }
+                        None => {
+                            // All tasks completed
+                            break;
+                        }
+                    }
+                }
+                // Handle Ctrl+C signal for graceful shutdown
+                _ = tokio::signal::ctrl_c() => {
+                    info!("Received shutdown signal (Ctrl+C), initiating graceful shutdown");
+                    if !ks_send.is_disconnected() {
+                        if let Err(e) = ks_send.send(()) {
+                            debug!(error = ?e, "Failed to send kill signal from signal handler");
+                        }
+                    }
+                    // Continue the loop to let tasks shut down gracefully
+                }
+            }
         }
 
         info!("pipeline finished");
@@ -481,7 +532,7 @@ impl Runtime {
         for (i, v) in processors.iter().enumerate() {
             let p = v.clone();
 
-            let (tx, rx) = bounded(0);
+            let (tx, rx) = bounded(CHANNEL_CAPACITY);
 
             for n in 0..self.config.num_threads {
                 let proc = processors::run_processor(
@@ -490,7 +541,7 @@ impl Runtime {
                     rx.clone(),
                     self.state_tx.clone(),
                 );
-                spawn_runtime_task(handles, format!("processor{i}-{n}"), proc);
+                spawn_task(handles, proc);
             }
 
             next_tx = tx;
@@ -506,7 +557,7 @@ impl Runtime {
     ) -> Result<Sender<InternalMessage>, Error> {
         trace!("started output");
 
-        let (tx, rx) = bounded(0);
+        let (tx, rx) = bounded(CHANNEL_CAPACITY);
 
         for i in 0..self.config.num_threads {
             let item = (output.creator)(output.config.clone()).await?;
@@ -514,20 +565,12 @@ impl Runtime {
                 ExecutionType::Output(o) => {
                     let state_tx = self.state_tx.clone();
                     let new_rx = rx.clone();
-                    spawn_runtime_task(
-                        handles,
-                        format!("output{i}"),
-                        outputs::run_output(new_rx, state_tx, o),
-                    );
+                    spawn_task(handles, outputs::run_output(new_rx, state_tx, o));
                 }
                 ExecutionType::OutputBatch(o) => {
                     let state_tx = self.state_tx.clone();
                     let new_rx = rx.clone();
-                    spawn_runtime_task(
-                        handles,
-                        format!("output{i}"),
-                        outputs::run_output_batch(new_rx, state_tx, o),
-                    );
+                    spawn_task(handles, outputs::run_output_batch(new_rx, state_tx, o));
                 }
                 _ => {
                     error!("invalid execution type for output");
@@ -556,15 +599,17 @@ struct State {
 
 /// Process state updates iteratively to avoid stack overflow with deeply nested streams
 fn process_state(
-    handles: &mut HashMap<String, State>,
+    handles: &mut FxHashMap<String, State>,
     output_ct: &usize,
     closed_outputs: &mut usize,
     initial_msg: InternalMessageState,
     metrics: &mut MessageMetrics,
 ) -> Result<(), Error> {
     // Use a stack for iterative processing instead of recursion
-    let mut pending_messages = vec![initial_msg];
-    let mut entries_to_remove = Vec::new();
+    // Pre-allocate with realistic capacity to avoid reallocation
+    let mut pending_messages = Vec::with_capacity(4);
+    pending_messages.push(initial_msg);
+    let mut entries_to_remove = Vec::with_capacity(2);
 
     while let Some(msg) = pending_messages.pop() {
         let mut remove_entry = false;
@@ -706,7 +751,7 @@ fn process_state(
                     }
                 };
 
-                info!(
+                trace!(
                     instance_count = state.instance_count,
                     processed_count = state.processed_count,
                     processed_error_count = state.processed_error_count,
@@ -767,45 +812,34 @@ async fn message_handler(
     msg_status: Receiver<InternalMessageState>,
     output_ct: usize,
     mut metrics_backend: Box<dyn Metrics>,
+    metrics_interval_secs: u64,
 ) -> Result<(), Error> {
-    let mut handles: HashMap<String, State> = HashMap::new();
+    // Pre-allocate FxHashMap for expected concurrent messages (faster than SipHash)
+    let mut handles: FxHashMap<String, State> = FxHashMap::default();
+    handles.reserve(1024);
     let mut closed_outputs = 0;
-    let mut last_cleanup = Instant::now();
-    let stale_timeout = std::time::Duration::from_secs(STALE_MESSAGE_TIMEOUT_SECS);
-    let cleanup_interval = std::time::Duration::from_secs(STALE_CLEANUP_INTERVAL_SECS);
+    let stale_timeout = Duration::from_secs(STALE_MESSAGE_TIMEOUT_SECS);
     let mut metrics = MessageMetrics::new();
 
+    // Use tokio interval timers instead of manual elapsed() checks
+    let mut metrics_timer = interval(Duration::from_secs(metrics_interval_secs));
+    metrics_timer.set_missed_tick_behavior(MissedTickBehavior::Skip);
+    // Skip the first immediate tick
+    metrics_timer.tick().await;
+
+    let mut cleanup_timer = interval(Duration::from_secs(STALE_CLEANUP_INTERVAL_SECS));
+    cleanup_timer.set_missed_tick_behavior(MissedTickBehavior::Skip);
+    // Skip the first immediate tick
+    cleanup_timer.tick().await;
+
+    debug!(
+        interval_secs = metrics_interval_secs,
+        "Metrics recording interval configured"
+    );
+
     loop {
-        // Periodically clean up stale entries to prevent memory leaks
-        if last_cleanup.elapsed() >= cleanup_interval {
-            let before_count = handles.len();
-            handles.retain(|message_id, state| {
-                let is_stale = state.created_at.elapsed() >= stale_timeout;
-                if is_stale {
-                    warn!(
-                        message_id = message_id,
-                        age_secs = state.created_at.elapsed().as_secs(),
-                        "Removing stale message state entry"
-                    );
-                }
-                !is_stale
-            });
-            let removed = before_count - handles.len();
-            if removed > 0 {
-                metrics.stale_entries_removed += removed as u64;
-                info!(
-                    removed_count = removed,
-                    remaining_count = handles.len(),
-                    "Cleaned up stale message state entries"
-                );
-            }
-            last_cleanup = Instant::now();
-
-            // Record metrics to configured backend
-            metrics.record(metrics_backend.as_mut(), handles.len());
-        }
-
         tokio::select! {
+            // biased ensures new messages are registered before status updates are processed
             biased;
             Ok(msg) = new_msg.recv_async() => {
                 trace!(message_id = msg.message_id, "Received new message");
@@ -835,7 +869,10 @@ async fn message_handler(
                 }
 
                 let closure = msg.closure;
-                match handles.entry(msg.message_id.clone()) {
+                let stream_id = msg.stream_id;
+                let is_stream = msg.is_stream;
+                // Consume message_id instead of cloning - Entry API takes ownership
+                match handles.entry(msg.message_id) {
                     Entry::Vacant(entry) => {
                         entry.insert(State {
                             instance_count: 1,
@@ -844,20 +881,20 @@ async fn message_handler(
                             output_count: 0,
                             output_error_count: 0,
                             closure,
-                            errors: Vec::new(),
-                            stream_id: msg.stream_id.clone(),
-                            stream_closed: if msg.is_stream { Some(false) } else { None },
+                            errors: Vec::with_capacity(2), // Pre-allocate for common case
+                            stream_id: stream_id.clone(),
+                            stream_closed: if is_stream { Some(false) } else { None },
                             created_at: Instant::now(),
                         });
                     }
-                    Entry::Occupied(_) => {
+                    Entry::Occupied(entry) => {
                         metrics.duplicates_rejected += 1;
-                        error!(message_id = msg.message_id, "Received duplicate message");
+                        error!(message_id = entry.key(), "Received duplicate message");
                         return Err(Error::ExecutionError("Duplicate Message ID Error".into()));
                     }
                 }
 
-                if let Some(s) = &msg.stream_id {
+                if let Some(s) = &stream_id {
                     if let Err(e) = process_state(&mut handles, &output_ct, &mut closed_outputs, InternalMessageState{
                         message_id: s.clone(),
                         status: MessageStatus::New,
@@ -884,6 +921,37 @@ async fn message_handler(
                         _ => return Err(e),
                     };
                 };
+            },
+            _ = metrics_timer.tick() => {
+                metrics.record(metrics_backend.as_mut(), handles.len());
+                trace!(
+                    in_flight = handles.len(),
+                    throughput = format!("{:.2}", metrics.throughput_per_sec()),
+                    "Recorded periodic metrics"
+                );
+            },
+            _ = cleanup_timer.tick() => {
+                let before_count = handles.len();
+                handles.retain(|message_id, state| {
+                    let is_stale = state.created_at.elapsed() >= stale_timeout;
+                    if is_stale {
+                        warn!(
+                            message_id = message_id,
+                            age_secs = state.created_at.elapsed().as_secs(),
+                            "Removing stale message state entry"
+                        );
+                    }
+                    !is_stale
+                });
+                let removed = before_count - handles.len();
+                if removed > 0 {
+                    metrics.stale_entries_removed += removed as u64;
+                    info!(
+                        removed_count = removed,
+                        remaining_count = handles.len(),
+                        "Cleaned up stale message state entries"
+                    );
+                }
             },
             else => break,
         }
@@ -939,6 +1007,9 @@ async fn input(
 
     debug!("input connected");
 
+    // Track consecutive no-input errors for exponential backoff
+    let mut no_input_count: u32 = 0;
+
     loop {
         tokio::select! {
             biased;
@@ -950,6 +1021,8 @@ async fn input(
             m = i.read() => {
                 match m {
                     Ok((msg, closure)) => {
+                        // Reset backoff on successful read
+                        no_input_count = 0;
                         let message_type = msg.message_type.clone();
 
                         let message_id: String = match &message_type {
@@ -958,7 +1031,7 @@ async fn input(
                             MessageType::EndStream(id) => id.clone(),
                         };
 
-                        debug!(message_id = message_id, message_type = format!("{:?}", message_type), "received message");
+                        trace!(message_id = message_id, message_type = format!("{:?}", message_type), "received message");
 
                         let is_stream = match &message_type {
                             MessageType::BeginStream(_) => true,
@@ -1003,7 +1076,12 @@ async fn input(
                             return Ok(());
                         }
                         Error::NoInputToReturn => {
-                            sleep(Duration::from_millis(NO_INPUT_BACKOFF_MS)).await;
+                            // Exponential backoff: 1μs, 2μs, 4μs, ..., up to 10ms
+                            let backoff_us = NO_INPUT_BACKOFF_MIN_US
+                                .saturating_mul(1u64 << no_input_count.min(20))
+                                .min(NO_INPUT_BACKOFF_MAX_MS * 1000);
+                            sleep(Duration::from_micros(backoff_us)).await;
+                            no_input_count = no_input_count.saturating_add(1);
                             continue;
                         }
                         _ => {
@@ -1117,5 +1195,126 @@ mod tests {
         let mut backend = NoOpMetrics::new();
         metrics.record(&mut backend, 10);
         // No assertion needed - just verify it doesn't panic
+    }
+
+    #[test]
+    fn test_process_state_unknown_message_id() {
+        let mut handles = FxHashMap::default();
+        let mut closed_outputs = 0;
+        let mut metrics = MessageMetrics::new();
+
+        // Try to process a status for a non-existent message
+        let result = process_state(
+            &mut handles,
+            &1,
+            &mut closed_outputs,
+            InternalMessageState {
+                message_id: "unknown_id".to_string(),
+                status: MessageStatus::Processed,
+                stream_id: None,
+                is_stream: false,
+            },
+            &mut metrics,
+        );
+
+        // Should return an error for unknown message ID
+        assert!(result.is_err());
+        match result {
+            Err(Error::ExecutionError(msg)) => {
+                assert!(msg.contains("does not exist"));
+            }
+            _ => panic!("Expected ExecutionError"),
+        }
+    }
+
+    #[test]
+    fn test_process_state_shutdown_signal() {
+        let mut handles = FxHashMap::default();
+        let mut closed_outputs = 0;
+        let mut metrics = MessageMetrics::new();
+        let output_ct = 1; // Single output
+
+        // Process shutdown signal
+        let result = process_state(
+            &mut handles,
+            &output_ct,
+            &mut closed_outputs,
+            InternalMessageState {
+                message_id: crate::SHUTDOWN_MESSAGE_ID.to_string(),
+                status: MessageStatus::Shutdown,
+                stream_id: None,
+                is_stream: false,
+            },
+            &mut metrics,
+        );
+
+        // Should return EndOfInput when all outputs have shut down
+        assert!(result.is_err());
+        assert!(matches!(result, Err(Error::EndOfInput)));
+        assert_eq!(closed_outputs, 1);
+    }
+
+    #[test]
+    fn test_process_state_tracks_errors() {
+        let mut handles = FxHashMap::default();
+        let mut closed_outputs = 0;
+        let mut metrics = MessageMetrics::new();
+        let message_id = "test_msg".to_string();
+
+        // Add a message to handles
+        handles.insert(
+            message_id.clone(),
+            State {
+                instance_count: 1,
+                processed_count: 0,
+                processed_error_count: 0,
+                output_count: 0,
+                output_error_count: 0,
+                closure: None,
+                errors: Vec::new(),
+                stream_id: None,
+                stream_closed: Some(true),
+                created_at: std::time::Instant::now(),
+            },
+        );
+
+        // Process an error status
+        let result = process_state(
+            &mut handles,
+            &1,
+            &mut closed_outputs,
+            InternalMessageState {
+                message_id: message_id.clone(),
+                status: MessageStatus::ProcessError("test error".to_string()),
+                stream_id: None,
+                is_stream: false,
+            },
+            &mut metrics,
+        );
+
+        assert!(result.is_ok());
+        assert_eq!(metrics.total_process_errors, 1);
+        // Message should be removed since stream_closed is true and counts match
+        assert!(!handles.contains_key(&message_id));
+    }
+
+    #[test]
+    fn test_message_status_display() {
+        assert_eq!(format!("{}", MessageStatus::New), "New");
+        assert_eq!(format!("{}", MessageStatus::Processed), "Processed");
+        assert_eq!(
+            format!("{}", MessageStatus::ProcessError("err".into())),
+            "ProcessError"
+        );
+        assert_eq!(format!("{}", MessageStatus::Output), "Output");
+        assert_eq!(
+            format!("{}", MessageStatus::OutputError("err".into())),
+            "OutputError"
+        );
+        assert_eq!(format!("{}", MessageStatus::Shutdown), "Shutdown");
+        assert_eq!(
+            format!("{}", MessageStatus::StreamComplete),
+            "StreamComplete"
+        );
     }
 }

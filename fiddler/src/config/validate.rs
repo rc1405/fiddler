@@ -33,7 +33,7 @@ pub async fn parse_configuration_item(
         "unable to determine {} key",
         itype
     )))?;
-    trace!("validationg item {} of type {}", first_key, itype);
+    trace!("validating item {} of type {}", first_key, itype);
     let item = get_item(&itype, first_key)?;
 
     let content = map
@@ -53,7 +53,7 @@ pub async fn parse_configuration_item(
 }
 
 fn get_item(itype: &ItemType, key: &String) -> Result<RegisteredItem, Error> {
-    match ENV.lock() {
+    match ENV.read() {
         Ok(lock) => {
             match lock.get(itype) {
                 Some(i) => {

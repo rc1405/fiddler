@@ -15,7 +15,7 @@ use serde_yaml::Value;
 use std::collections::HashMap;
 use tokio::io::AsyncBufReadExt;
 use tokio::task::JoinSet;
-use tracing::{debug, info};
+use tracing::{debug, error, info};
 
 enum ReaderType {
     Queue(String),
@@ -164,23 +164,33 @@ async fn list_objects(
                                 if let Ok(status) = rx.await {
                                     match status {
                                         Status::Processed => {
-                                            #[allow(clippy::unwrap_used)]
-                                            c.delete_message()
+                                            if let Err(e) = c
+                                                .delete_message()
                                                 .receipt_handle(receipt_handle)
                                                 .queue_url(&url2)
                                                 .send()
                                                 .await
-                                                .unwrap();
+                                            {
+                                                tracing::error!(
+                                                    error = %DisplayErrorContext(e),
+                                                    "Failed to delete SQS message"
+                                                );
+                                            }
                                         }
                                         Status::Errored(_e) => {
-                                            #[allow(clippy::unwrap_used)]
-                                            c.change_message_visibility()
+                                            if let Err(e) = c
+                                                .change_message_visibility()
                                                 .receipt_handle(receipt_handle)
                                                 .queue_url(&url2)
                                                 .visibility_timeout(10)
                                                 .send()
                                                 .await
-                                                .unwrap();
+                                            {
+                                                tracing::error!(
+                                                    error = %DisplayErrorContext(e),
+                                                    "Failed to change SQS message visibility"
+                                                );
+                                            }
                                         }
                                     };
                                 };
@@ -220,14 +230,16 @@ async fn list_objects(
                                     let k = key.clone();
                                     tokio::spawn(async move {
                                         if let Ok(Status::Processed) = rx.await {
-                                            #[allow(clippy::unwrap_used)]
-                                            s3.delete_object()
-                                                .bucket(b)
-                                                .key(k)
-                                                .send()
-                                                .await
-                                                .map_err(DisplayErrorContext)
-                                                .unwrap();
+                                            if let Err(e) =
+                                                s3.delete_object().bucket(&b).key(&k).send().await
+                                            {
+                                                tracing::error!(
+                                                    bucket = %b,
+                                                    key = %k,
+                                                    error = %DisplayErrorContext(e),
+                                                    "Failed to delete S3 object"
+                                                );
+                                            }
                                         }
                                     });
                                 } else {
@@ -324,14 +336,16 @@ async fn list_objects(
                             handles.spawn(async move {
                                 debug!(bucket = b, key = k, "deleting object");
                                 if let Ok(Status::Processed) = rx.await {
-                                    #[allow(clippy::unwrap_used)]
-                                    s3.delete_object()
-                                        .bucket(b)
-                                        .key(k)
-                                        .send()
-                                        .await
-                                        .map_err(DisplayErrorContext)
-                                        .unwrap();
+                                    if let Err(e) =
+                                        s3.delete_object().bucket(&b).key(&k).send().await
+                                    {
+                                        error!(
+                                            bucket = %b,
+                                            key = %k,
+                                            error = %DisplayErrorContext(e),
+                                            "Failed to delete S3 object"
+                                        );
+                                    }
                                 }
                             });
                         } else {

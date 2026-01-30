@@ -26,7 +26,7 @@ all = ["python", "elasticsearch", "aws", "prometheus"]
 [dependencies]
 fiddler-macros = { version = "1.0.0", path = "../fiddler-macros" }
 fiddler-script = { version = "0.1.0", path = "../fiddler-script" }
-async-std = { version = "1.12.0", features = ["std"] }
+async-std = { version = "1.12.0", features = ["attributes", "std"] }
 async-trait = "0.1.78"
 aws-config = { version = "1.1.7", features = [
     "behavior-version-latest",
@@ -56,10 +56,12 @@ tracing = "0.1.40"
 uuid = { version = "1.11.0", features = ["v4"] }
 chrono = { version = "0.4.40", features = ["serde"] }
 flume = { version = "0.11.1", features = ["async"] }
+rustc-hash = "2.1"
 flate2 = "1.1.1"
 base64 = "0.22.1"
 metrics = { version = "0.24", optional = true }
 metrics-exporter-prometheus = { version = "0.16", optional = true }
+futures = "0.3.31"
 
 [build-dependencies]
 fs_extra = "1.3.0"

@@ -64,9 +64,7 @@ impl ElasticConfig {
             _ => CertificateValidation::Default,
         };
 
-        if self.cloud_id.is_some() {
-            #[allow(clippy::unwrap_used)]
-            let cloud_id = self.cloud_id.clone().unwrap();
+        if let Some(ref cloud_id) = self.cloud_id {
             let username = self
                 .username
                 .clone()
@@ -76,8 +74,8 @@ impl ElasticConfig {
                 .clone()
                 .ok_or(Error::ConfigFailedValidation("password is required".into()))?;
             let credentials = Credentials::Basic(username, password);
-            let transport = Transport::cloud(&cloud_id, credentials)
-                .map_err(|e| Error::ConfigFailedValidation(format!("{}", e)))?;
+            let transport = Transport::cloud(cloud_id, credentials)
+                .map_err(|e| Error::ConfigFailedValidation(format!("{e}")))?;
             Ok(Elasticsearch::new(transport))
         } else if self.username.is_some() {
             let url = self

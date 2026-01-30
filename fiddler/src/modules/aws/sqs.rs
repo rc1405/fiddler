@@ -87,7 +87,12 @@ impl Input for AwsSqs {
                     if let Some(message_id) = m.receipt_handle.clone() {
                         tokio::spawn(async move {
                             if let Ok(Status::Processed) = rx.await {
-                                sender.send_async(message_id).await.unwrap();
+                                if let Err(e) = sender.send_async(message_id).await {
+                                    tracing::error!(
+                                        error = %e,
+                                        "Failed to send SQS acknowledgment"
+                                    );
+                                }
                             }
                         });
                     }
