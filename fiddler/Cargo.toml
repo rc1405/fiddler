@@ -1,6 +1,6 @@
 [package]
 name = "fiddler"
-version = "3.0.0"
+version = "4.0.0"
 edition = "2021"
 license-file = "../LICENSE"
 description = "Data Stream processor written in rust"
@@ -25,7 +25,7 @@ prometheus = ["dep:metrics", "dep:metrics-exporter-prometheus"]
 all = ["python", "elasticsearch", "aws", "prometheus"]
 
 [dependencies]
-fiddler-macros = { version = "1.0.0", path = "../fiddler-macros" }
+fiddler-macros = { version = "1.1.0", path = "../fiddler-macros" }
 fiddler-script = { version = "0.1.0", path = "../fiddler-script" }
 async-std = { version = "1.12.0", features = ["attributes", "std"] }
 async-trait = "0.1.78"
