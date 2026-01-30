@@ -5,3 +5,7 @@ version_group = "fiddler"
 [[package]]
 name = "fiddler-cli"
 version_group = "fiddler"
+
+[[package]]
+name = "fiddler-script"
+version_group = "script"
