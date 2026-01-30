@@ -16,7 +16,6 @@ struct CheckConfig {
 }
 
 pub struct Check {
-    _label: Option<String>,
     condition: String,
     output: Box<dyn Output + Send + Sync>,
 }
@@ -26,24 +25,30 @@ fn perform_check(condition: &str, json_str: String) -> Result<(), Error> {
     runtime.register_builtin_functions();
     let expr = runtime
         .compile(condition)
-        .map_err(|e| Error::ProcessingError(e.to_string()))?;
+        .map_err(|e| Error::ProcessingError(format!("{e}")))?;
     let data = jmespath::Variable::from_json(&json_str)
-        .map_err(|e| Error::ProcessingError(e.to_string()))?;
+        .map_err(|e| Error::ProcessingError(format!("{e}")))?;
 
     let result = expr
         .search(data)
-        .map_err(|e| Error::ProcessingError(format!("{}", e)))?;
-    if !result.as_boolean().unwrap_or(false) {
-        return Err(Error::ConditionalCheckfailed);
-    };
-    Ok(())
+        .map_err(|e| Error::ProcessingError(format!("{e}")))?;
+
+    // Explicitly check that result is a boolean type
+    match result.as_boolean() {
+        Some(true) => Ok(()),
+        Some(false) => Err(Error::ConditionalCheckfailed),
+        None => Err(Error::ProcessingError(format!(
+            "Condition '{}' did not return a boolean value, got: {:?}",
+            condition, result
+        ))),
+    }
 }
 
 #[async_trait]
 impl Output for Check {
     async fn write(&mut self, message: Message) -> Result<(), Error> {
         let json_str = String::from_utf8(message.bytes.clone())
-            .map_err(|e| Error::ProcessingError(e.to_string()))?;
+            .map_err(|e| Error::ProcessingError(format!("{e}")))?;
 
         perform_check(&self.condition, json_str)?;
 
@@ -63,7 +68,7 @@ impl Closer for Check {
 fn create_check(conf: Value) -> Result<ExecutionType, Error> {
     let c: CheckConfig = serde_yaml::from_value(conf.clone())?;
     let _ = jmespath::compile(&c.condition)
-        .map_err(|e| Error::ConfigFailedValidation(format!("{}", e)))?;
+        .map_err(|e| Error::ConfigFailedValidation(format!("{e}")))?;
 
     let ri = parse_configuration_item(ItemType::Output, &c.output.extra).await?;
 
@@ -78,7 +83,6 @@ fn create_check(conf: Value) -> Result<ExecutionType, Error> {
     };
 
     let s = Check {
-        _label: c.label,
         condition: c.condition,
         output: out,
     };

@@ -1,0 +1,29 @@
+[package]
+name = "fiddler-script"
+version = "0.1.0"
+edition = "2021"
+description = "A minimal C-style scripting language interpreter"
+license-file = "../LICENSE"
+readme = "README.md"
+
+[dependencies]
+thiserror = "2"
+serde_json = "1"
+flate2 = "1"
+base64 = "0.22"
+indexmap = "2"
+chrono = "0.4"
+
+[dev-dependencies]
+
+[lints.rust]
+unsafe_code = "forbid"
+missing-docs = "warn"
+redundant-imports = "warn"
+unused-crate-dependencies = "warn"
+unused-extern-crates = "warn"
+unused-import-braces = "warn"
+
+[lints.clippy]
+enum_glob_use = "deny"
+unwrap_used = "warn"

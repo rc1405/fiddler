@@ -38,4 +38,5 @@ output:
 ```
 
 ## Available Backends
+- [cloudwatch](./cloudwatch.md) - AWS CloudWatch metrics (requires `aws` feature)
 - [prometheus](./prometheus.md) - Prometheus-compatible metrics endpoint (requires `prometheus` feature)

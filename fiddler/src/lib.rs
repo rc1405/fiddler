@@ -1,7 +1,7 @@
 //! Fast and flexible data stream processor written in Rust
 //!
 //! Provides a library for building data streaming pipelines using a
-//! declaritive yaml based configuration for data aggregation and
+//! declarative yaml based configuration for data aggregation and
 //! transformation
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
@@ -16,6 +16,10 @@ pub mod config;
 pub use runtime::Runtime;
 pub(crate) mod modules;
 mod runtime;
+
+/// Reserved message ID used internally for shutdown signaling.
+/// User messages should not use this ID.
+pub const SHUTDOWN_MESSAGE_ID: &str = "SHUTDOWN_SIGNAL";
 
 /// BatchingPolicy defines common configuration items for used in batching operations
 /// such as OutputBatch modules.
@@ -32,9 +36,21 @@ mod runtime;
 #[derive(Deserialize, Default, Clone)]
 pub struct BatchingPolicy {
     /// Maximum duration to wait before flushing a batch
-    duration: Option<Duration>,
+    pub duration: Option<Duration>,
     /// Maximum number of messages in a batch before flushing
-    size: Option<usize>,
+    pub size: Option<usize>,
+}
+
+impl BatchingPolicy {
+    /// Get the effective batch size, using default (500) if not specified.
+    pub fn effective_size(&self) -> usize {
+        self.size.unwrap_or(500)
+    }
+
+    /// Get the effective interval, using default (10 seconds) if not specified.
+    pub fn effective_duration(&self) -> Duration {
+        self.duration.unwrap_or_else(|| Duration::from_secs(10))
+    }
 }
 
 /// MessageType is utilized by plugins to identiy which type of message are they sending
@@ -71,18 +87,31 @@ pub struct Message {
     pub bytes: Vec<u8>,
     /// metadata about the message
     pub metadata: HashMap<String, Value>,
-    /// Specified message types.  If [MessageType::Parent] is provided, no processing of the event
-    /// will take place, but the callback will be called when all child messages
-    /// have been processed.  This gives modules the ability to tier callback actions.  Such as a
-    /// module that receives a file from queue and then processes all the lines in said file.
-    /// Each line will be it's own [Message]; where the parent callback will delete the message
-    /// once all lines are processed
+    /// Specifies the message type. If [MessageType::BeginStream] or [MessageType::EndStream] is
+    /// provided, no processing of the event will take place, but the callback will be called
+    /// when all child messages have been processed. This gives modules the ability to tier
+    /// callback actions. Such as a module that receives a file from a queue and then processes
+    /// all the lines in said file. Each line will be its own [Message]; where the stream
+    /// callback will delete the original message once all lines are processed.
     pub message_type: MessageType,
     /// [Optional] Specifies the stream_id of the associated stream of messages with a shared callback
     pub stream_id: Option<String>,
 }
 
-/// Type alias for Vec<[crate::Message]>, a grouping of Messages being produced
+/// A batch of messages being processed together.
+///
+/// Message batches are used by processors to emit multiple messages from a single input,
+/// and by batch outputs to collect messages before writing.
+///
+/// # Example
+/// ```
+/// use fiddler::{Message, MessageBatch};
+///
+/// let batch: MessageBatch = vec![
+///     Message { bytes: b"msg1".to_vec(), ..Default::default() },
+///     Message { bytes: b"msg2".to_vec(), ..Default::default() },
+/// ];
+/// ```
 pub type MessageBatch = Vec<Message>;
 
 /// MetricEntry is the uniform struct utilized within metrics modules of fiddler.
@@ -115,8 +144,28 @@ pub struct MetricEntry {
     pub throughput_per_sec: f64,
 }
 
-/// Acknowledgement channel utilized to send feedback to input module on the successful
-/// or unsuccessful processing of event emited by input.
+/// Channel for sending acknowledgment status back to input modules.
+///
+/// Input modules can optionally provide a callback channel when emitting messages.
+/// The runtime will send a [`Status`] through this channel once all processing
+/// and output operations for the message (and any derived messages) are complete.
+///
+/// This enables input modules to implement at-least-once delivery semantics
+/// by only acknowledging messages after successful processing.
+///
+/// # Example
+/// ```
+/// use fiddler::{new_callback_chan, Status};
+///
+/// let (tx, rx) = new_callback_chan();
+/// // ... emit message with tx as callback ...
+/// // Later, check the result:
+/// // match rx.await {
+/// //     Ok(Status::Processed) => println!("Success"),
+/// //     Ok(Status::Errored(errs)) => println!("Failed: {:?}", errs),
+/// //     Err(_) => println!("Channel closed"),
+/// // }
+/// ```
 pub type CallbackChan = oneshot::Sender<Status>;
 
 /// Helper function to generate transmitting and receiver pair that can be utilized for

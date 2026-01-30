@@ -7,7 +7,7 @@ use std::collections::HashMap;
 use std::env;
 use std::fmt;
 use std::str::FromStr;
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, RwLock};
 use tracing::{debug, error, trace};
 
 use core::future::Future;
@@ -72,21 +72,17 @@ pub enum ExecutionType {
     Metrics(Box<dyn Metrics + Send + Sync>),
 }
 
-static ENV: Lazy<Mutex<HashMap<ItemType, HashMap<String, RegisteredItem>>>> = Lazy::new(|| {
+/// Plugin registry using RwLock for concurrent read access after initialization.
+/// Writes only occur during plugin registration at startup.
+static ENV: Lazy<RwLock<HashMap<ItemType, HashMap<String, RegisteredItem>>>> = Lazy::new(|| {
     let mut m = HashMap::new();
-    #[allow(unused_results)]
     m.insert(ItemType::Input, HashMap::new());
-    #[allow(unused_results)]
     m.insert(ItemType::InputBatch, HashMap::new());
-    #[allow(unused_results)]
     m.insert(ItemType::Output, HashMap::new());
-    #[allow(unused_results)]
     m.insert(ItemType::OutputBatch, HashMap::new());
-    #[allow(unused_results)]
     m.insert(ItemType::Processor, HashMap::new());
-    #[allow(unused_results)]
     m.insert(ItemType::Metrics, HashMap::new());
-    Mutex::new(m)
+    RwLock::new(m)
 });
 
 /// Parsed and validated configuration item
@@ -121,6 +117,7 @@ pub(crate) struct Item {
 ///
 /// ```yaml
 /// metrics:
+///   interval: 300  # Record metrics every 5 minutes (default)
 ///   prometheus: {}
 /// ```
 #[derive(Debug, Deserialize, Serialize, Clone, Default)]
@@ -128,9 +125,20 @@ pub struct MetricsConfig {
     /// Optional label for the metrics configuration
     pub label: Option<String>,
 
+    /// Interval in seconds at which metrics are recorded (default: 300)
+    #[serde(default = "MetricsConfig::default_interval")]
+    pub interval: u64,
+
     /// Dynamic configuration for the metrics backend
     #[serde(flatten)]
     pub extra: HashMap<String, Value>,
+}
+
+impl MetricsConfig {
+    /// Default metrics recording interval (300 seconds)
+    fn default_interval() -> u64 {
+        300
+    }
 }
 
 /// Unparsed fiddler configuration
@@ -158,7 +166,7 @@ impl FromStr for Config {
     fn from_str(conf: &str) -> Result<Self, Self::Err> {
         let mut environment_variables: HashMap<String, String> = HashMap::new();
         for (key, value) in env::vars() {
-            let _ = environment_variables.insert(key, value);
+            environment_variables.insert(key, value);
         }
 
         let mut handle_bars = Handlebars::new();
@@ -166,9 +174,18 @@ impl FromStr for Config {
 
         let populated_config = handle_bars
             .render_template(conf, &environment_variables)
-            .map_err(|e| Error::ConfigFailedValidation(format!("{}", e)))?;
+            .map_err(|e| {
+                Error::ConfigFailedValidation(format!(
+                    "Handlebars template error: {e}. Check your variable interpolations."
+                ))
+            })?;
 
-        let config: Config = serde_yaml::from_str(&populated_config)?;
+        let config: Config = serde_yaml::from_str(&populated_config).map_err(|e| {
+            Error::ConfigFailedValidation(format!(
+                "YAML parsing error after variable substitution: {e}"
+            ))
+        })?;
+
         Ok(config)
     }
 }

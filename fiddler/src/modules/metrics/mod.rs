@@ -24,6 +24,8 @@ use tracing::debug;
 #[cfg(feature = "prometheus")]
 pub mod prometheus;
 
+pub mod stdout;
+
 /// Registers all available metrics plugins.
 ///
 /// This function should be called during plugin initialization to register
@@ -31,6 +33,8 @@ pub mod prometheus;
 pub(crate) fn register_plugins() -> Result<(), Error> {
     #[cfg(feature = "prometheus")]
     prometheus::register_prometheus()?;
+
+    stdout::register_stdout()?;
 
     Ok(())
 }
@@ -180,9 +184,47 @@ mod tests {
             "prometheus".to_string(),
             serde_yaml::Value::Mapping(serde_yaml::Mapping::new()),
         );
-        let config = crate::config::MetricsConfig { label: None, extra };
+        let config = crate::config::MetricsConfig {
+            label: None,
+            interval: 30,
+            extra,
+        };
         let mut metrics = create_metrics(Some(&config)).await.unwrap();
         // Should create a prometheus metrics instance
+        metrics.record(MetricEntry {
+            total_received: 100,
+            total_completed: 90,
+            total_process_errors: 5,
+            total_output_errors: 5,
+            streams_started: 10,
+            streams_completed: 8,
+            duplicates_rejected: 2,
+            stale_entries_removed: 1,
+            in_flight: 50,
+            throughput_per_sec: 123.45,
+        });
+    }
+
+    #[tokio::test]
+    async fn test_create_metrics_with_stdout_config() {
+        // Registration should succeed (or already be registered)
+        let result = stdout::register_stdout();
+        // May return DuplicateRegisteredName if already registered by another test
+        assert!(result.is_ok() || matches!(result, Err(crate::Error::DuplicateRegisteredName(_))));
+
+        use std::collections::HashMap;
+        let mut extra = HashMap::new();
+        extra.insert(
+            "stdout".to_string(),
+            serde_yaml::Value::Mapping(serde_yaml::Mapping::new()),
+        );
+        let config = crate::config::MetricsConfig {
+            label: None,
+            interval: 30,
+            extra,
+        };
+        let mut metrics = create_metrics(Some(&config)).await.unwrap();
+        // Should create a stdout metrics instance
         metrics.record(MetricEntry {
             total_received: 100,
             total_completed: 90,
@@ -205,7 +247,11 @@ mod tests {
             "unknown_backend".to_string(),
             serde_yaml::Value::Mapping(serde_yaml::Mapping::new()),
         );
-        let config = crate::config::MetricsConfig { label: None, extra };
+        let config = crate::config::MetricsConfig {
+            label: None,
+            interval: 30,
+            extra,
+        };
         // Should return an error for unknown backend
         let result = create_metrics(Some(&config)).await;
         assert!(result.is_err());

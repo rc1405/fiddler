@@ -26,7 +26,7 @@ pub fn register_plugin(
 ) -> Result<(), Error> {
     let r = RegisteredItem { creator, format };
 
-    match ENV.lock() {
+    match ENV.write() {
         Ok(mut lock) => {
             match lock.get_mut(&itype) {
                 Some(i) => {
@@ -36,7 +36,7 @@ pub fn register_plugin(
                     };
                     debug!(
                         name = name.clone(),
-                        plugin_type = format!("{}", itype),
+                        plugin_type = format!("{itype}"),
                         "plugin registered"
                     );
                 }
@@ -47,7 +47,7 @@ pub fn register_plugin(
             };
         }
         Err(_) => {
-            error!(kind = "unable to secure lock", "InternalServerError");
+            error!(kind = "unable to secure write lock", "InternalServerError");
             return Err(Error::UnableToSecureLock);
         }
     };
