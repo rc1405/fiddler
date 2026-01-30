@@ -1,6 +1,6 @@
 [package]
 name = "fiddler-cli"
-version = "3.0.0"
+version = "4.0.0"
 edition = "2021"
 exclude = ["tests"]
 license-file = "../LICENSE"
@@ -24,12 +24,12 @@ path = "src/bin.rs"
 [dependencies]
 async-trait = "0.1.79"
 clap = { version = "4.5.3", features = ["derive"] }
-fiddler = { version = "3.0.0", path = "../fiddler", features = [
+fiddler = { version = "4.0.0", path = "../fiddler", features = [
     "elasticsearch",
     "aws",
     "prometheus",
 ] }
-fiddler-macros = { version = "1.0.0", path = "../fiddler-macros" }
+fiddler-macros = { version = "1.1.0", path = "../fiddler-macros" }
 futures = "0.3.30"
 inline_colorization = "0.1.6"
 prettytable-rs = "0.10.0"
