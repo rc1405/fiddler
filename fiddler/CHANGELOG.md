@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [4.2.0](https://github.com/rc1405/fiddler/compare/fiddler-v4.1.0...fiddler-v4.2.0) - 2026-02-01
+
+### Added
+
+- added function to export schema of modules ([#76](https://github.com/rc1405/fiddler/pull/76))
+
 ## [4.1.0](https://github.com/rc1405/fiddler/compare/fiddler-v4.0.0...fiddler-v4.1.0) - 2026-02-01
 
 ### Added
