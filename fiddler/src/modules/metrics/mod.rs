@@ -37,6 +37,9 @@ pub(crate) const ALL_METRICS: &[&str] = &[
     "input_bytes",
     "output_bytes",
     "bytes_per_sec",
+    "latency_avg_ms",
+    "latency_min_ms",
+    "latency_max_ms",
 ];
 
 #[cfg(feature = "prometheus")]
@@ -151,6 +154,9 @@ mod tests {
             input_bytes: 1000,
             output_bytes: 900,
             bytes_per_sec: 90.0,
+            latency_avg_ms: 5.5,
+            latency_min_ms: 1.0,
+            latency_max_ms: 15.0,
         });
     }
 
@@ -178,6 +184,9 @@ mod tests {
             input_bytes: 0,
             output_bytes: 0,
             bytes_per_sec: 0.0,
+            latency_avg_ms: 0.0,
+            latency_min_ms: 0.0,
+            latency_max_ms: 0.0,
         });
     }
 
@@ -200,6 +209,9 @@ mod tests {
             input_bytes: 0,
             output_bytes: 0,
             bytes_per_sec: 0.0,
+            latency_avg_ms: 0.0,
+            latency_min_ms: 0.0,
+            latency_max_ms: 0.0,
         });
     }
 
@@ -238,6 +250,9 @@ mod tests {
             input_bytes: 1000,
             output_bytes: 900,
             bytes_per_sec: 90.0,
+            latency_avg_ms: 5.5,
+            latency_min_ms: 1.0,
+            latency_max_ms: 15.0,
         });
     }
 
@@ -275,6 +290,9 @@ mod tests {
             input_bytes: 1000,
             output_bytes: 900,
             bytes_per_sec: 90.0,
+            latency_avg_ms: 5.5,
+            latency_min_ms: 1.0,
+            latency_max_ms: 15.0,
         });
     }
 

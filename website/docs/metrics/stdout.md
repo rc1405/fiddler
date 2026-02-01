@@ -27,7 +27,7 @@ Required: `false`
 
 ### Standard Output (pretty: false)
 ```json
-{"total_received":1000,"total_completed":998,"total_process_errors":2,"total_output_errors":0,"streams_started":0,"streams_completed":0,"duplicates_rejected":0,"stale_entries_removed":0,"in_flight":5,"throughput_per_sec":123.45,"input_bytes":102400,"output_bytes":98304,"bytes_per_sec":9830.4}
+{"total_received":1000,"total_completed":998,"total_process_errors":2,"total_output_errors":0,"streams_started":0,"streams_completed":0,"duplicates_rejected":0,"stale_entries_removed":0,"in_flight":5,"throughput_per_sec":123.45,"input_bytes":102400,"output_bytes":98304,"bytes_per_sec":9830.4,"latency_avg_ms":5.5,"latency_min_ms":1.2,"latency_max_ms":15.8}
 ```
 
 ### Pretty Output (pretty: true)
@@ -45,7 +45,10 @@ Required: `false`
   "throughput_per_sec": 123.45,
   "input_bytes": 102400,
   "output_bytes": 98304,
-  "bytes_per_sec": 9830.4
+  "bytes_per_sec": 9830.4,
+  "latency_avg_ms": 5.5,
+  "latency_min_ms": 1.2,
+  "latency_max_ms": 15.8
 }
 ```
 
@@ -66,6 +69,9 @@ Required: `false`
 | `input_bytes` | integer | Total input bytes received |
 | `output_bytes` | integer | Total output bytes written |
 | `bytes_per_sec` | float | Throughput in bytes per second |
+| `latency_avg_ms` | float | Average message processing latency in milliseconds |
+| `latency_min_ms` | float | Minimum message processing latency in milliseconds |
+| `latency_max_ms` | float | Maximum message processing latency in milliseconds |
 
 ## Use Cases
 

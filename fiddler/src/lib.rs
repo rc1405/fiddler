@@ -148,6 +148,12 @@ pub struct MetricEntry {
     pub output_bytes: u64,
     /// * `bytes_per_sec` - Current throughput in bytes per second (based on output_bytes)
     pub bytes_per_sec: f64,
+    /// * `latency_avg_ms` - Average message processing latency in milliseconds
+    pub latency_avg_ms: f64,
+    /// * `latency_min_ms` - Minimum message processing latency in milliseconds
+    pub latency_min_ms: f64,
+    /// * `latency_max_ms` - Maximum message processing latency in milliseconds
+    pub latency_max_ms: f64,
 }
 
 /// Channel for sending acknowledgment status back to input modules.

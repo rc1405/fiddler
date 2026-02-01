@@ -308,6 +308,30 @@ fn build_metric_data(
         ));
     }
 
+    if should_include("latency_avg_ms") {
+        data.push(create_datum(
+            "latency_avg_ms",
+            metric.latency_avg_ms,
+            StandardUnit::Milliseconds,
+        ));
+    }
+
+    if should_include("latency_min_ms") {
+        data.push(create_datum(
+            "latency_min_ms",
+            metric.latency_min_ms,
+            StandardUnit::Milliseconds,
+        ));
+    }
+
+    if should_include("latency_max_ms") {
+        data.push(create_datum(
+            "latency_max_ms",
+            metric.latency_max_ms,
+            StandardUnit::Milliseconds,
+        ));
+    }
+
     data
 }
 
@@ -455,13 +479,16 @@ dimensions:
             input_bytes: 1000,
             output_bytes: 900,
             bytes_per_sec: 90.0,
+            latency_avg_ms: 5.5,
+            latency_min_ms: 1.0,
+            latency_max_ms: 15.0,
         };
 
         let include_set: HashSet<String> = ALL_METRICS.iter().map(|s| s.to_string()).collect();
         let exclude_set: HashSet<String> = HashSet::new();
 
         let data = build_metric_data(&metric, &[], &include_set, &exclude_set);
-        assert_eq!(data.len(), 13);
+        assert_eq!(data.len(), 16);
     }
 
     #[test]
@@ -480,6 +507,9 @@ dimensions:
             input_bytes: 1000,
             output_bytes: 900,
             bytes_per_sec: 90.0,
+            latency_avg_ms: 5.5,
+            latency_min_ms: 1.0,
+            latency_max_ms: 15.0,
         };
 
         let include_set: HashSet<String> = vec![
@@ -510,6 +540,9 @@ dimensions:
             input_bytes: 1000,
             output_bytes: 900,
             bytes_per_sec: 90.0,
+            latency_avg_ms: 5.5,
+            latency_min_ms: 1.0,
+            latency_max_ms: 15.0,
         };
 
         let include_set: HashSet<String> = ALL_METRICS.iter().map(|s| s.to_string()).collect();
@@ -518,7 +551,7 @@ dimensions:
             .collect();
 
         let data = build_metric_data(&metric, &[], &include_set, &exclude_set);
-        assert_eq!(data.len(), 12);
+        assert_eq!(data.len(), 15);
     }
 
     #[test]

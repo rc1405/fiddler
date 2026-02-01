@@ -24,6 +24,9 @@ The following metrics are tracked and exposed by all metrics backends:
 | `input_bytes` | Counter | Total bytes received from input |
 | `output_bytes` | Counter | Total bytes written to output |
 | `bytes_per_sec` | Gauge | Current throughput in bytes per second |
+| `latency_avg_ms` | Gauge | Average message processing latency in milliseconds |
+| `latency_min_ms` | Gauge | Minimum message processing latency in milliseconds |
+| `latency_max_ms` | Gauge | Maximum message processing latency in milliseconds |
 
 ## Configuration
 Metrics are configured at the top level of the pipeline configuration:

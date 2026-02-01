@@ -96,6 +96,9 @@ impl Metrics for PrometheusMetrics {
         counter!("fiddler_input_bytes_total").absolute(metric.input_bytes);
         counter!("fiddler_output_bytes_total").absolute(metric.output_bytes);
         gauge!("fiddler_bytes_per_second").set(metric.bytes_per_sec);
+        gauge!("fiddler_latency_avg_ms").set(metric.latency_avg_ms);
+        gauge!("fiddler_latency_min_ms").set(metric.latency_min_ms);
+        gauge!("fiddler_latency_max_ms").set(metric.latency_max_ms);
     }
 }
 
@@ -150,6 +153,9 @@ mod tests {
             input_bytes: 1000,
             output_bytes: 900,
             bytes_per_sec: 90.0,
+            latency_avg_ms: 5.5,
+            latency_min_ms: 1.0,
+            latency_max_ms: 15.0,
         });
     }
 

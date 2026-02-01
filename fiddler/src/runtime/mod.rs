@@ -54,6 +54,14 @@ pub struct MessageMetrics {
     pub output_bytes: u64,
     /// Timestamp when metrics collection started
     started_at: Option<Instant>,
+    /// Sum of all message latencies in microseconds (for average calculation)
+    latency_sum_us: u128,
+    /// Count of messages with recorded latency
+    latency_count: u64,
+    /// Minimum latency in microseconds
+    latency_min_us: Option<u64>,
+    /// Maximum latency in microseconds
+    latency_max_us: u64,
 }
 
 impl MessageMetrics {
@@ -100,6 +108,50 @@ impl MessageMetrics {
         }
     }
 
+    /// Records a latency measurement for a completed message.
+    ///
+    /// # Arguments
+    ///
+    /// * `latency` - The duration from when the message entered processing until completion
+    pub fn record_latency(&mut self, latency: std::time::Duration) {
+        let latency_us = latency.as_micros() as u64;
+        self.latency_sum_us += latency_us as u128;
+        self.latency_count += 1;
+
+        // Update min latency
+        match self.latency_min_us {
+            Some(min) if latency_us < min => self.latency_min_us = Some(latency_us),
+            None => self.latency_min_us = Some(latency_us),
+            _ => {}
+        }
+
+        // Update max latency
+        if latency_us > self.latency_max_us {
+            self.latency_max_us = latency_us;
+        }
+    }
+
+    /// Returns the average latency in milliseconds.
+    pub fn latency_avg_ms(&self) -> f64 {
+        if self.latency_count > 0 {
+            (self.latency_sum_us as f64 / self.latency_count as f64) / 1000.0
+        } else {
+            0.0
+        }
+    }
+
+    /// Returns the minimum latency in milliseconds.
+    pub fn latency_min_ms(&self) -> f64 {
+        self.latency_min_us
+            .map(|us| us as f64 / 1000.0)
+            .unwrap_or(0.0)
+    }
+
+    /// Returns the maximum latency in milliseconds.
+    pub fn latency_max_ms(&self) -> f64 {
+        self.latency_max_us as f64 / 1000.0
+    }
+
     /// Records metrics to the configured metrics backend.
     ///
     /// If no metrics backend is configured, this is a no-op.
@@ -118,6 +170,9 @@ impl MessageMetrics {
             input_bytes: self.input_bytes,
             output_bytes: self.output_bytes,
             bytes_per_sec: self.bytes_per_sec(),
+            latency_avg_ms: self.latency_avg_ms(),
+            latency_min_ms: self.latency_min_ms(),
+            latency_max_ms: self.latency_max_ms(),
         });
     }
 }
@@ -628,6 +683,7 @@ fn process_state(
         let mut remove_entry = false;
         let mut stream_id = None;
         let mut message_completed_successfully = false;
+        let mut message_latency: Option<std::time::Duration> = None;
 
         match handles.get_mut(&msg.message_id) {
             None => {
@@ -669,6 +725,7 @@ fn process_state(
                                 >= state.instance_count
                         {
                             remove_entry = true;
+                            message_latency = Some(state.created_at.elapsed());
                             if let Some(chan) = state.closure.take() {
                                 info!(message_id = msg.message_id, "calling closure");
                                 let err = std::mem::take(&mut state.errors);
@@ -692,6 +749,7 @@ fn process_state(
                         if stream_closed && state.output_count >= state.instance_count {
                             remove_entry = true;
                             message_completed_successfully = true;
+                            message_latency = Some(state.created_at.elapsed());
                             if let Some(chan) = state.closure.take() {
                                 info!(message_id = msg.message_id, "calling closure");
                                 let _ = chan.send(Status::Processed);
@@ -703,6 +761,7 @@ fn process_state(
                                 >= state.instance_count
                         {
                             remove_entry = true;
+                            message_latency = Some(state.created_at.elapsed());
                             if let Some(chan) = state.closure.take() {
                                 info!(message_id = msg.message_id, "calling closure");
                                 let err = std::mem::take(&mut state.errors);
@@ -724,6 +783,7 @@ fn process_state(
                             remove_entry = state.stream_closed.unwrap_or(true);
 
                             if remove_entry {
+                                message_latency = Some(state.created_at.elapsed());
                                 if let Some(chan) = state.closure.take() {
                                     info!(message_id = msg.message_id, "calling closure");
                                     let err = std::mem::take(&mut state.errors);
@@ -747,6 +807,7 @@ fn process_state(
                         if state.output_count >= state.instance_count {
                             remove_entry = true;
                             message_completed_successfully = true;
+                            message_latency = Some(state.created_at.elapsed());
                             if let Some(chan) = state.closure.take() {
                                 info!(message_id = msg.message_id, "calling closure");
                                 let _ = chan.send(Status::Processed);
@@ -757,6 +818,7 @@ fn process_state(
                             >= state.instance_count
                         {
                             remove_entry = true;
+                            message_latency = Some(state.created_at.elapsed());
                             if let Some(chan) = state.closure.take() {
                                 info!(message_id = msg.message_id, "calling closure");
                                 let err = std::mem::take(&mut state.errors);
@@ -808,9 +870,15 @@ fn process_state(
                 "Marking message for removal from state"
             );
             entries_to_remove.push(msg.message_id);
-            // Track completed messages (only count non-stream messages to avoid double counting)
-            if message_completed_successfully && !msg.is_stream {
-                metrics.total_completed += 1;
+            // Track completed messages and latency (only count non-stream messages to avoid double counting)
+            if !msg.is_stream {
+                if message_completed_successfully {
+                    metrics.total_completed += 1;
+                }
+                // Record latency for all completed messages (success or failure)
+                if let Some(latency) = message_latency {
+                    metrics.record_latency(latency);
+                }
             }
         }
     }

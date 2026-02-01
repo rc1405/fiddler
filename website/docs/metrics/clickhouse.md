@@ -134,6 +134,9 @@ The following metrics can be tracked:
 | `input_bytes` | counter | Total input bytes received |
 | `output_bytes` | counter | Total output bytes written |
 | `bytes_per_sec` | gauge | Throughput in bytes per second |
+| `latency_avg_ms` | gauge | Average message processing latency in milliseconds |
+| `latency_min_ms` | gauge | Minimum message processing latency in milliseconds |
+| `latency_max_ms` | gauge | Maximum message processing latency in milliseconds |
 
 ## Table Schema
 
