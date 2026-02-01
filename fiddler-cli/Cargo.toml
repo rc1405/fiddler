@@ -28,6 +28,8 @@ fiddler = { version = "4.2.0", path = "../fiddler", features = [
     "elasticsearch",
     "aws",
     "prometheus",
+    "clickhouse",
+    "http_server",
 ] }
 fiddler-macros = { version = "1.1.0", path = "../fiddler-macros" }
 futures = "0.3.30"
