@@ -224,7 +224,15 @@ impl Config {
             ));
         };
 
-        let input = parse_configuration_item(ItemType::Input, &self.input.extra).await?;
+        let input = match parse_configuration_item(ItemType::Input, &self.input.extra).await {
+            Ok(i) => i,
+            Err(e) => match e {
+                Error::ConfigurationItemNotFound(_) => {
+                    parse_configuration_item(ItemType::InputBatch, &self.input.extra).await?
+                }
+                _ => return Err(e),
+            },
+        };
 
         let output = match parse_configuration_item(ItemType::Output, &self.output.extra).await {
             Ok(i) => i,

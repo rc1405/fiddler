@@ -128,7 +128,7 @@ pub struct MetricEntry {
     pub total_completed: u64,
     /// * `total_process_errors` - Messages that encountered processing errors
     pub total_process_errors: u64,
-    /// * `total_output_errors` - Messages that encountered output errors  
+    /// * `total_output_errors` - Messages that encountered output errors
     pub total_output_errors: u64,
     /// * `streams_started` - Number of streams started
     pub streams_started: u64,
@@ -142,6 +142,12 @@ pub struct MetricEntry {
     pub in_flight: usize,
     /// * `throughput_per_sec` - Current throughput in messages per second
     pub throughput_per_sec: f64,
+    /// * `input_bytes` - Total bytes received from input
+    pub input_bytes: u64,
+    /// * `output_bytes` - Total bytes written to output
+    pub output_bytes: u64,
+    /// * `bytes_per_sec` - Current throughput in bytes per second (based on output_bytes)
+    pub bytes_per_sec: f64,
 }
 
 /// Channel for sending acknowledgment status back to input modules.
@@ -201,13 +207,25 @@ pub trait Input: Closer {
     async fn read(&mut self) -> Result<(Message, Option<CallbackChan>), Error>;
 }
 
-/// BatchInput module trait to insert one to may [crate::Message] into the pipeline.
-/// InputBatch is currently not yet introduced into the runtime.
+/// BatchInput module trait to insert one to many [crate::Message] into the pipeline.
+///
+/// Unlike the single-message [Input] trait, `InputBatch` allows modules to read multiple
+/// messages at once. The callback channel applies to the entire batch - it will be called
+/// when ALL messages in the batch have completed processing.
+///
+/// # Batch Callback Semantics
+///
+/// - If all messages succeed: callback receives `Status::Processed`
+/// - If any messages fail: callback receives `Status::Errored(errors)` with error details
+/// - Successful messages in a partial failure are still processed through the pipeline
 #[async_trait]
 pub trait InputBatch: Closer {
     /// Read multiple messages from the input module and expected return a tuple
     /// containing the [crate::MessageBatch] and a [crate::CallbackChan] for reporting status back.
-    fn read_batch(&mut self) -> Result<(MessageBatch, Option<CallbackChan>), Error>;
+    ///
+    /// The callback applies to the entire batch and will be triggered once all messages
+    /// in the batch have completed processing (or failed).
+    async fn read_batch(&mut self) -> Result<(MessageBatch, Option<CallbackChan>), Error>;
 }
 
 /// Output module trait to write a single [crate::Message] to the output

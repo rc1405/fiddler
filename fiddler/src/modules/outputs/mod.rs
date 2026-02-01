@@ -4,6 +4,8 @@ use flume::{Receiver, Sender};
 use tokio::time::{timeout, Instant};
 use tracing::{debug, error, trace};
 
+#[cfg(feature = "clickhouse")]
+pub mod clickhouse;
 pub mod drop;
 #[cfg(feature = "elasticsearch")]
 pub mod elasticsearch;
@@ -14,6 +16,8 @@ pub(crate) fn register_plugins() -> Result<(), Error> {
     drop::register_drop()?;
     #[cfg(feature = "elasticsearch")]
     elasticsearch::register_elasticsearch()?;
+    #[cfg(feature = "clickhouse")]
+    clickhouse::register_clickhouse()?;
     stdout::register_stdout()?;
     switch::register_switch()?;
     Ok(())
@@ -33,6 +37,7 @@ pub(crate) async fn run_output(
                 // Extract fields before moving message to avoid clone
                 let stream_id = msg.message.stream_id.clone();
                 let message_id = msg.message_id;
+                let output_bytes = msg.message.bytes.len() as u64;
 
                 match o.write(msg.message).await {
                     Ok(_) => {
@@ -42,7 +47,8 @@ pub(crate) async fn run_output(
                                 message_id,
                                 status: MessageStatus::Output,
                                 stream_id,
-                                ..Default::default()
+                                is_stream: false,
+                                bytes: output_bytes,
                             })
                             .await
                             .map_err(|e| Error::UnableToSendToChannel(format!("{e}")))?;
@@ -58,7 +64,8 @@ pub(crate) async fn run_output(
                                     message_id,
                                     status: MessageStatus::OutputError(format!("{e}")),
                                     stream_id,
-                                    ..Default::default()
+                                    is_stream: false,
+                                    bytes: 0,
                                 })
                                 .await
                                 .map_err(|e| Error::UnableToSendToChannel(format!("{e}")))?;
@@ -143,9 +150,16 @@ async fn process_batch(
     internal_msg_batch: Vec<InternalMessage>,
 ) -> Result<(), Error> {
     // Extract metadata before moving messages to avoid clones
-    let metadata: Vec<(String, Option<String>)> = internal_msg_batch
+    // Include bytes for output tracking
+    let metadata: Vec<(String, Option<String>, u64)> = internal_msg_batch
         .iter()
-        .map(|i| (i.message_id.clone(), i.message.stream_id.clone()))
+        .map(|i| {
+            (
+                i.message_id.clone(),
+                i.message.stream_id.clone(),
+                i.message.bytes.len() as u64,
+            )
+        })
         .collect();
 
     // Move messages instead of cloning
@@ -154,13 +168,14 @@ async fn process_batch(
 
     match o.write_batch(msg_batch).await {
         Ok(_) => {
-            for (message_id, stream_id) in metadata {
+            for (message_id, stream_id, bytes) in metadata {
                 state
                     .send_async(InternalMessageState {
                         message_id,
                         status: MessageStatus::Output,
                         stream_id,
-                        ..Default::default()
+                        is_stream: false,
+                        bytes,
                     })
                     .await
                     .map_err(|e| Error::UnableToSendToChannel(format!("{e}")))?;
@@ -171,13 +186,14 @@ async fn process_batch(
                 debug!("conditional check failed for output");
             }
             _ => {
-                for (message_id, stream_id) in metadata {
+                for (message_id, stream_id, _bytes) in metadata {
                     state
                         .send_async(InternalMessageState {
                             message_id,
                             status: MessageStatus::OutputError(format!("{e}")),
                             stream_id,
-                            ..Default::default()
+                            is_stream: false,
+                            bytes: 0,
                         })
                         .await
                         .map_err(|e| Error::UnableToSendToChannel(format!("{e}")))?;

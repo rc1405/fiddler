@@ -41,12 +41,15 @@ The following Prometheus metrics are exposed:
 | `fiddler_streams_completed_total` | Number of streams completed |
 | `fiddler_duplicates_rejected_total` | Duplicate messages rejected |
 | `fiddler_stale_entries_removed_total` | Stale entries cleaned up |
+| `fiddler_input_bytes_total` | Total bytes received from input |
+| `fiddler_output_bytes_total` | Total bytes written to output |
 
 ### Gauges
 | Metric Name | Description |
 |-------------|-------------|
 | `fiddler_messages_in_flight` | Current number of messages being processed |
 | `fiddler_throughput_per_second` | Current throughput in messages per second |
+| `fiddler_bytes_per_second` | Current throughput in bytes per second |
 
 ## Scraping Metrics
 

@@ -24,6 +24,9 @@ use tracing::debug;
 #[cfg(feature = "prometheus")]
 pub mod prometheus;
 
+#[cfg(feature = "clickhouse")]
+pub mod clickhouse;
+
 pub mod stdout;
 
 /// Registers all available metrics plugins.
@@ -33,6 +36,9 @@ pub mod stdout;
 pub(crate) fn register_plugins() -> Result<(), Error> {
     #[cfg(feature = "prometheus")]
     prometheus::register_prometheus()?;
+
+    #[cfg(feature = "clickhouse")]
+    clickhouse::register_clickhouse()?;
 
     stdout::register_stdout()?;
 
@@ -124,6 +130,9 @@ mod tests {
             stale_entries_removed: 1,
             in_flight: 50,
             throughput_per_sec: 123.45,
+            input_bytes: 1000,
+            output_bytes: 900,
+            bytes_per_sec: 90.0,
         });
     }
 
@@ -148,6 +157,9 @@ mod tests {
             stale_entries_removed: 0,
             in_flight: 0,
             throughput_per_sec: 0.0,
+            input_bytes: 0,
+            output_bytes: 0,
+            bytes_per_sec: 0.0,
         });
     }
 
@@ -167,6 +179,9 @@ mod tests {
             stale_entries_removed: 0,
             in_flight: 0,
             throughput_per_sec: 0.0,
+            input_bytes: 0,
+            output_bytes: 0,
+            bytes_per_sec: 0.0,
         });
     }
 
@@ -202,6 +217,9 @@ mod tests {
             stale_entries_removed: 1,
             in_flight: 50,
             throughput_per_sec: 123.45,
+            input_bytes: 1000,
+            output_bytes: 900,
+            bytes_per_sec: 90.0,
         });
     }
 
@@ -236,6 +254,9 @@ mod tests {
             stale_entries_removed: 1,
             in_flight: 50,
             throughput_per_sec: 123.45,
+            input_bytes: 1000,
+            output_bytes: 900,
+            bytes_per_sec: 90.0,
         });
     }
 
