@@ -15,13 +15,6 @@ use tracing::{debug, error, info, trace, warn};
 use crate::MetricEntry;
 use std::str::FromStr;
 use std::sync::Once;
-use uuid::Uuid;
-
-/// Minimum backoff duration when no input is available (in microseconds)
-const NO_INPUT_BACKOFF_MIN_US: u64 = 1;
-
-/// Maximum backoff duration when no input is available (in milliseconds)
-const NO_INPUT_BACKOFF_MAX_MS: u64 = 10;
 
 /// Timeout for stale message entries in the state tracker (1 hour)
 const STALE_MESSAGE_TIMEOUT_SECS: u64 = 3600;
@@ -55,6 +48,10 @@ pub struct MessageMetrics {
     pub duplicates_rejected: u64,
     /// Stale entries cleaned up
     pub stale_entries_removed: u64,
+    /// Total bytes received from input
+    pub input_bytes: u64,
+    /// Total bytes written to output
+    pub output_bytes: u64,
     /// Timestamp when metrics collection started
     started_at: Option<Instant>,
 }
@@ -83,6 +80,16 @@ impl MessageMetrics {
         }
     }
 
+    /// Returns the throughput in bytes per second (based on output_bytes).
+    pub fn bytes_per_sec(&self) -> f64 {
+        let elapsed = self.elapsed().as_secs_f64();
+        if elapsed > 0.0 {
+            self.output_bytes as f64 / elapsed
+        } else {
+            0.0
+        }
+    }
+
     /// Returns the error rate as a percentage.
     pub fn error_rate(&self) -> f64 {
         let total = self.total_completed + self.total_process_errors + self.total_output_errors;
@@ -106,8 +113,11 @@ impl MessageMetrics {
             streams_completed: self.streams_completed,
             duplicates_rejected: self.duplicates_rejected,
             stale_entries_removed: self.stale_entries_removed,
-            in_flight: in_flight,
+            in_flight,
             throughput_per_sec: self.throughput_per_sec(),
+            input_bytes: self.input_bytes,
+            output_bytes: self.output_bytes,
+            bytes_per_sec: self.bytes_per_sec(),
         });
     }
 }
@@ -133,7 +143,6 @@ use crate::modules::metrics::create_metrics;
 use crate::modules::outputs;
 use crate::modules::processors;
 use crate::modules::register_plugins;
-use crate::MessageType;
 use crate::Status;
 
 use once_cell::sync::Lazy;
@@ -183,6 +192,8 @@ pub(crate) struct InternalMessageState {
     pub status: MessageStatus,
     pub stream_id: Option<String>,
     pub is_stream: bool,
+    /// Bytes associated with this state update (used for output bytes tracking)
+    pub bytes: u64,
 }
 
 #[derive(Clone, Serialize, Deserialize)]
@@ -192,12 +203,14 @@ pub(crate) struct InternalMessage {
     pub status: MessageStatus,
 }
 
-struct MessageHandle {
-    message_id: String,
-    closure: Option<CallbackChan>,
-    stream_id: Option<String>,
-    is_stream: bool,
-    stream_complete: bool,
+pub(crate) struct MessageHandle {
+    pub message_id: String,
+    pub closure: Option<CallbackChan>,
+    pub stream_id: Option<String>,
+    pub is_stream: bool,
+    pub stream_complete: bool,
+    /// Bytes received from input for this message
+    pub input_bytes: u64,
 }
 
 impl Runtime {
@@ -666,6 +679,8 @@ fn process_state(
                     MessageStatus::Output => {
                         state.output_count += 1;
                         stream_id = state.stream_id.clone();
+                        // Track output bytes
+                        metrics.output_bytes += msg.bytes;
 
                         debug!(
                             message_id = msg.message_id,
@@ -781,6 +796,7 @@ fn process_state(
                         status: msg.status.clone(),
                         stream_id: s.stream_id.clone(),
                         is_stream: true,
+                        bytes: msg.bytes,
                     });
                 }
             }
@@ -849,7 +865,8 @@ async fn message_handler(
                         message_id: msg.message_id.clone(),
                         status: MessageStatus::StreamComplete,
                         stream_id: msg.stream_id.clone(),
-                        is_stream: true
+                        is_stream: true,
+                        bytes: 0,
                     }, &mut metrics) {
                         match e {
                             Error::EndOfInput => {
@@ -862,8 +879,9 @@ async fn message_handler(
                     continue
                 };
 
-                // Track new message received
+                // Track new message received and input bytes
                 metrics.total_received += 1;
+                metrics.input_bytes += msg.input_bytes;
                 if msg.is_stream {
                     metrics.streams_started += 1;
                 }
@@ -900,6 +918,7 @@ async fn message_handler(
                         status: MessageStatus::New,
                         stream_id: None,
                         is_stream: true,
+                        bytes: 0,
                     }, &mut metrics) {
                         match e {
                             Error::EndOfInput => {
@@ -997,105 +1016,16 @@ async fn input(
 
     let item = (input.creator)(input.config.clone()).await?;
 
-    let mut i = match item {
-        ExecutionType::Input(i) => i,
+    match item {
+        ExecutionType::Input(i) => {
+            crate::modules::inputs::run_input(i, output, state_handle, kill_switch).await
+        }
+        ExecutionType::InputBatch(i) => {
+            crate::modules::inputs::run_input_batch(i, output, state_handle, kill_switch).await
+        }
         _ => {
             error!("invalid execution type for input");
-            return Err(Error::Validation("invalid execution type".into()));
-        }
-    };
-
-    debug!("input connected");
-
-    // Track consecutive no-input errors for exponential backoff
-    let mut no_input_count: u32 = 0;
-
-    loop {
-        tokio::select! {
-            biased;
-            Ok(_) = kill_switch.recv_async() => {
-                i.close().await?;
-                debug!("input closed by timeout");
-                return Ok(());
-            },
-            m = i.read() => {
-                match m {
-                    Ok((msg, closure)) => {
-                        // Reset backoff on successful read
-                        no_input_count = 0;
-                        let message_type = msg.message_type.clone();
-
-                        let message_id: String = match &message_type {
-                            MessageType::Default => Uuid::new_v4().into(),
-                            MessageType::BeginStream(id) => id.clone(),
-                            MessageType::EndStream(id) => id.clone(),
-                        };
-
-                        trace!(message_id = message_id, message_type = format!("{:?}", message_type), "received message");
-
-                        let is_stream = match &message_type {
-                            MessageType::BeginStream(_) => true,
-                            MessageType::EndStream(_) => true,
-                            MessageType::Default => false,
-                        };
-                        state_handle
-                            .send_async(MessageHandle {
-                                message_id: message_id.clone(),
-                                closure,
-                                stream_id: msg.stream_id.clone(),
-                                is_stream,
-                                stream_complete: matches!(&message_type, MessageType::EndStream(_))
-                            })
-                            .await
-                            .map_err(|e| Error::UnableToSendToChannel(format!("{e}")))?;
-
-                        // if message.type != registration forward down the pipeline
-                        // new input send main event with type parent or whatever with a callback
-                        // for sqs, delete main message
-                        // each subsequent message adds in an Option<String> for the parentId
-                        // in state if item has a parent ID // increment or decrement the parent's counter
-                        // if parent counter is zero, then send aggregated status
-                        if let MessageType::Default = message_type {
-                            let internal_msg = InternalMessage {
-                                message: msg,
-                                message_id: message_id.clone(),
-                                status: MessageStatus::New,
-                            };
-
-                            output
-                                .send_async(internal_msg)
-                                .await
-                                .map_err(|e| Error::UnableToSendToChannel(format!("{e}")))?;
-                        }
-
-                    }
-                    Err(e) => match e {
-                        Error::EndOfInput => {
-                            i.close().await?;
-                            debug!("input closed");
-                            return Ok(());
-                        }
-                        Error::NoInputToReturn => {
-                            // Exponential backoff: 1μs, 2μs, 4μs, ..., up to 10ms
-                            let backoff_us = NO_INPUT_BACKOFF_MIN_US
-                                .saturating_mul(1u64 << no_input_count.min(20))
-                                .min(NO_INPUT_BACKOFF_MAX_MS * 1000);
-                            sleep(Duration::from_micros(backoff_us)).await;
-                            no_input_count = no_input_count.saturating_add(1);
-                            continue;
-                        }
-                        _ => {
-                            i.close().await?;
-                            debug!("input closed");
-                            error!(error = format!("{}", e), "read error from input");
-                            return Err(Error::ExecutionError(format!(
-                                "Received error from read: {}",
-                                e
-                            )));
-                        }
-                    },
-                }
-            },
+            Err(Error::Validation("invalid execution type".into()))
         }
     }
 }
@@ -1213,6 +1143,7 @@ mod tests {
                 status: MessageStatus::Processed,
                 stream_id: None,
                 is_stream: false,
+                bytes: 0,
             },
             &mut metrics,
         );
@@ -1244,6 +1175,7 @@ mod tests {
                 status: MessageStatus::Shutdown,
                 stream_id: None,
                 is_stream: false,
+                bytes: 0,
             },
             &mut metrics,
         );
@@ -1288,6 +1220,7 @@ mod tests {
                 status: MessageStatus::ProcessError("test error".to_string()),
                 stream_id: None,
                 is_stream: false,
+                bytes: 0,
             },
             &mut metrics,
         );

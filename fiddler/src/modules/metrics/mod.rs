@@ -21,8 +21,29 @@ use crate::{Closer, Error, MetricEntry, Metrics};
 use async_trait::async_trait;
 use tracing::debug;
 
+/// All available metric names that can be filtered.
+/// Used by metrics backends that support include/exclude filtering.
+pub(crate) const ALL_METRICS: &[&str] = &[
+    "total_received",
+    "total_completed",
+    "total_process_errors",
+    "total_output_errors",
+    "streams_started",
+    "streams_completed",
+    "duplicates_rejected",
+    "stale_entries_removed",
+    "in_flight",
+    "throughput_per_sec",
+    "input_bytes",
+    "output_bytes",
+    "bytes_per_sec",
+];
+
 #[cfg(feature = "prometheus")]
 pub mod prometheus;
+
+#[cfg(feature = "clickhouse")]
+pub mod clickhouse;
 
 pub mod stdout;
 
@@ -33,6 +54,9 @@ pub mod stdout;
 pub(crate) fn register_plugins() -> Result<(), Error> {
     #[cfg(feature = "prometheus")]
     prometheus::register_prometheus()?;
+
+    #[cfg(feature = "clickhouse")]
+    clickhouse::register_clickhouse()?;
 
     stdout::register_stdout()?;
 
@@ -124,6 +148,9 @@ mod tests {
             stale_entries_removed: 1,
             in_flight: 50,
             throughput_per_sec: 123.45,
+            input_bytes: 1000,
+            output_bytes: 900,
+            bytes_per_sec: 90.0,
         });
     }
 
@@ -148,6 +175,9 @@ mod tests {
             stale_entries_removed: 0,
             in_flight: 0,
             throughput_per_sec: 0.0,
+            input_bytes: 0,
+            output_bytes: 0,
+            bytes_per_sec: 0.0,
         });
     }
 
@@ -167,6 +197,9 @@ mod tests {
             stale_entries_removed: 0,
             in_flight: 0,
             throughput_per_sec: 0.0,
+            input_bytes: 0,
+            output_bytes: 0,
+            bytes_per_sec: 0.0,
         });
     }
 
@@ -202,6 +235,9 @@ mod tests {
             stale_entries_removed: 1,
             in_flight: 50,
             throughput_per_sec: 123.45,
+            input_bytes: 1000,
+            output_bytes: 900,
+            bytes_per_sec: 90.0,
         });
     }
 
@@ -236,6 +272,9 @@ mod tests {
             stale_entries_removed: 1,
             in_flight: 50,
             throughput_per_sec: 123.45,
+            input_bytes: 1000,
+            output_bytes: 900,
+            bytes_per_sec: 90.0,
         });
     }
 

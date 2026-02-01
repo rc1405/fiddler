@@ -136,6 +136,9 @@ mod tests {
             stale_entries_removed: 1,
             in_flight: 50,
             throughput_per_sec: 123.45,
+            input_bytes: 1000,
+            output_bytes: 900,
+            bytes_per_sec: 90.0,
         });
     }
 

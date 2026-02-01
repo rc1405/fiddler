@@ -27,6 +27,7 @@
 use crate::config::register_plugin;
 use crate::config::ItemType;
 use crate::config::{ConfigSpec, ExecutionType};
+use crate::modules::metrics::ALL_METRICS;
 use crate::Error;
 use crate::{Closer, MetricEntry, Metrics};
 use async_trait::async_trait;
@@ -43,20 +44,6 @@ use super::Credentials;
 
 const DEFAULT_NAMESPACE: &str = "Fiddler";
 const CHANNEL_BUFFER_SIZE: usize = 100;
-
-/// All available metric names that can be filtered.
-const ALL_METRICS: &[&str] = &[
-    "total_received",
-    "total_completed",
-    "total_process_errors",
-    "total_output_errors",
-    "streams_started",
-    "streams_completed",
-    "duplicates_rejected",
-    "stale_entries_removed",
-    "in_flight",
-    "throughput_per_sec",
-];
 
 /// CloudWatch dimension configuration.
 #[derive(Debug, Deserialize, Clone, Default)]
@@ -297,6 +284,30 @@ fn build_metric_data(
         ));
     }
 
+    if should_include("input_bytes") {
+        data.push(create_datum(
+            "input_bytes",
+            metric.input_bytes as f64,
+            StandardUnit::Bytes,
+        ));
+    }
+
+    if should_include("output_bytes") {
+        data.push(create_datum(
+            "output_bytes",
+            metric.output_bytes as f64,
+            StandardUnit::Bytes,
+        ));
+    }
+
+    if should_include("bytes_per_sec") {
+        data.push(create_datum(
+            "bytes_per_sec",
+            metric.bytes_per_sec,
+            StandardUnit::BytesSecond,
+        ));
+    }
+
     data
 }
 
@@ -441,13 +452,16 @@ dimensions:
             stale_entries_removed: 1,
             in_flight: 50,
             throughput_per_sec: 123.45,
+            input_bytes: 1000,
+            output_bytes: 900,
+            bytes_per_sec: 90.0,
         };
 
         let include_set: HashSet<String> = ALL_METRICS.iter().map(|s| s.to_string()).collect();
         let exclude_set: HashSet<String> = HashSet::new();
 
         let data = build_metric_data(&metric, &[], &include_set, &exclude_set);
-        assert_eq!(data.len(), 10);
+        assert_eq!(data.len(), 13);
     }
 
     #[test]
@@ -463,6 +477,9 @@ dimensions:
             stale_entries_removed: 1,
             in_flight: 50,
             throughput_per_sec: 123.45,
+            input_bytes: 1000,
+            output_bytes: 900,
+            bytes_per_sec: 90.0,
         };
 
         let include_set: HashSet<String> = vec![
@@ -490,6 +507,9 @@ dimensions:
             stale_entries_removed: 1,
             in_flight: 50,
             throughput_per_sec: 123.45,
+            input_bytes: 1000,
+            output_bytes: 900,
+            bytes_per_sec: 90.0,
         };
 
         let include_set: HashSet<String> = ALL_METRICS.iter().map(|s| s.to_string()).collect();
@@ -498,7 +518,7 @@ dimensions:
             .collect();
 
         let data = build_metric_data(&metric, &[], &include_set, &exclude_set);
-        assert_eq!(data.len(), 9);
+        assert_eq!(data.len(), 12);
     }
 
     #[test]

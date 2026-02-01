@@ -21,6 +21,9 @@ The following metrics are tracked and exposed by all metrics backends:
 | `stale_entries_removed` | Counter | Stale entries cleaned up from state tracker |
 | `in_flight` | Gauge | Current number of messages being processed |
 | `throughput_per_sec` | Gauge | Current throughput in messages per second |
+| `input_bytes` | Counter | Total bytes received from input |
+| `output_bytes` | Counter | Total bytes written to output |
+| `bytes_per_sec` | Gauge | Current throughput in bytes per second |
 
 ## Configuration
 Metrics are configured at the top level of the pipeline configuration:
@@ -38,5 +41,10 @@ output:
 ```
 
 ## Available Backends
-- [cloudwatch](./cloudwatch.md) - AWS CloudWatch metrics (requires `aws` feature)
-- [prometheus](./prometheus.md) - Prometheus-compatible metrics endpoint (requires `prometheus` feature)
+
+| Backend | Description | Feature Flag |
+|---------|-------------|--------------|
+| [clickhouse](./clickhouse.md) | Send metrics to ClickHouse for time-series storage | `clickhouse` |
+| [cloudwatch](./cloudwatch.md) | AWS CloudWatch metrics | `aws` |
+| [prometheus](./prometheus.md) | Prometheus-compatible metrics endpoint | `prometheus` |
+| [stdout](./stdout.md) | Output metrics as JSON to stdout | - |

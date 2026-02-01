@@ -1,3 +1,7 @@
+[workspace]
+# a lot of changes going into 4.0.0; ignoring breaking changes for now
+semver_check = false
+
 [[package]]
 name = "fiddler"
 version_group = "fiddler"

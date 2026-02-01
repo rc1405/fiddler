@@ -93,6 +93,9 @@ impl Metrics for PrometheusMetrics {
         counter!("fiddler_stale_entries_removed_total").absolute(metric.stale_entries_removed);
         gauge!("fiddler_messages_in_flight").set(metric.in_flight as f64);
         gauge!("fiddler_throughput_per_second").set(metric.throughput_per_sec);
+        counter!("fiddler_input_bytes_total").absolute(metric.input_bytes);
+        counter!("fiddler_output_bytes_total").absolute(metric.output_bytes);
+        gauge!("fiddler_bytes_per_second").set(metric.bytes_per_sec);
     }
 }
 
@@ -144,6 +147,9 @@ mod tests {
             stale_entries_removed: 1,
             in_flight: 50,
             throughput_per_sec: 123.45,
+            input_bytes: 1000,
+            output_bytes: 900,
+            bytes_per_sec: 90.0,
         });
     }
 

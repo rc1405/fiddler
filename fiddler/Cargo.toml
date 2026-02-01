@@ -22,7 +22,9 @@ aws = [
     "dep:aws-sdk-cloudwatch",
 ]
 prometheus = ["dep:metrics", "dep:metrics-exporter-prometheus"]
-all = ["python", "elasticsearch", "aws", "prometheus"]
+clickhouse = ["dep:reqwest"]
+http_server = ["dep:axum", "dep:tower-http"]
+all = ["python", "elasticsearch", "aws", "prometheus", "clickhouse", "http_server"]
 
 [dependencies]
 fiddler-macros = { version = "1.1.0", path = "../fiddler-macros" }
@@ -63,6 +65,9 @@ flate2 = "1.1.1"
 base64 = "0.22.1"
 metrics = { version = "0.24", optional = true }
 metrics-exporter-prometheus = { version = "0.16", optional = true }
+reqwest = { version = "0.12", features = ["json"], optional = true }
+axum = { version = "0.7", optional = true }
+tower-http = { version = "0.5", features = ["cors", "trace"], optional = true }
 futures = "0.3.31"
 
 [build-dependencies]
