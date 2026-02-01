@@ -318,8 +318,8 @@ ORDER BY (timestamp, metric_name){}"#,
         // Generate timestamp once per batch (all metrics in a batch represent the same snapshot)
         let timestamp = Utc::now().timestamp_millis();
 
-        // Pre-allocate with estimated capacity (10 metric fields per entry)
-        let estimated_rows = metrics.len() * 10;
+        // Pre-allocate with estimated capacity (16 metric fields per entry)
+        let estimated_rows = metrics.len() * 16;
         let mut rows = Vec::with_capacity(estimated_rows);
 
         for metric in metrics {
@@ -412,6 +412,27 @@ ORDER BY (timestamp, metric_name){}"#,
                 timestamp,
                 "bytes_per_sec",
                 metric.bytes_per_sec,
+                &dimension_values,
+            );
+            self.add_metric_row(
+                &mut rows,
+                timestamp,
+                "latency_avg_ms",
+                metric.latency_avg_ms,
+                &dimension_values,
+            );
+            self.add_metric_row(
+                &mut rows,
+                timestamp,
+                "latency_min_ms",
+                metric.latency_min_ms,
+                &dimension_values,
+            );
+            self.add_metric_row(
+                &mut rows,
+                timestamp,
+                "latency_max_ms",
+                metric.latency_max_ms,
                 &dimension_values,
             );
         }

@@ -164,21 +164,24 @@ pub struct Config {
 impl FromStr for Config {
     type Err = Error;
     fn from_str(conf: &str) -> Result<Self, Self::Err> {
-        let mut environment_variables: HashMap<String, String> = HashMap::new();
-        for (key, value) in env::vars() {
-            environment_variables.insert(key, value);
-        }
+        Self::from_env(conf)
+    }
+}
 
+impl Config {
+    /// Core parsing logic that substitutes variables from the provided map.
+    fn parse_with_variables(
+        conf: &str,
+        variables: &HashMap<String, String>,
+    ) -> Result<Self, Error> {
         let mut handle_bars = Handlebars::new();
         handle_bars.set_strict_mode(true);
 
-        let populated_config = handle_bars
-            .render_template(conf, &environment_variables)
-            .map_err(|e| {
-                Error::ConfigFailedValidation(format!(
-                    "Handlebars template error: {e}. Check your variable interpolations."
-                ))
-            })?;
+        let populated_config = handle_bars.render_template(conf, variables).map_err(|e| {
+            Error::ConfigFailedValidation(format!(
+                "Handlebars template error: {e}. Check your variable interpolations."
+            ))
+        })?;
 
         let config: Config = serde_yaml::from_str(&populated_config).map_err(|e| {
             Error::ConfigFailedValidation(format!(
@@ -187,6 +190,87 @@ impl FromStr for Config {
         })?;
 
         Ok(config)
+    }
+
+    /// Parse configuration with variable substitution from environment variables.
+    ///
+    /// This is equivalent to using `Config::from_str()` but provides a more
+    /// explicit API for environment-based substitution.
+    ///
+    /// # Example
+    /// ```no_run
+    /// use fiddler::config::Config;
+    ///
+    /// let conf_str = r#"input:
+    ///   file:
+    ///     filename: {{INPUT_FILE}}
+    /// processors: []
+    /// output:
+    ///   stdout: {}"#;
+    ///
+    /// // Uses environment variables for substitution
+    /// let config = Config::from_env(conf_str).unwrap();
+    /// ```
+    pub fn from_env(conf: &str) -> Result<Self, Error> {
+        let environment_variables: HashMap<String, String> = env::vars().collect();
+        Self::parse_with_variables(conf, &environment_variables)
+    }
+
+    /// Parse configuration with variable substitution from provided variables.
+    ///
+    /// This allows programmatic control over variable values without requiring
+    /// them to be set as environment variables.
+    ///
+    /// # Example
+    /// ```
+    /// use fiddler::config::Config;
+    /// use std::collections::HashMap;
+    ///
+    /// let conf_str = r#"input:
+    ///   stdin: {}
+    /// processors: []
+    /// output:
+    ///   stdout: {}"#;
+    ///
+    /// let vars = HashMap::new();
+    /// let config = Config::from_variables(conf_str, vars).unwrap();
+    /// ```
+    pub fn from_variables(conf: &str, variables: HashMap<String, String>) -> Result<Self, Error> {
+        Self::parse_with_variables(conf, &variables)
+    }
+
+    /// Parse configuration with variable substitution from both environment
+    /// variables and provided variables.
+    ///
+    /// Provided variables take precedence over environment variables when
+    /// there are conflicts.
+    ///
+    /// # Example
+    /// ```no_run
+    /// use fiddler::config::Config;
+    /// use std::collections::HashMap;
+    ///
+    /// let conf_str = r#"input:
+    ///   file:
+    ///     filename: {{INPUT_FILE}}
+    ///     codec: {{CODEC}}
+    /// processors: []
+    /// output:
+    ///   stdout: {}"#;
+    ///
+    /// let mut overrides = HashMap::new();
+    /// overrides.insert("INPUT_FILE".to_string(), "/override/path.txt".to_string());
+    ///
+    /// // CODEC comes from env, INPUT_FILE uses the override
+    /// let config = Config::from_env_with_overrides(conf_str, overrides).unwrap();
+    /// ```
+    pub fn from_env_with_overrides(
+        conf: &str,
+        overrides: HashMap<String, String>,
+    ) -> Result<Self, Error> {
+        let mut variables: HashMap<String, String> = env::vars().collect();
+        variables.extend(overrides);
+        Self::parse_with_variables(conf, &variables)
     }
 }
 
@@ -513,7 +597,7 @@ output:
     lines: true";
 
         let schema = "properties:
-    scanner: 
+    scanner:
         type: object
         properties:
             lines:
@@ -523,5 +607,198 @@ output:
         if let Ok(_) = conf.validate(input) {
             panic!("expected error, none received")
         }
+    }
+
+    #[test]
+    fn from_variables_uses_provided_map() {
+        let conf_str = r#"input:
+  stdin: {}
+processors: []
+output:
+  file:
+    path: {{OUTPUT_PATH}}"#;
+
+        let mut vars = HashMap::new();
+        vars.insert("OUTPUT_PATH".to_string(), "/test/output.txt".to_string());
+
+        let config = Config::from_variables(conf_str, vars).unwrap();
+
+        // Verify the variable was substituted correctly
+        let output_yaml = serde_yaml::to_string(&config.output).unwrap();
+        assert!(
+            output_yaml.contains("/test/output.txt"),
+            "Expected substituted path in output config"
+        );
+    }
+
+    #[test]
+    fn from_variables_does_not_use_env() {
+        // Set an env var that we won't include in the provided HashMap
+        std::env::set_var("FIDDLER_TEST_VAR_ISOLATED", "env_value");
+
+        let conf_str = r#"input:
+  stdin: {}
+processors: []
+output:
+  file:
+    path: {{FIDDLER_TEST_VAR_ISOLATED}}"#;
+
+        // Provide an empty HashMap - should fail because strict mode is enabled
+        let vars = HashMap::new();
+
+        let result = Config::from_variables(conf_str, vars);
+        assert!(
+            result.is_err(),
+            "Expected error when variable not in provided map"
+        );
+
+        // Clean up
+        std::env::remove_var("FIDDLER_TEST_VAR_ISOLATED");
+    }
+
+    #[test]
+    fn from_env_reads_environment_variables() {
+        // Set a unique env var for this test
+        std::env::set_var("FIDDLER_TEST_ENV_PATH", "/env/path.txt");
+
+        let conf_str = r#"input:
+  stdin: {}
+processors: []
+output:
+  file:
+    path: {{FIDDLER_TEST_ENV_PATH}}"#;
+
+        let config = Config::from_env(conf_str).unwrap();
+
+        let output_yaml = serde_yaml::to_string(&config.output).unwrap();
+        assert!(
+            output_yaml.contains("/env/path.txt"),
+            "Expected env variable to be substituted"
+        );
+
+        // Clean up
+        std::env::remove_var("FIDDLER_TEST_ENV_PATH");
+    }
+
+    #[test]
+    fn from_env_with_overrides_prefers_overrides() {
+        // Set an env var
+        std::env::set_var("FIDDLER_TEST_OVERRIDE_PATH", "env_value");
+
+        let conf_str = r#"input:
+  stdin: {}
+processors: []
+output:
+  file:
+    path: {{FIDDLER_TEST_OVERRIDE_PATH}}"#;
+
+        let mut overrides = HashMap::new();
+        overrides.insert(
+            "FIDDLER_TEST_OVERRIDE_PATH".to_string(),
+            "override_value".to_string(),
+        );
+
+        let config = Config::from_env_with_overrides(conf_str, overrides).unwrap();
+
+        let output_yaml = serde_yaml::to_string(&config.output).unwrap();
+        assert!(
+            output_yaml.contains("override_value"),
+            "Expected override to take precedence over env"
+        );
+        assert!(
+            !output_yaml.contains("env_value"),
+            "Should not contain env value"
+        );
+
+        // Clean up
+        std::env::remove_var("FIDDLER_TEST_OVERRIDE_PATH");
+    }
+
+    #[test]
+    fn from_env_with_overrides_uses_env_when_no_override() {
+        // Set env vars - one will be overridden, one won't
+        std::env::set_var("FIDDLER_TEST_PATH_A", "/path/a");
+        std::env::set_var("FIDDLER_TEST_PATH_B", "/path/b");
+
+        let conf_str = r#"input:
+  file:
+    path: {{FIDDLER_TEST_PATH_A}}
+    codec: Lines
+processors: []
+output:
+  file:
+    path: {{FIDDLER_TEST_PATH_B}}"#;
+
+        let mut overrides = HashMap::new();
+        // Only override PATH_A
+        overrides.insert("FIDDLER_TEST_PATH_A".to_string(), "/override/a".to_string());
+
+        let config = Config::from_env_with_overrides(conf_str, overrides).unwrap();
+
+        let input_yaml = serde_yaml::to_string(&config.input).unwrap();
+        let output_yaml = serde_yaml::to_string(&config.output).unwrap();
+
+        assert!(
+            input_yaml.contains("/override/a"),
+            "PATH_A should use override"
+        );
+        assert!(
+            output_yaml.contains("/path/b"),
+            "PATH_B should use env value"
+        );
+
+        // Clean up
+        std::env::remove_var("FIDDLER_TEST_PATH_A");
+        std::env::remove_var("FIDDLER_TEST_PATH_B");
+    }
+
+    #[test]
+    fn missing_variable_in_strict_mode_returns_error() {
+        let conf_str = r#"input:
+  stdin: {}
+processors: []
+output:
+  file:
+    path: {{UNDEFINED_VARIABLE_XYZ}}"#;
+
+        // Ensure the variable doesn't exist
+        std::env::remove_var("UNDEFINED_VARIABLE_XYZ");
+
+        let result = Config::from_env(conf_str);
+        assert!(result.is_err(), "Expected error for missing variable");
+
+        if let Err(Error::ConfigFailedValidation(msg)) = result {
+            assert!(
+                msg.contains("Handlebars template error"),
+                "Error should mention template error: {}",
+                msg
+            );
+        } else {
+            panic!("Expected ConfigFailedValidation error");
+        }
+    }
+
+    #[test]
+    fn from_str_uses_environment_variables() {
+        // Verify that FromStr implementation delegates to from_env
+        std::env::set_var("FIDDLER_FROM_STR_TEST", "/fromstr/path");
+
+        let conf_str = r#"input:
+  stdin: {}
+processors: []
+output:
+  file:
+    path: {{FIDDLER_FROM_STR_TEST}}"#;
+
+        let config: Config = conf_str.parse().unwrap();
+
+        let output_yaml = serde_yaml::to_string(&config.output).unwrap();
+        assert!(
+            output_yaml.contains("/fromstr/path"),
+            "FromStr should use environment variables"
+        );
+
+        // Clean up
+        std::env::remove_var("FIDDLER_FROM_STR_TEST");
     }
 }

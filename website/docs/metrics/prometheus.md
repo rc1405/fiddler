@@ -50,6 +50,9 @@ The following Prometheus metrics are exposed:
 | `fiddler_messages_in_flight` | Current number of messages being processed |
 | `fiddler_throughput_per_second` | Current throughput in messages per second |
 | `fiddler_bytes_per_second` | Current throughput in bytes per second |
+| `fiddler_latency_avg_ms` | Average message processing latency in milliseconds |
+| `fiddler_latency_min_ms` | Minimum message processing latency in milliseconds |
+| `fiddler_latency_max_ms` | Maximum message processing latency in milliseconds |
 
 ## Scraping Metrics
 
