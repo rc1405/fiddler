@@ -1,6 +1,6 @@
 [package]
 name = "fiddler"
-version = "4.0.0"
+version = "4.1.0"
 edition = "2021"
 license-file = "../LICENSE"
 description = "Data Stream processor written in rust"
@@ -28,7 +28,7 @@ all = ["python", "elasticsearch", "aws", "prometheus", "clickhouse", "http_serve
 
 [dependencies]
 fiddler-macros = { version = "1.1.0", path = "../fiddler-macros" }
-fiddler-script = { version = "0.1.0", path = "../fiddler-script" }
+fiddler-script = { version = "0.1.1", path = "../fiddler-script" }
 async-std = { version = "1.12.0", features = ["attributes", "std"] }
 async-trait = "0.1.78"
 aws-config = { version = "1.1.7", features = [
