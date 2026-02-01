@@ -30,6 +30,7 @@
 use crate::config::register_plugin;
 use crate::config::ItemType;
 use crate::config::{ConfigSpec, ExecutionType};
+use crate::modules::metrics::ALL_METRICS;
 use crate::Error;
 use crate::{Closer, MetricEntry, Metrics};
 use async_trait::async_trait;
@@ -52,23 +53,6 @@ const DEFAULT_FLUSH_INTERVAL_MS: u64 = 5000;
 const DEFAULT_TTL_DAYS: u32 = 0;
 // Buffer size is 10x batch size to handle bursts while batching provides efficiency
 const CHANNEL_BUFFER_SIZE: usize = 1000;
-
-/// All available metric names that can be filtered.
-const ALL_METRICS: &[&str] = &[
-    "total_received",
-    "total_completed",
-    "total_process_errors",
-    "total_output_errors",
-    "streams_started",
-    "streams_completed",
-    "duplicates_rejected",
-    "stale_entries_removed",
-    "in_flight",
-    "throughput_per_sec",
-    "input_bytes",
-    "output_bytes",
-    "bytes_per_sec",
-];
 
 /// ClickHouse dimension configuration.
 #[derive(Debug, Deserialize, Clone, Default)]

@@ -27,6 +27,7 @@
 use crate::config::register_plugin;
 use crate::config::ItemType;
 use crate::config::{ConfigSpec, ExecutionType};
+use crate::modules::metrics::ALL_METRICS;
 use crate::Error;
 use crate::{Closer, MetricEntry, Metrics};
 use async_trait::async_trait;
@@ -43,23 +44,6 @@ use super::Credentials;
 
 const DEFAULT_NAMESPACE: &str = "Fiddler";
 const CHANNEL_BUFFER_SIZE: usize = 100;
-
-/// All available metric names that can be filtered.
-const ALL_METRICS: &[&str] = &[
-    "total_received",
-    "total_completed",
-    "total_process_errors",
-    "total_output_errors",
-    "streams_started",
-    "streams_completed",
-    "duplicates_rejected",
-    "stale_entries_removed",
-    "in_flight",
-    "throughput_per_sec",
-    "input_bytes",
-    "output_bytes",
-    "bytes_per_sec",
-];
 
 /// CloudWatch dimension configuration.
 #[derive(Debug, Deserialize, Clone, Default)]

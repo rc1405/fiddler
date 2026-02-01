@@ -21,6 +21,24 @@ use crate::{Closer, Error, MetricEntry, Metrics};
 use async_trait::async_trait;
 use tracing::debug;
 
+/// All available metric names that can be filtered.
+/// Used by metrics backends that support include/exclude filtering.
+pub(crate) const ALL_METRICS: &[&str] = &[
+    "total_received",
+    "total_completed",
+    "total_process_errors",
+    "total_output_errors",
+    "streams_started",
+    "streams_completed",
+    "duplicates_rejected",
+    "stale_entries_removed",
+    "in_flight",
+    "throughput_per_sec",
+    "input_bytes",
+    "output_bytes",
+    "bytes_per_sec",
+];
+
 #[cfg(feature = "prometheus")]
 pub mod prometheus;
 
