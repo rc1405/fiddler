@@ -297,6 +297,82 @@ pub struct ConfigSpec {
     schema: Arc<JSONSchema>,
 }
 
+/// Schemas organized by category and plugin name.
+///
+/// The outer HashMap maps category names (e.g., "input", "output") to
+/// inner HashMaps that map plugin names to their JSON schema strings.
+pub type SchemaExport = HashMap<String, HashMap<String, String>>;
+
+/// Exports all registered plugin schemas organized by plugin type.
+///
+/// This function collects JSON schemas from all registered plugins and returns them
+/// in a hierarchical structure for documentation, validation, or tooling purposes.
+///
+/// # Returns
+///
+/// A [`SchemaExport`] where:
+/// - The outer key is the plugin category name (e.g., "input", "output", "processors", "metrics")
+/// - The inner `HashMap` maps plugin names to their JSON schema strings
+///
+/// # Errors
+///
+/// Returns an error if:
+/// - Plugin registration fails
+/// - Unable to acquire read lock on the plugin registry ([`Error::UnableToSecureLock`])
+///
+/// # Examples
+///
+/// ```no_run
+/// use fiddler::config::export_schemas;
+///
+/// let schemas = export_schemas().unwrap();
+/// if let Some(inputs) = schemas.get("input") {
+///     for (name, schema) in inputs {
+///         println!("Input plugin '{}' has schema: {}", name, schema);
+///     }
+/// }
+/// ```
+pub fn export_schemas() -> Result<SchemaExport, Error> {
+    // Ensure all plugins are registered before exporting
+    crate::modules::register_plugins()?;
+
+    // Acquire read lock on the plugin registry
+    let lock = ENV.read().map_err(|_| Error::UnableToSecureLock)?;
+
+    // Define the plugin types to export with their corresponding export names
+    let plugin_types = [
+        (ItemType::Input, "input"),
+        (ItemType::InputBatch, "input_batch"),
+        (ItemType::Processor, "processors"),
+        (ItemType::Metrics, "metrics"),
+        (ItemType::Output, "output"),
+        (ItemType::OutputBatch, "output_batch"),
+    ];
+
+    // Extract schemas for each plugin type
+    let results: SchemaExport = plugin_types
+        .iter()
+        .filter_map(|(item_type, export_name)| {
+            lock.get(item_type).map(|plugins| {
+                let schemas: HashMap<String, String> = plugins
+                    .iter()
+                    .map(|(name, registered_item)| {
+                        (name.clone(), registered_item.format.raw_schema.clone())
+                    })
+                    .collect();
+
+                (export_name.to_string(), schemas)
+            })
+        })
+        .collect();
+
+    if results.is_empty() {
+        debug!("No plugin schemas found in registry");
+    }
+
+    Ok(results)
+}
+
 impl std::fmt::Debug for ConfigSpec {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("ConfigSpec")
