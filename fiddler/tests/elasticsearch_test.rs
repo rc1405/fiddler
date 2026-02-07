@@ -17,8 +17,11 @@ use std::path::MAIN_SEPARATOR_STR;
 #[cfg_attr(feature = "elasticsearch", tokio::test)]
 async fn fiddler_elasticsearch_output_test() {
     use testcontainers::runners::AsyncRunner;
+    use testcontainers::ImageExt;
 
-    let request = elastic_search::ElasticSearch::default();
+    // Configure Elasticsearch with appropriate memory settings for testing
+    let request = elastic_search::ElasticSearch::default()
+        .with_env_var("ES_JAVA_OPTS", "-Xms512m -Xmx512m");
     let container = request.start().await.unwrap();
     let host_port = container.get_host_port_ipv4(9200).await.unwrap();
     let config = format!(

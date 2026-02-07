@@ -1,5 +1,6 @@
 use crate::Error;
 use serde::Deserialize;
+mod aws_kinesis;
 pub mod cloudwatch;
 mod s3;
 mod sqs;
@@ -11,6 +12,7 @@ pub(crate) struct Credentials {
     pub session_token: Option<String>,
 }
 pub(crate) fn register_plugins() -> Result<(), Error> {
+    aws_kinesis::register_kinesis()?;
     sqs::register_sqs()?;
     s3::register_s3()?;
     cloudwatch::register_cloudwatch()?;

@@ -118,6 +118,7 @@ pub(crate) struct Item {
 /// ```yaml
 /// metrics:
 ///   interval: 300  # Record metrics every 5 minutes (default)
+///   collect_system_metrics: true  # Include CPU and memory usage
 ///   prometheus: {}
 /// ```
 #[derive(Debug, Deserialize, Serialize, Clone, Default)]
@@ -128,6 +129,10 @@ pub struct MetricsConfig {
     /// Interval in seconds at which metrics are recorded (default: 300)
     #[serde(default = "MetricsConfig::default_interval")]
     pub interval: u64,
+
+    /// Whether to collect system metrics (CPU and memory usage) (default: false)
+    #[serde(default)]
+    pub collect_system_metrics: bool,
 
     /// Dynamic configuration for the metrics backend
     #[serde(flatten)]

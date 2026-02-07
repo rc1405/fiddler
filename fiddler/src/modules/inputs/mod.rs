@@ -8,6 +8,14 @@ use uuid::Uuid;
 pub mod file;
 #[cfg(feature = "http_server")]
 pub mod http_server;
+#[cfg(feature = "redis")]
+pub mod redis;
+#[cfg(feature = "mqtt")]
+pub mod mqtt;
+#[cfg(feature = "zeromq")]
+pub mod zeromq;
+#[cfg(feature = "amqp")]
+pub mod amqp;
 pub mod stdin;
 
 /// Minimum backoff duration when no input is available (in microseconds)
@@ -20,6 +28,14 @@ pub(crate) fn register_plugins() -> Result<(), Error> {
     file::register_file()?;
     #[cfg(feature = "http_server")]
     http_server::register_http_server()?;
+    #[cfg(feature = "redis")]
+    redis::register_redis()?;
+    #[cfg(feature = "mqtt")]
+    mqtt::register_mqtt()?;
+    #[cfg(feature = "zeromq")]
+    zeromq::register_zeromq()?;
+    #[cfg(feature = "amqp")]
+    amqp::register_amqp()?;
     stdin::register_stdin()?;
     Ok(())
 }

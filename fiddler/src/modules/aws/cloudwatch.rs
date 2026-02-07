@@ -236,6 +236,14 @@ fn build_metric_data(
         ));
     }
 
+    if should_include("total_filtered") {
+        data.push(create_datum(
+            "total_filtered",
+            metric.total_filtered as f64,
+            StandardUnit::Count,
+        ));
+    }
+
     if should_include("streams_started") {
         data.push(create_datum(
             "streams_started",
@@ -330,6 +338,37 @@ fn build_metric_data(
             metric.latency_max_ms,
             StandardUnit::Milliseconds,
         ));
+    }
+
+    // System metrics - only emit if collected
+    if should_include("cpu_usage_percent") {
+        if let Some(cpu) = metric.cpu_usage_percent {
+            data.push(create_datum(
+                "cpu_usage_percent",
+                cpu as f64,
+                StandardUnit::Percent,
+            ));
+        }
+    }
+
+    if should_include("memory_used_bytes") {
+        if let Some(mem_used) = metric.memory_used_bytes {
+            data.push(create_datum(
+                "memory_used_bytes",
+                mem_used as f64,
+                StandardUnit::Bytes,
+            ));
+        }
+    }
+
+    if should_include("memory_total_bytes") {
+        if let Some(mem_total) = metric.memory_total_bytes {
+            data.push(create_datum(
+                "memory_total_bytes",
+                mem_total as f64,
+                StandardUnit::Bytes,
+            ));
+        }
     }
 
     data
@@ -470,12 +509,16 @@ dimensions:
             total_completed: 90,
             total_process_errors: 5,
             total_output_errors: 5,
+            total_filtered: 0,
             streams_started: 10,
             streams_completed: 8,
             duplicates_rejected: 2,
             stale_entries_removed: 1,
             in_flight: 50,
             throughput_per_sec: 123.45,
+            cpu_usage_percent: None,
+            memory_used_bytes: None,
+            memory_total_bytes: None,
             input_bytes: 1000,
             output_bytes: 900,
             bytes_per_sec: 90.0,
@@ -488,7 +531,7 @@ dimensions:
         let exclude_set: HashSet<String> = HashSet::new();
 
         let data = build_metric_data(&metric, &[], &include_set, &exclude_set);
-        assert_eq!(data.len(), 16);
+        assert_eq!(data.len(), 17);
     }
 
     #[test]
@@ -498,12 +541,16 @@ dimensions:
             total_completed: 90,
             total_process_errors: 5,
             total_output_errors: 5,
+            total_filtered: 0,
             streams_started: 10,
             streams_completed: 8,
             duplicates_rejected: 2,
             stale_entries_removed: 1,
             in_flight: 50,
             throughput_per_sec: 123.45,
+            cpu_usage_percent: None,
+            memory_used_bytes: None,
+            memory_total_bytes: None,
             input_bytes: 1000,
             output_bytes: 900,
             bytes_per_sec: 90.0,
@@ -531,12 +578,16 @@ dimensions:
             total_completed: 90,
             total_process_errors: 5,
             total_output_errors: 5,
+            total_filtered: 0,
             streams_started: 10,
             streams_completed: 8,
             duplicates_rejected: 2,
             stale_entries_removed: 1,
             in_flight: 50,
             throughput_per_sec: 123.45,
+            cpu_usage_percent: None,
+            memory_used_bytes: None,
+            memory_total_bytes: None,
             input_bytes: 1000,
             output_bytes: 900,
             bytes_per_sec: 90.0,
@@ -551,7 +602,7 @@ dimensions:
             .collect();
 
         let data = build_metric_data(&metric, &[], &include_set, &exclude_set);
-        assert_eq!(data.len(), 15);
+        assert_eq!(data.len(), 16);
     }
 
     #[test]

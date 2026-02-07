@@ -9,6 +9,16 @@ pub mod clickhouse;
 pub mod drop;
 #[cfg(feature = "elasticsearch")]
 pub mod elasticsearch;
+#[cfg(feature = "http_client")]
+pub mod http;
+#[cfg(feature = "redis")]
+pub mod redis;
+#[cfg(feature = "mqtt")]
+pub mod mqtt;
+#[cfg(feature = "zeromq")]
+pub mod zeromq;
+#[cfg(feature = "amqp")]
+pub mod amqp;
 pub mod stdout;
 pub mod switch;
 
@@ -18,6 +28,16 @@ pub(crate) fn register_plugins() -> Result<(), Error> {
     elasticsearch::register_elasticsearch()?;
     #[cfg(feature = "clickhouse")]
     clickhouse::register_clickhouse()?;
+    #[cfg(feature = "http_client")]
+    http::register_http()?;
+    #[cfg(feature = "redis")]
+    redis::register_redis()?;
+    #[cfg(feature = "mqtt")]
+    mqtt::register_mqtt()?;
+    #[cfg(feature = "zeromq")]
+    zeromq::register_zeromq()?;
+    #[cfg(feature = "amqp")]
+    amqp::register_amqp()?;
     stdout::register_stdout()?;
     switch::register_switch()?;
     Ok(())

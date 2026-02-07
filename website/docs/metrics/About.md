@@ -13,6 +13,7 @@ The following metrics are tracked and exposed by all metrics backends:
 |--------|------|-------------|
 | `total_received` | Counter | Total messages received from input |
 | `total_completed` | Counter | Messages successfully processed through all outputs |
+| `total_filtered` | Counter | Messages intentionally filtered/dropped by processors |
 | `total_process_errors` | Counter | Messages that encountered processing errors |
 | `total_output_errors` | Counter | Messages that encountered output errors |
 | `streams_started` | Counter | Number of streams started |

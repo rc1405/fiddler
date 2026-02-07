@@ -98,6 +98,7 @@ The following metrics can be included or excluded:
 |-------------|------|-------------|
 | `total_received` | Count | Total messages received from input |
 | `total_completed` | Count | Messages successfully processed through all outputs |
+| `total_filtered` | Count | Messages intentionally filtered/dropped by processors |
 | `total_process_errors` | Count | Messages that encountered processing errors |
 | `total_output_errors` | Count | Messages that encountered output errors |
 | `streams_started` | Count | Number of streams started |

@@ -3,11 +3,13 @@ pub mod compression;
 pub mod decode;
 pub mod exception;
 pub mod fiddlerscript;
+pub mod filter;
 pub mod lines;
 pub mod noop;
 #[cfg(feature = "python")]
 pub mod python;
 pub mod switch;
+pub mod transform;
 
 use crate::config::{ExecutionType, ParsedRegisteredItem};
 use crate::runtime::{InternalMessage, InternalMessageState, MessageStatus};
@@ -24,6 +26,8 @@ pub(crate) fn register_plugins() -> Result<(), Error> {
     decode::register_decode()?;
     exception::register_try()?;
     fiddlerscript::register_fiddlerscript()?;
+    filter::register_filter()?;
+    transform::register_transform()?;
     Ok(())
 }
 
@@ -54,6 +58,22 @@ pub(crate) async fn run_processor(
                 match p.process(msg.message).await {
                     Ok(m) => {
                         let msg_count = m.len();
+
+                        // Handle filtered messages (empty batch)
+                        if msg_count == 0 {
+                            debug!("processor returned empty batch - message filtered");
+                            state_tx
+                                .send_async(InternalMessageState {
+                                    message_id: message_id.clone(),
+                                    status: MessageStatus::Filtered,
+                                    stream_id: stream_id.clone(),
+                                    ..Default::default()
+                                })
+                                .await
+                                .map_err(|e| Error::UnableToSendToChannel(format!("{e}")))?;
+                            continue;
+                        }
+
                         if msg_count > 1 {
                             for _ in 0..(msg_count - 1) {
                                 state_tx

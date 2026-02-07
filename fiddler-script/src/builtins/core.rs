@@ -151,6 +151,32 @@ pub fn builtin_getenv(args: Vec<Value>) -> Result<Value, RuntimeError> {
     }
 }
 
+/// Drop a variable's value by returning null.
+///
+/// This function simply returns null. To drop a variable, assign the result:
+/// ```ignore
+/// let x = 42;
+/// x = drop(x);  // x is now null
+/// ```
+///
+/// Alternatively, you can directly assign null:
+/// ```ignore
+/// x = null;
+/// ```
+///
+/// # Arguments
+/// - Any value (ignored)
+///
+/// # Returns
+/// - `Value::Null`
+pub fn builtin_drop(args: Vec<Value>) -> Result<Value, RuntimeError> {
+    if args.len() != 1 {
+        return Err(RuntimeError::wrong_argument_count(1, args.len()));
+    }
+    // Just return null - the argument is ignored
+    Ok(Value::Null)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -237,5 +263,30 @@ mod tests {
         let result =
             builtin_getenv(vec![Value::String("NONEXISTENT_VAR_12345".to_string())]).unwrap();
         assert_eq!(result, Value::Null);
+    }
+
+    #[test]
+    fn test_builtin_drop() {
+        let result = builtin_drop(vec![Value::Integer(42)]).unwrap();
+        assert_eq!(result, Value::Null);
+    }
+
+    #[test]
+    fn test_builtin_drop_string() {
+        let result = builtin_drop(vec![Value::String("hello".to_string())]).unwrap();
+        assert_eq!(result, Value::Null);
+    }
+
+    #[test]
+    fn test_builtin_drop_wrong_count() {
+        let result = builtin_drop(vec![]);
+        assert!(matches!(
+            result,
+            Err(RuntimeError::WrongArgumentCount {
+                expected: 1,
+                actual: 0,
+                ..
+            })
+        ));
     }
 }

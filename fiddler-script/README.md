@@ -194,7 +194,9 @@ print(factorial(5));  // 120
 | `str(value)`             | Convert a value to a string                                     |
 | `int(value)`             | Convert a value to an integer                                   |
 | `getenv(name)`           | Get an environment variable by name (returns null if not found) |
+| `drop(value)`            | Returns null (useful for clearing variables)                    |
 | `parse_json(bytes)`      | Parse JSON from bytes or string                                 |
+| `jmespath(data, expr)`   | Query JSON data using JMESPath expressions                      |
 | `bytes_to_string(bytes)` | Convert bytes to a UTF-8 string                                 |
 | `bytes(value)`           | Convert any value to bytes                                      |
 

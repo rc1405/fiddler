@@ -354,6 +354,13 @@ ORDER BY (timestamp, metric_name){}"#,
             self.add_metric_row(
                 &mut rows,
                 timestamp,
+                "total_filtered",
+                metric.total_filtered as f64,
+                &dimension_values,
+            );
+            self.add_metric_row(
+                &mut rows,
+                timestamp,
                 "streams_started",
                 metric.streams_started as f64,
                 &dimension_values,
@@ -435,6 +442,34 @@ ORDER BY (timestamp, metric_name){}"#,
                 metric.latency_max_ms,
                 &dimension_values,
             );
+            // System metrics - only emit if collected
+            if let Some(cpu) = metric.cpu_usage_percent {
+                self.add_metric_row(
+                    &mut rows,
+                    timestamp,
+                    "cpu_usage_percent",
+                    cpu as f64,
+                    &dimension_values,
+                );
+            }
+            if let Some(mem_used) = metric.memory_used_bytes {
+                self.add_metric_row(
+                    &mut rows,
+                    timestamp,
+                    "memory_used_bytes",
+                    mem_used as f64,
+                    &dimension_values,
+                );
+            }
+            if let Some(mem_total) = metric.memory_total_bytes {
+                self.add_metric_row(
+                    &mut rows,
+                    timestamp,
+                    "memory_total_bytes",
+                    mem_total as f64,
+                    &dimension_values,
+                );
+            }
         }
 
         if rows.is_empty() {

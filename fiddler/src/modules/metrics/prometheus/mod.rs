@@ -87,12 +87,23 @@ impl Metrics for PrometheusMetrics {
         counter!("fiddler_messages_completed_total").absolute(metric.total_completed);
         counter!("fiddler_messages_process_errors_total").absolute(metric.total_process_errors);
         counter!("fiddler_messages_output_errors_total").absolute(metric.total_output_errors);
+        counter!("fiddler_messages_filtered_total").absolute(metric.total_filtered);
         counter!("fiddler_streams_started_total").absolute(metric.streams_started);
         counter!("fiddler_streams_completed_total").absolute(metric.streams_completed);
         counter!("fiddler_duplicates_rejected_total").absolute(metric.duplicates_rejected);
         counter!("fiddler_stale_entries_removed_total").absolute(metric.stale_entries_removed);
         gauge!("fiddler_messages_in_flight").set(metric.in_flight as f64);
         gauge!("fiddler_throughput_per_second").set(metric.throughput_per_sec);
+        // System metrics - only emit if collected
+        if let Some(cpu) = metric.cpu_usage_percent {
+            gauge!("fiddler_cpu_usage_percent").set(cpu as f64);
+        }
+        if let Some(mem_used) = metric.memory_used_bytes {
+            gauge!("fiddler_memory_used_bytes").set(mem_used as f64);
+        }
+        if let Some(mem_total) = metric.memory_total_bytes {
+            gauge!("fiddler_memory_total_bytes").set(mem_total as f64);
+        }
         counter!("fiddler_input_bytes_total").absolute(metric.input_bytes);
         counter!("fiddler_output_bytes_total").absolute(metric.output_bytes);
         gauge!("fiddler_bytes_per_second").set(metric.bytes_per_sec);
@@ -144,12 +155,16 @@ mod tests {
             total_completed: 90,
             total_process_errors: 5,
             total_output_errors: 5,
+            total_filtered: 0,
             streams_started: 10,
             streams_completed: 8,
             duplicates_rejected: 2,
             stale_entries_removed: 1,
             in_flight: 50,
             throughput_per_sec: 123.45,
+            cpu_usage_percent: None,
+            memory_used_bytes: None,
+            memory_total_bytes: None,
             input_bytes: 1000,
             output_bytes: 900,
             bytes_per_sec: 90.0,
