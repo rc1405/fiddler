@@ -136,9 +136,9 @@ pub fn builtin_jmespath(args: Vec<Value>) -> Result<Value, RuntimeError> {
     })?;
 
     // Execute the search
-    let result = expr.search(&data).map_err(|e| {
-        RuntimeError::invalid_argument(format!("JMESPath query failed: {}", e))
-    })?;
+    let result = expr
+        .search(&data)
+        .map_err(|e| RuntimeError::invalid_argument(format!("JMESPath query failed: {}", e)))?;
 
     // Convert result back to serde_json::Value, then to FiddlerScript Value
     // The result is an Rc<Variable>, dereference to get the Variable
@@ -234,7 +234,11 @@ mod tests {
 
     #[test]
     fn test_value_to_json_array() {
-        let value = Value::Array(vec![Value::Integer(1), Value::Integer(2), Value::Integer(3)]);
+        let value = Value::Array(vec![
+            Value::Integer(1),
+            Value::Integer(2),
+            Value::Integer(3),
+        ]);
         let json = value_to_json(&value);
         assert_eq!(json, serde_json::json!([1, 2, 3]));
     }

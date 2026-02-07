@@ -1131,7 +1131,12 @@ async fn message_handler(
         }
     }
 
-    log_shutdown_metrics(&metrics, handles.len(), metrics_backend.as_mut(), system.as_mut());
+    log_shutdown_metrics(
+        &metrics,
+        handles.len(),
+        metrics_backend.as_mut(),
+        system.as_mut(),
+    );
     Ok(())
 }
 

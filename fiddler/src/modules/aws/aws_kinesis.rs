@@ -34,7 +34,9 @@
 //! ```
 
 use crate::config::{register_plugin, ConfigSpec, ExecutionType, ItemType};
-use crate::{BatchingPolicy, CallbackChan, Closer, Error, Input, Message, MessageBatch, OutputBatch};
+use crate::{
+    BatchingPolicy, CallbackChan, Closer, Error, Input, Message, MessageBatch, OutputBatch,
+};
 use async_trait::async_trait;
 use aws_sdk_kinesis::primitives::Blob;
 use aws_sdk_kinesis::types::{PutRecordsRequestEntry, ShardIteratorType};
@@ -143,7 +145,9 @@ async fn kinesis_reader_task(
         config.region.clone(),
         config.endpoint_url.clone(),
         config.credentials.clone(),
-    ).await {
+    )
+    .await
+    {
         Ok(c) => c,
         Err(e) => {
             let _ = sender.send_async(Err(e)).await;
@@ -155,22 +159,36 @@ async fn kinesis_reader_task(
     let shard_id = match config.shard_id {
         Some(ref id) => id.clone(),
         None => {
-            match client.list_shards().stream_name(&config.stream_name).send().await {
+            match client
+                .list_shards()
+                .stream_name(&config.stream_name)
+                .send()
+                .await
+            {
                 Ok(resp) => {
                     if let Some(shards) = resp.shards {
                         if let Some(shard) = shards.first() {
                             shard.shard_id().to_string()
                         } else {
-                            let _ = sender.send_async(Err(Error::ExecutionError("No shards found".into()))).await;
+                            let _ = sender
+                                .send_async(Err(Error::ExecutionError("No shards found".into())))
+                                .await;
                             return;
                         }
                     } else {
-                        let _ = sender.send_async(Err(Error::ExecutionError("No shards found".into()))).await;
+                        let _ = sender
+                            .send_async(Err(Error::ExecutionError("No shards found".into())))
+                            .await;
                         return;
                     }
                 }
                 Err(e) => {
-                    let _ = sender.send_async(Err(Error::ExecutionError(format!("List shards failed: {}", e)))).await;
+                    let _ = sender
+                        .send_async(Err(Error::ExecutionError(format!(
+                            "List shards failed: {}",
+                            e
+                        ))))
+                        .await;
                     return;
                 }
             }
@@ -189,7 +207,12 @@ async fn kinesis_reader_task(
     {
         Ok(resp) => resp.shard_iterator,
         Err(e) => {
-            let _ = sender.send_async(Err(Error::ExecutionError(format!("Get iterator failed: {}", e)))).await;
+            let _ = sender
+                .send_async(Err(Error::ExecutionError(format!(
+                    "Get iterator failed: {}",
+                    e
+                ))))
+                .await;
             return;
         }
     };
@@ -303,13 +326,13 @@ impl KinesisOutput {
             config.region.clone(),
             config.endpoint_url.clone(),
             config.credentials.clone(),
-        ).await?;
+        )
+        .await?;
 
         // Enforce Kinesis limit of 500 records per PutRecords call
-        let batch_size = config
-            .batch
-            .as_ref()
-            .map_or(MAX_KINESIS_BATCH, |b| b.effective_size().min(MAX_KINESIS_BATCH));
+        let batch_size = config.batch.as_ref().map_or(MAX_KINESIS_BATCH, |b| {
+            b.effective_size().min(MAX_KINESIS_BATCH)
+        });
 
         let interval = config
             .batch
@@ -365,7 +388,11 @@ impl OutputBatch for KinesisOutput {
                 if failed > 0 {
                     warn!(failed_count = failed, "Some Kinesis records failed");
                 }
-                debug!(count = messages.len(), failed = failed, "Put records to Kinesis");
+                debug!(
+                    count = messages.len(),
+                    failed = failed,
+                    "Put records to Kinesis"
+                );
                 Ok(())
             }
             Err(e) => {
@@ -401,7 +428,9 @@ fn create_kinesis_input(conf: Value) -> Result<ExecutionType, Error> {
     let config: KinesisInputConfig = serde_yaml::from_value(conf)?;
 
     if config.stream_name.is_empty() {
-        return Err(Error::ConfigFailedValidation("stream_name is required".into()));
+        return Err(Error::ConfigFailedValidation(
+            "stream_name is required".into(),
+        ));
     }
 
     Ok(ExecutionType::Input(Box::new(KinesisInput::new(config)?)))
@@ -412,7 +441,9 @@ fn create_kinesis_output(conf: Value) -> Result<ExecutionType, Error> {
     let config: KinesisOutputConfig = serde_yaml::from_value(conf)?;
 
     if config.stream_name.is_empty() {
-        return Err(Error::ConfigFailedValidation("stream_name is required".into()));
+        return Err(Error::ConfigFailedValidation(
+            "stream_name is required".into(),
+        ));
     }
 
     Ok(ExecutionType::OutputBatch(Box::new(

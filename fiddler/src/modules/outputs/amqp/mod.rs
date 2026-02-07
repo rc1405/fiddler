@@ -20,8 +20,7 @@ use crate::{BatchingPolicy, Closer, Error, MessageBatch, OutputBatch};
 use async_trait::async_trait;
 use fiddler_macros::fiddler_registration_func;
 use lapin::{
-    options::BasicPublishOptions,
-    BasicProperties, Channel, Connection, ConnectionProperties,
+    options::BasicPublishOptions, BasicProperties, Channel, Connection, ConnectionProperties,
 };
 use serde::Deserialize;
 use serde_yaml::Value;
@@ -70,7 +69,11 @@ impl AmqpClient {
     }
 
     async fn ensure_connected(&mut self) -> Result<&Channel, Error> {
-        if self.channel.as_ref().map_or(true, |c| !c.status().connected()) {
+        if self
+            .channel
+            .as_ref()
+            .map_or(true, |c| !c.status().connected())
+        {
             let conn = Connection::connect(&self.url, ConnectionProperties::default())
                 .await
                 .map_err(|e| Error::OutputError(format!("AMQP connection failed: {}", e)))?;
@@ -191,7 +194,9 @@ fn create_amqp_output(conf: Value) -> Result<ExecutionType, Error> {
         return Err(Error::ConfigFailedValidation("exchange is required".into()));
     }
 
-    Ok(ExecutionType::OutputBatch(Box::new(AmqpOutput::new(config)?)))
+    Ok(ExecutionType::OutputBatch(Box::new(AmqpOutput::new(
+        config,
+    )?)))
 }
 
 pub(crate) fn register_amqp() -> Result<(), Error> {
@@ -228,7 +233,12 @@ properties:
     description: "Batching configuration"
 "#;
     let conf_spec = ConfigSpec::from_schema(config)?;
-    register_plugin("amqp".into(), ItemType::OutputBatch, conf_spec, create_amqp_output)
+    register_plugin(
+        "amqp".into(),
+        ItemType::OutputBatch,
+        conf_spec,
+        create_amqp_output,
+    )
 }
 
 #[cfg(test)]

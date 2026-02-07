@@ -110,10 +110,7 @@ async fn mqtt_reader_task(
             return;
         }
 
-        match tokio::time::timeout(
-            std::time::Duration::from_secs(1),
-            eventloop.poll(),
-        ).await {
+        match tokio::time::timeout(std::time::Duration::from_secs(1), eventloop.poll()).await {
             Ok(Ok(Event::Incoming(Packet::Publish(publish)))) => {
                 let msg = Message {
                     bytes: publish.payload.to_vec(),
@@ -185,7 +182,9 @@ fn create_mqtt_input(conf: Value) -> Result<ExecutionType, Error> {
         return Err(Error::ConfigFailedValidation("topics is required".into()));
     }
     if config.qos > 2 {
-        return Err(Error::ConfigFailedValidation("qos must be 0, 1, or 2".into()));
+        return Err(Error::ConfigFailedValidation(
+            "qos must be 0, 1, or 2".into(),
+        ));
     }
 
     Ok(ExecutionType::Input(Box::new(MqttInput::new(config)?)))

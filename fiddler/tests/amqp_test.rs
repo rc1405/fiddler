@@ -152,7 +152,10 @@ output:
         {
             let delivery = delivery.unwrap();
             received.push(String::from_utf8(delivery.data.clone()).unwrap());
-            delivery.ack(lapin::options::BasicAckOptions::default()).await.unwrap();
+            delivery
+                .ack(lapin::options::BasicAckOptions::default())
+                .await
+                .unwrap();
         }
     }
 

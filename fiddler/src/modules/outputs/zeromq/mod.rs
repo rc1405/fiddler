@@ -54,7 +54,9 @@ impl ZmqOutput {
             "push" => {
                 let mut s = PushSocket::new();
                 if let Some(ref addr) = config.bind {
-                    s.bind(addr).await.map_err(|e| Error::ExecutionError(format!("Bind failed: {}", e)))?;
+                    s.bind(addr)
+                        .await
+                        .map_err(|e| Error::ExecutionError(format!("Bind failed: {}", e)))?;
                 }
                 for addr in &config.connect {
                     if let Err(e) = s.connect(addr).await {
@@ -66,7 +68,9 @@ impl ZmqOutput {
             "pub" => {
                 let mut s = PubSocket::new();
                 if let Some(ref addr) = config.bind {
-                    s.bind(addr).await.map_err(|e| Error::ExecutionError(format!("Bind failed: {}", e)))?;
+                    s.bind(addr)
+                        .await
+                        .map_err(|e| Error::ExecutionError(format!("Bind failed: {}", e)))?;
                 }
                 for addr in &config.connect {
                     if let Err(e) = s.connect(addr).await {
@@ -75,12 +79,18 @@ impl ZmqOutput {
                 }
                 ZmqSocket::Pub(s)
             }
-            _ => return Err(Error::ConfigFailedValidation("socket_type must be 'push' or 'pub'".into())),
+            _ => {
+                return Err(Error::ConfigFailedValidation(
+                    "socket_type must be 'push' or 'pub'".into(),
+                ))
+            }
         };
 
         debug!(socket_type = %config.socket_type, "ZeroMQ output initialized");
 
-        Ok(Self { socket: Arc::new(Mutex::new(socket)) })
+        Ok(Self {
+            socket: Arc::new(Mutex::new(socket)),
+        })
     }
 }
 
@@ -110,10 +120,14 @@ fn create_zeromq_output(conf: Value) -> Result<ExecutionType, Error> {
     let config: ZmqOutputConfig = serde_yaml::from_value(conf)?;
 
     if config.bind.is_none() && config.connect.is_empty() {
-        return Err(Error::ConfigFailedValidation("bind or connect is required".into()));
+        return Err(Error::ConfigFailedValidation(
+            "bind or connect is required".into(),
+        ));
     }
 
-    Ok(ExecutionType::Output(Box::new(ZmqOutput::new(config).await?)))
+    Ok(ExecutionType::Output(Box::new(
+        ZmqOutput::new(config).await?,
+    )))
 }
 
 pub(crate) fn register_zeromq() -> Result<(), Error> {
@@ -135,7 +149,12 @@ properties:
     description: "Connect addresses"
 "#;
     let conf_spec = ConfigSpec::from_schema(config)?;
-    register_plugin("zeromq".into(), ItemType::Output, conf_spec, create_zeromq_output)
+    register_plugin(
+        "zeromq".into(),
+        ItemType::Output,
+        conf_spec,
+        create_zeromq_output,
+    )
 }
 
 #[cfg(test)]

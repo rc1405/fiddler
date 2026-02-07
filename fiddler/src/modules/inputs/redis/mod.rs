@@ -351,8 +351,7 @@ fn create_redis_input(conf: Value) -> Result<ExecutionType, Error> {
             }
         }
         "pubsub" => {
-            if config.channels.is_none() || config.channels.as_ref().is_some_and(|c| c.is_empty())
-            {
+            if config.channels.is_none() || config.channels.as_ref().is_some_and(|c| c.is_empty()) {
                 return Err(Error::ConfigFailedValidation(
                     "channels is required for pubsub mode".into(),
                 ));
@@ -434,7 +433,13 @@ timeout: 5
         let config: RedisInputConfig = serde_yaml::from_str(yaml).unwrap();
         assert_eq!(config.url, "redis://localhost:6379/0");
         assert_eq!(config.mode, "list");
-        assert_eq!(config.keys, Some(vec!["input_queue".to_string(), "fallback_queue".to_string()]));
+        assert_eq!(
+            config.keys,
+            Some(vec![
+                "input_queue".to_string(),
+                "fallback_queue".to_string()
+            ])
+        );
         assert_eq!(config.list_command, "brpop");
         assert_eq!(config.timeout, 5);
     }
@@ -452,7 +457,10 @@ use_patterns: true
         let config: RedisInputConfig = serde_yaml::from_str(yaml).unwrap();
         assert_eq!(config.url, "redis://localhost:6379");
         assert_eq!(config.mode, "pubsub");
-        assert_eq!(config.channels, Some(vec!["events.*".to_string(), "logs.*".to_string()]));
+        assert_eq!(
+            config.channels,
+            Some(vec!["events.*".to_string(), "logs.*".to_string()])
+        );
         assert!(config.use_patterns);
     }
 

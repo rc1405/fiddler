@@ -5,18 +5,18 @@ use tokio::time::{sleep, Duration};
 use tracing::{debug, trace};
 use uuid::Uuid;
 
+#[cfg(feature = "amqp")]
+pub mod amqp;
 pub mod file;
 #[cfg(feature = "http_server")]
 pub mod http_server;
-#[cfg(feature = "redis")]
-pub mod redis;
 #[cfg(feature = "mqtt")]
 pub mod mqtt;
+#[cfg(feature = "redis")]
+pub mod redis;
+pub mod stdin;
 #[cfg(feature = "zeromq")]
 pub mod zeromq;
-#[cfg(feature = "amqp")]
-pub mod amqp;
-pub mod stdin;
 
 /// Minimum backoff duration when no input is available (in microseconds)
 const NO_INPUT_BACKOFF_MIN_US: u64 = 1;

@@ -73,7 +73,10 @@ output:
 
     // Verify input_queue was drained (messages were read)
     let len: usize = conn.llen("input_queue").await.unwrap();
-    assert_eq!(len, 0, "Expected input_queue to be drained after processing");
+    assert_eq!(
+        len, 0,
+        "Expected input_queue to be drained after processing"
+    );
 }
 
 /// Test Redis pubsub: input subscribes, output writes to list
@@ -126,7 +129,10 @@ output:
     let mut conn = client.get_multiplexed_async_connection().await.unwrap();
 
     for i in 1..=3 {
-        let _: () = conn.publish("test_channel", format!("pubsub_msg_{}", i)).await.unwrap();
+        let _: () = conn
+            .publish("test_channel", format!("pubsub_msg_{}", i))
+            .await
+            .unwrap();
         // Small delay between publishes
         tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
     }

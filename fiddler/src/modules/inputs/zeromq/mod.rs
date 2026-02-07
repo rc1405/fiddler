@@ -45,7 +45,9 @@ async fn pull_reader_task(
 
     if let Some(ref addr) = config.bind {
         if let Err(e) = socket.bind(addr).await {
-            let _ = sender.send_async(Err(Error::ExecutionError(format!("Bind failed: {}", e)))).await;
+            let _ = sender
+                .send_async(Err(Error::ExecutionError(format!("Bind failed: {}", e))))
+                .await;
             return;
         }
     }
@@ -65,8 +67,15 @@ async fn pull_reader_task(
 
         match tokio::time::timeout(std::time::Duration::from_secs(1), socket.recv()).await {
             Ok(Ok(msg)) => {
-                let bytes: Vec<u8> = msg.into_vec().into_iter().flat_map(|f| f.to_vec()).collect();
-                let message = Message { bytes, ..Default::default() };
+                let bytes: Vec<u8> = msg
+                    .into_vec()
+                    .into_iter()
+                    .flat_map(|f| f.to_vec())
+                    .collect();
+                let message = Message {
+                    bytes,
+                    ..Default::default()
+                };
                 if sender.send_async(Ok(message)).await.is_err() {
                     return;
                 }
@@ -88,7 +97,9 @@ async fn sub_reader_task(
 
     if let Some(ref addr) = config.bind {
         if let Err(e) = socket.bind(addr).await {
-            let _ = sender.send_async(Err(Error::ExecutionError(format!("Bind failed: {}", e)))).await;
+            let _ = sender
+                .send_async(Err(Error::ExecutionError(format!("Bind failed: {}", e))))
+                .await;
             return;
         }
     }
@@ -115,8 +126,15 @@ async fn sub_reader_task(
 
         match tokio::time::timeout(std::time::Duration::from_secs(1), socket.recv()).await {
             Ok(Ok(msg)) => {
-                let bytes: Vec<u8> = msg.into_vec().into_iter().flat_map(|f| f.to_vec()).collect();
-                let message = Message { bytes, ..Default::default() };
+                let bytes: Vec<u8> = msg
+                    .into_vec()
+                    .into_iter()
+                    .flat_map(|f| f.to_vec())
+                    .collect();
+                let message = Message {
+                    bytes,
+                    ..Default::default()
+                };
                 if sender.send_async(Ok(message)).await.is_err() {
                     return;
                 }
@@ -142,10 +160,17 @@ impl ZmqInput {
         match config.socket_type.as_str() {
             "pull" => tokio::spawn(pull_reader_task(config, sender, shutdown_rx)),
             "sub" => tokio::spawn(sub_reader_task(config, sender, shutdown_rx)),
-            _ => return Err(Error::ConfigFailedValidation("socket_type must be 'pull' or 'sub'".into())),
+            _ => {
+                return Err(Error::ConfigFailedValidation(
+                    "socket_type must be 'pull' or 'sub'".into(),
+                ))
+            }
         };
 
-        Ok(Self { receiver, shutdown_tx: Some(shutdown_tx) })
+        Ok(Self {
+            receiver,
+            shutdown_tx: Some(shutdown_tx),
+        })
     }
 }
 
@@ -176,10 +201,14 @@ fn create_zeromq_input(conf: Value) -> Result<ExecutionType, Error> {
     let config: ZmqInputConfig = serde_yaml::from_value(conf)?;
 
     if config.bind.is_none() && config.connect.is_empty() {
-        return Err(Error::ConfigFailedValidation("bind or connect is required".into()));
+        return Err(Error::ConfigFailedValidation(
+            "bind or connect is required".into(),
+        ));
     }
     if config.socket_type == "sub" && config.subscribe.is_empty() {
-        return Err(Error::ConfigFailedValidation("subscribe is required for sub socket".into()));
+        return Err(Error::ConfigFailedValidation(
+            "subscribe is required for sub socket".into(),
+        ));
     }
 
     Ok(ExecutionType::Input(Box::new(ZmqInput::new(config)?)))
@@ -209,7 +238,12 @@ properties:
     description: "Subscribe topics (for sub socket)"
 "#;
     let conf_spec = ConfigSpec::from_schema(config)?;
-    register_plugin("zeromq".into(), ItemType::Input, conf_spec, create_zeromq_input)
+    register_plugin(
+        "zeromq".into(),
+        ItemType::Input,
+        conf_spec,
+        create_zeromq_input,
+    )
 }
 
 #[cfg(test)]

@@ -140,7 +140,9 @@ fn create_mqtt_output(conf: Value) -> Result<ExecutionType, Error> {
         return Err(Error::ConfigFailedValidation("topic is required".into()));
     }
     if config.qos > 2 {
-        return Err(Error::ConfigFailedValidation("qos must be 0, 1, or 2".into()));
+        return Err(Error::ConfigFailedValidation(
+            "qos must be 0, 1, or 2".into(),
+        ));
     }
 
     Ok(ExecutionType::Output(Box::new(MqttOutput::new(config)?)))
@@ -176,7 +178,12 @@ properties:
     type: string
 "#;
     let conf_spec = ConfigSpec::from_schema(config)?;
-    register_plugin("mqtt".into(), ItemType::Output, conf_spec, create_mqtt_output)
+    register_plugin(
+        "mqtt".into(),
+        ItemType::Output,
+        conf_spec,
+        create_mqtt_output,
+    )
 }
 
 #[cfg(test)]

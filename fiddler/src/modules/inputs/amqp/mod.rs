@@ -143,7 +143,7 @@ async fn amqp_reader_task(
                     break; // Reconnect
                 }
                 Ok(None) => break, // Stream ended, reconnect
-                Err(_) => {} // Timeout
+                Err(_) => {}       // Timeout
             }
         }
     }
@@ -175,7 +175,10 @@ impl Input for AmqpInput {
     async fn read(&mut self) -> Result<(Message, Option<CallbackChan>), Error> {
         // Ack previous message if exists
         if let Some(info) = self.pending_ack.take() {
-            let _ = info.channel.basic_ack(info.delivery_tag, BasicAckOptions::default()).await;
+            let _ = info
+                .channel
+                .basic_ack(info.delivery_tag, BasicAckOptions::default())
+                .await;
         }
 
         match self.receiver.recv_async().await {
@@ -194,10 +197,16 @@ impl Closer for AmqpInput {
     async fn close(&mut self) -> Result<(), Error> {
         // Nack pending message on close
         if let Some(info) = self.pending_ack.take() {
-            let _ = info.channel.basic_nack(
-                info.delivery_tag,
-                BasicNackOptions { requeue: true, ..Default::default() },
-            ).await;
+            let _ = info
+                .channel
+                .basic_nack(
+                    info.delivery_tag,
+                    BasicNackOptions {
+                        requeue: true,
+                        ..Default::default()
+                    },
+                )
+                .await;
         }
         if let Some(tx) = self.shutdown_tx.take() {
             let _ = tx.send(());

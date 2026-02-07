@@ -70,7 +70,10 @@ async fn fiddler_kinesis_test() {
             .put_record()
             .stream_name("input_stream")
             .partition_key("test_partition")
-            .data(kinesis::primitives::Blob::new(format!("kinesis_message_{}", i)))
+            .data(kinesis::primitives::Blob::new(format!(
+                "kinesis_message_{}",
+                i
+            )))
             .send()
             .await
             .unwrap();

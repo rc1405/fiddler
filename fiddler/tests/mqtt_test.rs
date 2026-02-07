@@ -79,7 +79,12 @@ output:
     // Publish messages
     for i in 1..=3 {
         pub_client
-            .publish("input/topic", QoS::AtLeastOnce, false, format!("mqtt_msg_{}", i))
+            .publish(
+                "input/topic",
+                QoS::AtLeastOnce,
+                false,
+                format!("mqtt_msg_{}", i),
+            )
             .await
             .unwrap();
         // Small delay between publishes

@@ -477,7 +477,10 @@ timeout_secs: 60
         let config: HttpOutputConfig = serde_yaml::from_str(yaml).unwrap();
         assert_eq!(config.url, "https://api.example.com/events");
         assert_eq!(config.method, "POST");
-        assert_eq!(config.headers.get("Content-Type"), Some(&"application/json".to_string()));
+        assert_eq!(
+            config.headers.get("Content-Type"),
+            Some(&"application/json".to_string())
+        );
         assert_eq!(config.timeout_secs, 60);
         assert!(config.batch.is_none());
     }

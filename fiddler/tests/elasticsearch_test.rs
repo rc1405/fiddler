@@ -20,8 +20,8 @@ async fn fiddler_elasticsearch_output_test() {
     use testcontainers::ImageExt;
 
     // Configure Elasticsearch with appropriate memory settings for testing
-    let request = elastic_search::ElasticSearch::default()
-        .with_env_var("ES_JAVA_OPTS", "-Xms512m -Xmx512m");
+    let request =
+        elastic_search::ElasticSearch::default().with_env_var("ES_JAVA_OPTS", "-Xms512m -Xmx512m");
     let container = request.start().await.unwrap();
     let host_port = container.get_host_port_ipv4(9200).await.unwrap();
     let config = format!(

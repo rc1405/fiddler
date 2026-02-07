@@ -4,6 +4,8 @@ use flume::{Receiver, Sender};
 use tokio::time::{timeout, Instant};
 use tracing::{debug, error, trace};
 
+#[cfg(feature = "amqp")]
+pub mod amqp;
 #[cfg(feature = "clickhouse")]
 pub mod clickhouse;
 pub mod drop;
@@ -11,16 +13,14 @@ pub mod drop;
 pub mod elasticsearch;
 #[cfg(feature = "http_client")]
 pub mod http;
-#[cfg(feature = "redis")]
-pub mod redis;
 #[cfg(feature = "mqtt")]
 pub mod mqtt;
-#[cfg(feature = "zeromq")]
-pub mod zeromq;
-#[cfg(feature = "amqp")]
-pub mod amqp;
+#[cfg(feature = "redis")]
+pub mod redis;
 pub mod stdout;
 pub mod switch;
+#[cfg(feature = "zeromq")]
+pub mod zeromq;
 
 pub(crate) fn register_plugins() -> Result<(), Error> {
     drop::register_drop()?;

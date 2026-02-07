@@ -436,7 +436,11 @@ mod test {
         };
 
         let result = processor.process(message).await.unwrap();
-        assert_eq!(result.len(), 0, "null should result in empty batch (filtered)");
+        assert_eq!(
+            result.len(),
+            0,
+            "null should result in empty batch (filtered)"
+        );
     }
 
     #[tokio::test]
