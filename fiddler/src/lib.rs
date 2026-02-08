@@ -4,7 +4,7 @@
 //! declarative yaml based configuration for data aggregation and
 //! transformation
 use async_trait::async_trait;
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Deserializer, Serialize};
 use serde_yaml::Value;
 use std::collections::HashMap;
 use thiserror::Error;
@@ -21,6 +21,22 @@ mod runtime;
 /// User messages should not use this ID.
 pub const SHUTDOWN_MESSAGE_ID: &str = "SHUTDOWN_SIGNAL";
 
+/// Deserialize an optional duration from a string like "10s", "5m", "1h", etc.
+pub(crate) fn deserialize_optional_duration<'de, D>(
+    deserializer: D,
+) -> Result<Option<Duration>, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    let opt: Option<String> = Option::deserialize(deserializer)?;
+    match opt {
+        Some(s) => parse_duration::parse(&s)
+            .map(Some)
+            .map_err(serde::de::Error::custom),
+        None => Ok(None),
+    }
+}
+
 /// BatchingPolicy defines common configuration items for used in batching operations
 /// such as OutputBatch modules.
 ///
@@ -36,6 +52,7 @@ pub const SHUTDOWN_MESSAGE_ID: &str = "SHUTDOWN_SIGNAL";
 #[derive(Deserialize, Default, Clone)]
 pub struct BatchingPolicy {
     /// Maximum duration to wait before flushing a batch
+    #[serde(default, deserialize_with = "deserialize_optional_duration")]
     pub duration: Option<Duration>,
     /// Maximum number of messages in a batch before flushing
     pub size: Option<usize>,
@@ -392,4 +409,80 @@ pub enum Error {
     /// Error returned by input module to indicate there are no messages to process
     #[error("No input to return")]
     NoInputToReturn,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_batching_policy_deserialize_seconds() {
+        let yaml = r#"
+duration: "10s"
+size: 500
+"#;
+        let policy: BatchingPolicy = serde_yaml::from_str(yaml).unwrap();
+        assert_eq!(policy.duration, Some(Duration::from_secs(10)));
+        assert_eq!(policy.size, Some(500));
+    }
+
+    #[test]
+    fn test_batching_policy_deserialize_milliseconds() {
+        let yaml = r#"
+duration: "100ms"
+size: 100
+"#;
+        let policy: BatchingPolicy = serde_yaml::from_str(yaml).unwrap();
+        assert_eq!(policy.duration, Some(Duration::from_millis(100)));
+        assert_eq!(policy.size, Some(100));
+    }
+
+    #[test]
+    fn test_batching_policy_deserialize_minutes() {
+        let yaml = r#"
+duration: "5m"
+"#;
+        let policy: BatchingPolicy = serde_yaml::from_str(yaml).unwrap();
+        assert_eq!(policy.duration, Some(Duration::from_secs(300)));
+        assert!(policy.size.is_none());
+    }
+
+    #[test]
+    fn test_batching_policy_deserialize_complex_duration() {
+        let yaml = r#"
+duration: "1m 30s"
+size: 1000
+"#;
+        let policy: BatchingPolicy = serde_yaml::from_str(yaml).unwrap();
+        assert_eq!(policy.duration, Some(Duration::from_secs(90)));
+        assert_eq!(policy.size, Some(1000));
+    }
+
+    #[test]
+    fn test_batching_policy_deserialize_no_duration() {
+        let yaml = r#"
+size: 250
+"#;
+        let policy: BatchingPolicy = serde_yaml::from_str(yaml).unwrap();
+        assert!(policy.duration.is_none());
+        assert_eq!(policy.size, Some(250));
+    }
+
+    #[test]
+    fn test_batching_policy_effective_defaults() {
+        let policy = BatchingPolicy::default();
+        assert_eq!(policy.effective_size(), 500);
+        assert_eq!(policy.effective_duration(), Duration::from_secs(10));
+    }
+
+    #[test]
+    fn test_batching_policy_effective_with_values() {
+        let yaml = r#"
+duration: "30s"
+size: 1000
+"#;
+        let policy: BatchingPolicy = serde_yaml::from_str(yaml).unwrap();
+        assert_eq!(policy.effective_size(), 1000);
+        assert_eq!(policy.effective_duration(), Duration::from_secs(30));
+    }
 }

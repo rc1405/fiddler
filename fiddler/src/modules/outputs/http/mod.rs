@@ -25,6 +25,7 @@
 use crate::config::register_plugin;
 use crate::config::ItemType;
 use crate::config::{ConfigSpec, ExecutionType};
+use crate::deserialize_optional_duration;
 use crate::{Closer, Error, Message, MessageBatch, Output, OutputBatch};
 use async_trait::async_trait;
 use fiddler_macros::fiddler_registration_func;
@@ -67,7 +68,8 @@ pub struct BatchConfig {
     /// Batch size.
     pub size: Option<usize>,
     /// Flush interval.
-    pub duration: Option<String>,
+    #[serde(default, deserialize_with = "deserialize_optional_duration")]
+    pub duration: Option<Duration>,
     /// Batch format: "json_array" or "ndjson" (default: ndjson).
     #[serde(default = "default_batch_format")]
     pub format: String,
@@ -247,8 +249,7 @@ impl HttpBatchOutput {
 
         // Parse duration string or use default
         let interval = batch_config
-            .and_then(|b| b.duration.as_ref())
-            .and_then(|d| parse_duration(d))
+            .and_then(|b| b.duration)
             .unwrap_or(Duration::from_secs(10));
 
         let use_json_array = batch_config
@@ -296,35 +297,6 @@ impl HttpBatchOutput {
             result.extend_from_slice(&msg.bytes);
         }
         result
-    }
-}
-
-/// Parse a duration string like "5s", "10m", "1h".
-fn parse_duration(s: &str) -> Option<Duration> {
-    let s = s.trim();
-    if s.is_empty() {
-        return None;
-    }
-
-    let (num_str, unit) = if s.ends_with("ms") {
-        (&s[..s.len() - 2], "ms")
-    } else if s.ends_with('s') {
-        (&s[..s.len() - 1], "s")
-    } else if s.ends_with('m') {
-        (&s[..s.len() - 1], "m")
-    } else if s.ends_with('h') {
-        (&s[..s.len() - 1], "h")
-    } else {
-        return None;
-    };
-
-    let num: u64 = num_str.parse().ok()?;
-    match unit {
-        "ms" => Some(Duration::from_millis(num)),
-        "s" => Some(Duration::from_secs(num)),
-        "m" => Some(Duration::from_secs(num * 60)),
-        "h" => Some(Duration::from_secs(num * 3600)),
-        _ => None,
     }
 }
 
@@ -509,7 +481,8 @@ batch:
         assert!(config.batch.is_some());
         let batch = config.batch.unwrap();
         assert_eq!(batch.size, Some(100));
-        assert_eq!(batch.duration, Some("5s".to_string()));
+        let expected = parse_duration::parse("5s").unwrap();
+        assert_eq!(batch.duration, Some(expected));
         assert_eq!(batch.format, "json_array");
     }
 
@@ -558,16 +531,6 @@ auth:
         assert!(config.headers.is_empty());
         assert!(config.auth.is_none());
         assert!(config.batch.is_none());
-    }
-
-    #[test]
-    fn test_parse_duration() {
-        assert_eq!(parse_duration("5s"), Some(Duration::from_secs(5)));
-        assert_eq!(parse_duration("100ms"), Some(Duration::from_millis(100)));
-        assert_eq!(parse_duration("2m"), Some(Duration::from_secs(120)));
-        assert_eq!(parse_duration("1h"), Some(Duration::from_secs(3600)));
-        assert_eq!(parse_duration(""), None);
-        assert_eq!(parse_duration("invalid"), None);
     }
 
     #[test]
