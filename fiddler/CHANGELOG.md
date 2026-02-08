@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [4.4.0](https://github.com/rc1405/fiddler/compare/fiddler-v4.3.0...fiddler-v4.4.0) - 2026-02-08
+
+### Added
+
+- lots of modules ([#83](https://github.com/rc1405/fiddler/pull/83))
+
 ### Added
 
 - Message filtering support: processors can now filter messages by returning null or empty arrays
