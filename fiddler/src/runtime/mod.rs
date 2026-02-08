@@ -8,6 +8,7 @@ use std::collections::HashMap;
 use std::fmt;
 use std::future::Future;
 use std::time::Instant;
+use sysinfo::System;
 use tokio::task::JoinSet;
 use tokio::time::{interval, sleep, Duration, MissedTickBehavior};
 use tracing::{debug, error, info, trace, warn};
@@ -40,6 +41,8 @@ pub struct MessageMetrics {
     pub total_process_errors: u64,
     /// Messages that encountered output errors
     pub total_output_errors: u64,
+    /// Messages intentionally filtered/dropped
+    pub total_filtered: u64,
     /// Streams started
     pub streams_started: u64,
     /// Streams completed
@@ -155,18 +158,40 @@ impl MessageMetrics {
     /// Records metrics to the configured metrics backend.
     ///
     /// If no metrics backend is configured, this is a no-op.
-    pub fn record(&self, metrics_backend: &mut dyn Metrics, in_flight: usize) {
+    /// If `system` is provided, CPU and memory metrics will be included.
+    pub fn record(
+        &self,
+        metrics_backend: &mut dyn Metrics,
+        in_flight: usize,
+        system: Option<&mut System>,
+    ) {
+        // Collect system metrics if enabled
+        let (cpu_usage_percent, memory_used_bytes, memory_total_bytes) = if let Some(sys) = system {
+            sys.refresh_cpu_usage();
+            sys.refresh_memory();
+            let cpu = sys.global_cpu_usage();
+            let mem_used = sys.used_memory();
+            let mem_total = sys.total_memory();
+            (Some(cpu), Some(mem_used), Some(mem_total))
+        } else {
+            (None, None, None)
+        };
+
         metrics_backend.record(MetricEntry {
             total_received: self.total_received,
             total_completed: self.total_completed,
             total_process_errors: self.total_process_errors,
             total_output_errors: self.total_output_errors,
+            total_filtered: self.total_filtered,
             streams_started: self.streams_started,
             streams_completed: self.streams_completed,
             duplicates_rejected: self.duplicates_rejected,
             stale_entries_removed: self.stale_entries_removed,
             in_flight,
             throughput_per_sec: self.throughput_per_sec(),
+            cpu_usage_percent,
+            memory_used_bytes,
+            memory_total_bytes,
             input_bytes: self.input_bytes,
             output_bytes: self.output_bytes,
             bytes_per_sec: self.bytes_per_sec(),
@@ -223,6 +248,7 @@ pub(crate) enum MessageStatus {
     ProcessError(String),
     Output,
     OutputError(String),
+    Filtered,
     Shutdown,
     StreamComplete,
 }
@@ -235,6 +261,7 @@ impl fmt::Display for MessageStatus {
             MessageStatus::ProcessError(_) => write!(f, "ProcessError"),
             MessageStatus::Output => write!(f, "Output"),
             MessageStatus::OutputError(_) => write!(f, "OutputError"),
+            MessageStatus::Filtered => write!(f, "Filtered"),
             MessageStatus::Shutdown => write!(f, "Shutdown"),
             MessageStatus::StreamComplete => write!(f, "StreamComplete"),
         }
@@ -505,6 +532,14 @@ impl Runtime {
             .map(|m| m.interval)
             .unwrap_or(300);
 
+        // Get collect_system_metrics flag from config, default to false
+        let collect_system_metrics = self
+            .config
+            .metrics
+            .as_ref()
+            .map(|m| m.collect_system_metrics)
+            .unwrap_or(false);
+
         let (msg_tx, msg_rx) = bounded(CHANNEL_CAPACITY);
         let msg_state = message_handler(
             msg_rx,
@@ -512,6 +547,7 @@ impl Runtime {
             self.config.num_threads,
             metrics_backend,
             metrics_interval,
+            collect_system_metrics,
         );
 
         spawn_task(&mut handles, msg_state);
@@ -657,6 +693,7 @@ struct State {
     processed_error_count: i64,
     output_count: i64,
     output_error_count: i64,
+    filtered_count: i64,
     closure: Option<CallbackChan>,
     errors: Vec<String>,
     stream_id: Option<String>,
@@ -792,6 +829,42 @@ fn process_state(
                             }
                         }
                     }
+                    MessageStatus::Filtered => {
+                        // Filtered is treated as successful - message intentionally dropped
+                        state.filtered_count += 1;
+                        stream_id = state.stream_id.clone();
+                        metrics.total_filtered += 1;
+
+                        debug!(
+                            message_id = msg.message_id,
+                            "message filtered/dropped by processor"
+                        );
+
+                        let stream_closed = state.stream_closed.unwrap_or(true);
+
+                        // A filtered message counts as complete - decrement instance count
+                        // since no output will be sent for this message
+                        if stream_closed {
+                            // Check if all instances are accounted for (filtered + output + errors)
+                            if (state.filtered_count
+                                + state.output_count
+                                + state.output_error_count
+                                + state.processed_error_count)
+                                >= state.instance_count
+                            {
+                                remove_entry = true;
+                                message_completed_successfully = true;
+                                message_latency = Some(state.created_at.elapsed());
+                                if let Some(chan) = state.closure.take() {
+                                    info!(
+                                        message_id = msg.message_id,
+                                        "message filtered - calling closure"
+                                    );
+                                    let _ = chan.send(Status::Processed);
+                                }
+                            }
+                        }
+                    }
                     MessageStatus::Shutdown => {
                         *closed_outputs += 1;
                         if closed_outputs == output_ct {
@@ -897,6 +970,7 @@ async fn message_handler(
     output_ct: usize,
     mut metrics_backend: Box<dyn Metrics>,
     metrics_interval_secs: u64,
+    collect_system_metrics: bool,
 ) -> Result<(), Error> {
     // Pre-allocate FxHashMap for expected concurrent messages (faster than SipHash)
     let mut handles: FxHashMap<String, State> = FxHashMap::default();
@@ -904,6 +978,17 @@ async fn message_handler(
     let mut closed_outputs = 0;
     let stale_timeout = Duration::from_secs(STALE_MESSAGE_TIMEOUT_SECS);
     let mut metrics = MessageMetrics::new();
+
+    // Create System instance for collecting CPU/memory metrics if enabled
+    let mut system = if collect_system_metrics {
+        let mut sys = System::new();
+        // Initial refresh to populate baseline data
+        sys.refresh_cpu_usage();
+        sys.refresh_memory();
+        Some(sys)
+    } else {
+        None
+    };
 
     // Use tokio interval timers instead of manual elapsed() checks
     let mut metrics_timer = interval(Duration::from_secs(metrics_interval_secs));
@@ -918,6 +1003,7 @@ async fn message_handler(
 
     debug!(
         interval_secs = metrics_interval_secs,
+        collect_system_metrics = collect_system_metrics,
         "Metrics recording interval configured"
     );
 
@@ -938,7 +1024,7 @@ async fn message_handler(
                     }, &mut metrics) {
                         match e {
                             Error::EndOfInput => {
-                                log_shutdown_metrics(&metrics, handles.len(), metrics_backend.as_mut());
+                                log_shutdown_metrics(&metrics, handles.len(), metrics_backend.as_mut(), system.as_mut());
                                 return Ok(());
                             }
                             _ => return Err(e),
@@ -966,6 +1052,7 @@ async fn message_handler(
                             processed_error_count: 0,
                             output_count: 0,
                             output_error_count: 0,
+                            filtered_count: 0,
                             closure,
                             errors: Vec::with_capacity(2), // Pre-allocate for common case
                             stream_id: stream_id.clone(),
@@ -990,7 +1077,7 @@ async fn message_handler(
                     }, &mut metrics) {
                         match e {
                             Error::EndOfInput => {
-                                log_shutdown_metrics(&metrics, handles.len(), metrics_backend.as_mut());
+                                log_shutdown_metrics(&metrics, handles.len(), metrics_backend.as_mut(), system.as_mut());
                                 return Ok(());
                             }
                         _ => return Err(e),
@@ -1002,7 +1089,7 @@ async fn message_handler(
                 if let Err(e) = process_state(&mut handles, &output_ct, &mut closed_outputs, msg, &mut metrics) {
                     match e {
                         Error::EndOfInput => {
-                            log_shutdown_metrics(&metrics, handles.len(), metrics_backend.as_mut());
+                            log_shutdown_metrics(&metrics, handles.len(), metrics_backend.as_mut(), system.as_mut());
                             return Ok(());
                         }
                         _ => return Err(e),
@@ -1010,7 +1097,7 @@ async fn message_handler(
                 };
             },
             _ = metrics_timer.tick() => {
-                metrics.record(metrics_backend.as_mut(), handles.len());
+                metrics.record(metrics_backend.as_mut(), handles.len(), system.as_mut());
                 trace!(
                     in_flight = handles.len(),
                     throughput = format!("{:.2}", metrics.throughput_per_sec()),
@@ -1044,7 +1131,12 @@ async fn message_handler(
         }
     }
 
-    log_shutdown_metrics(&metrics, handles.len(), metrics_backend.as_mut());
+    log_shutdown_metrics(
+        &metrics,
+        handles.len(),
+        metrics_backend.as_mut(),
+        system.as_mut(),
+    );
     Ok(())
 }
 
@@ -1053,9 +1145,10 @@ fn log_shutdown_metrics(
     metrics: &MessageMetrics,
     in_flight: usize,
     metrics_backend: &mut dyn Metrics,
+    system: Option<&mut System>,
 ) {
     // Record final metrics to configured backend
-    metrics.record(metrics_backend, in_flight);
+    metrics.record(metrics_backend, in_flight, system);
 
     info!(
         total_received = metrics.total_received,
@@ -1191,7 +1284,7 @@ mod tests {
         // Should work with no-op metrics backend
         let metrics = MessageMetrics::new();
         let mut backend = NoOpMetrics::new();
-        metrics.record(&mut backend, 10);
+        metrics.record(&mut backend, 10, None);
         // No assertion needed - just verify it doesn't panic
     }
 
@@ -1270,6 +1363,7 @@ mod tests {
                 processed_error_count: 0,
                 output_count: 0,
                 output_error_count: 0,
+                filtered_count: 0,
                 closure: None,
                 errors: Vec::new(),
                 stream_id: None,

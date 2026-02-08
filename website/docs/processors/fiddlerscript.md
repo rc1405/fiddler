@@ -30,6 +30,18 @@ FiddlerScript is the built-in scripting language for inline message manipulation
             this = bytes(name);
     ```
 
+=== "Filter Messages"
+    ```yml
+    processors:
+      - fiddlerscript:
+          code: |
+            let data = parse_json(this);
+            let status = jmespath(data, "status");
+            if (status == "ignore") {
+                this = null;  // Filter out this message
+            }
+    ```
+
 ## Fields
 
 ### `code`
@@ -79,6 +91,30 @@ this = array(bytes("first"), bytes("second"), bytes("third"));
 ```
 
 Each element in the array becomes a separate message in the pipeline.
+
+## Filtering Messages
+
+To filter out (drop) a message from the pipeline, set `this` to `null` or an empty array:
+
+```fiddlerscript
+// Filter using null
+let data = parse_json(this);
+if (jmespath(data, "skip") == true) {
+    this = null;  // Message will be filtered
+}
+
+// Or use drop() function
+if (should_filter) {
+    this = drop(this);
+}
+
+// Or use empty array
+if (no_output_needed) {
+    this = array();  // Also filters the message
+}
+```
+
+Filtered messages are tracked in the `total_filtered` metric and treated as successful completions.
 
 ## Built-in Functions
 
@@ -137,6 +173,7 @@ Each element in the array becomes a separate message in the pipeline.
 | Function | Description |
 |----------|-------------|
 | `parse_json(bytes)` | Parse JSON bytes into values |
+| `jmespath(data, expr)` | Query data using JMESPath expressions |
 
 ### Type Checking
 | Function | Description |
@@ -149,6 +186,7 @@ Each element in the array becomes a separate message in the pipeline.
 |----------|-------------|
 | `getenv(name)` | Get environment variable (returns null if not set) |
 | `print(values...)` | Print to stdout (for debugging) |
+| `drop(value)` | Returns null (useful for filtering messages) |
 
 ## Examples
 
@@ -191,6 +229,32 @@ processors:
         let name = get(user, "name");
         let email = get(user, "email");
         this = bytes(name + " <" + email + ">");
+```
+
+### Extract Nested Fields with JMESPath
+```yml
+processors:
+  - fiddlerscript:
+      code: |
+        let data = parse_json(this);
+        // Extract deeply nested field
+        let email = jmespath(data, "user.profile.contact.email");
+        // Extract all names from an array
+        let names = jmespath(data, "users[*].name");
+        this = bytes(str(names));
+```
+
+### Filter Messages by Content
+```yml
+processors:
+  - fiddlerscript:
+      code: |
+        let data = parse_json(this);
+        let level = jmespath(data, "level");
+        // Only keep error and warning messages
+        if (level != "error" && level != "warning") {
+            this = null;  // Filter out info/debug messages
+        }
 ```
 
 ### Split JSON Array into Messages

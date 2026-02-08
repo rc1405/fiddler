@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Message filtering support: processors can now filter messages by returning null or empty arrays
+- New `total_filtered` metric to track intentionally filtered messages across all metrics backends
+- `Filtered` message status for proper tracking of filtered messages in the runtime
+
 ## [4.3.0](https://github.com/rc1405/fiddler/compare/fiddler-v4.2.1...fiddler-v4.3.0) - 2026-02-01
 
 ### Added

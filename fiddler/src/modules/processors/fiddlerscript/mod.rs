@@ -148,20 +148,22 @@ impl Processor for FiddlerScriptProcessor {
             Error::ProcessingError("'this' variable not found after script execution".to_string())
         })?;
 
-        // Check if result is an array (multiple messages) or single value
+        // Check if result is an array (multiple messages), null (filtered), or single value
         match &result {
+            // Null explicitly filters the message - return empty batch
+            Value::Null => Ok(vec![]),
+            // Empty array explicitly filters the message - return empty batch
+            Value::Array(arr) if arr.is_empty() => Ok(vec![]),
+            // Non-empty array - multiple messages
             Value::Array(arr) => {
-                // Multiple messages
                 let messages: Vec<Message> = arr
                     .iter()
                     .map(|v| Self::create_message(v, &message.metadata))
                     .collect();
                 Ok(messages)
             }
-            _ => {
-                // Single message
-                Ok(vec![Self::create_message(&result, &message.metadata)])
-            }
+            // Single message
+            _ => Ok(vec![Self::create_message(&result, &message.metadata)]),
         }
     }
 }
@@ -416,5 +418,84 @@ mod test {
         let result = processor.process(message).await.unwrap();
         assert_eq!(result.len(), 1);
         assert_eq!(result[0].bytes, b"4,3,4");
+    }
+
+    #[tokio::test]
+    async fn test_filter_with_null() {
+        // Setting this to null filters the message
+        let processor = FiddlerScriptProcessor {
+            code: r#"
+                this = null;
+            "#
+            .to_string(),
+        };
+
+        let message = Message {
+            bytes: b"should be filtered".to_vec(),
+            ..Default::default()
+        };
+
+        let result = processor.process(message).await.unwrap();
+        assert_eq!(
+            result.len(),
+            0,
+            "null should result in empty batch (filtered)"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_filter_with_empty_array() {
+        // Setting this to empty array filters the message
+        let processor = FiddlerScriptProcessor {
+            code: r#"
+                this = array();
+            "#
+            .to_string(),
+        };
+
+        let message = Message {
+            bytes: b"should be filtered".to_vec(),
+            ..Default::default()
+        };
+
+        let result = processor.process(message).await.unwrap();
+        assert_eq!(
+            result.len(),
+            0,
+            "empty array should result in empty batch (filtered)"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_conditional_filter() {
+        // Filter messages based on content using null
+        let processor = FiddlerScriptProcessor {
+            code: r#"
+                let text = bytes_to_string(this);
+                if (text == "drop") {
+                    this = null;
+                }
+            "#
+            .to_string(),
+        };
+
+        // Message that should be filtered
+        let message = Message {
+            bytes: b"drop".to_vec(),
+            ..Default::default()
+        };
+
+        let result = processor.process(message).await.unwrap();
+        assert_eq!(result.len(), 0, "message 'drop' should be filtered");
+
+        // Message that should pass through
+        let message = Message {
+            bytes: b"keep".to_vec(),
+            ..Default::default()
+        };
+
+        let result = processor.process(message).await.unwrap();
+        assert_eq!(result.len(), 1, "message 'keep' should pass through");
+        assert_eq!(result[0].bytes, b"keep");
     }
 }

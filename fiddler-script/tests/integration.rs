@@ -364,3 +364,64 @@ fn test_for_loop_with_no_init() {
     "#;
     assert_eq!(run(source), Value::Integer(3)); // 0 + 1 + 2
 }
+
+// === Null and drop() tests ===
+
+#[test]
+fn test_null_literal() {
+    assert_eq!(run("null;"), Value::Null);
+}
+
+#[test]
+fn test_null_in_variable() {
+    assert_eq!(run("let x = null; x;"), Value::Null);
+}
+
+#[test]
+fn test_assign_to_null() {
+    let source = r#"
+        let text = "something";
+        text = null;
+        text;
+    "#;
+    assert_eq!(run(source), Value::Null);
+}
+
+#[test]
+fn test_drop_function() {
+    let source = r#"
+        let text = "something";
+        text = drop(text);
+        text;
+    "#;
+    assert_eq!(run(source), Value::Null);
+}
+
+#[test]
+fn test_null_equality() {
+    assert_eq!(run("null == null;"), Value::Boolean(true));
+    assert_eq!(run("null != 42;"), Value::Boolean(true));
+    assert_eq!(run("null != \"hello\";"), Value::Boolean(true));
+}
+
+#[test]
+fn test_null_in_conditional() {
+    // null is falsy
+    let source = r#"
+        let x = null;
+        if (x) {
+            1;
+        } else {
+            0;
+        }
+    "#;
+    assert_eq!(run(source), Value::Integer(0));
+}
+
+#[test]
+fn test_drop_with_different_types() {
+    assert_eq!(run("drop(42);"), Value::Null);
+    assert_eq!(run("drop(\"hello\");"), Value::Null);
+    assert_eq!(run("drop(true);"), Value::Null);
+    assert_eq!(run("drop(null);"), Value::Null);
+}

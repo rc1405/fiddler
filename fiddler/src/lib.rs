@@ -130,6 +130,8 @@ pub struct MetricEntry {
     pub total_process_errors: u64,
     /// * `total_output_errors` - Messages that encountered output errors
     pub total_output_errors: u64,
+    /// * `total_filtered` - Messages intentionally filtered/dropped by processors
+    pub total_filtered: u64,
     /// * `streams_started` - Number of streams started
     pub streams_started: u64,
     /// * `streams_completed` - Number of streams completed
@@ -142,6 +144,12 @@ pub struct MetricEntry {
     pub in_flight: usize,
     /// * `throughput_per_sec` - Current throughput in messages per second
     pub throughput_per_sec: f64,
+    /// * `cpu_usage_percent` - System CPU usage percentage (0-100), None if not collected
+    pub cpu_usage_percent: Option<f32>,
+    /// * `memory_used_bytes` - System memory used in bytes, None if not collected
+    pub memory_used_bytes: Option<u64>,
+    /// * `memory_total_bytes` - System total memory in bytes, None if not collected
+    pub memory_total_bytes: Option<u64>,
     /// * `input_bytes` - Total bytes received from input
     pub input_bytes: u64,
     /// * `output_bytes` - Total bytes written to output

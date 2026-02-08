@@ -142,6 +142,25 @@ print(HOME);      // Same as getenv("HOME")
 print(PATH);      // Same as getenv("PATH")
 ```
 
+### `drop(value)`
+
+Returns `null`. This is a convenience function for clearing variables or signaling that a value should be discarded.
+
+**Arguments:** Any value (the value is ignored)
+**Returns:** `null`
+
+```fiddlerscript
+let data = "temporary";
+data = drop(data);        // data is now null
+
+// Useful for clearing variables
+let temp = some_computation();
+// ... use temp ...
+temp = drop(temp);        // Clear temp
+```
+
+**Note:** In the context of the FiddlerScript processor, setting `this` to `null` (either directly or via `drop()`) will filter out the message from the pipeline.
+
 ## JSON Processing
 
 ### `parse_json(data)`
@@ -180,6 +199,47 @@ let first = get(arr, 0);              // 1
 - strings -> string
 - arrays -> array
 - objects -> dictionary
+
+### `jmespath(data, expression)`
+
+Query JSON data using [JMESPath](https://jmespath.org/) expressions. JMESPath is a query language for JSON that allows you to extract and transform elements from a JSON document.
+
+**Arguments:**
+- `data` - A dictionary or array (typically from `parse_json()`)
+- `expression` - A JMESPath expression string
+
+**Returns:** The extracted value, or `null` if not found
+
+```fiddlerscript
+// Simple key access
+let data = parse_json("{\"name\": \"Alice\", \"age\": 30}");
+let name = jmespath(data, "name");           // "Alice"
+
+// Nested key access
+let nested = parse_json("{\"user\": {\"profile\": {\"email\": \"alice@example.com\"}}}");
+let email = jmespath(nested, "user.profile.email");  // "alice@example.com"
+
+// Array indexing
+let arr = parse_json("[\"a\", \"b\", \"c\"]");
+let second = jmespath(arr, "[1]");           // "b"
+
+// Array projections
+let users = parse_json("[{\"name\": \"Alice\"}, {\"name\": \"Bob\"}]");
+let names = jmespath(users, "[*].name");     // ["Alice", "Bob"]
+
+// Filtering
+let items = parse_json("[{\"price\": 10}, {\"price\": 25}, {\"price\": 5}]");
+let expensive = jmespath(items, "[?price > `15`]");  // [{"price": 25}]
+```
+
+**Common JMESPath expressions:**
+- `key` - Get a key from an object
+- `key1.key2` - Nested key access
+- `[0]` - Array index
+- `[*]` - All array elements
+- `[*].key` - Project key from all array elements
+- `[?condition]` - Filter array elements
+- `key1 || key2` - Return first non-null value
 
 ## Array Operations
 
@@ -751,7 +811,14 @@ log("Application started");
 | `bytes(value)` | Any | Bytes | Convert to bytes |
 | `bytes_to_string(value)` | Bytes or string | String | Convert bytes to string |
 | `getenv(name)` | String | String or null | Get environment variable |
+| `drop(value)` | Any | `null` | Returns null (clears variables) |
+
+### JSON
+
+| Function | Arguments | Returns | Description |
+|----------|-----------|---------|-------------|
 | `parse_json(data)` | Bytes or string | Dict, array, etc. | Parse JSON data |
+| `jmespath(data, expr)` | Dict/array, string | Any | Query with JMESPath |
 
 ### Collections
 

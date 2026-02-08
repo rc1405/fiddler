@@ -35,6 +35,7 @@ The following Prometheus metrics are exposed:
 |-------------|-------------|
 | `fiddler_messages_received_total` | Total messages received from input |
 | `fiddler_messages_completed_total` | Messages successfully processed through all outputs |
+| `fiddler_messages_filtered_total` | Messages intentionally filtered/dropped by processors |
 | `fiddler_messages_process_errors_total` | Messages that encountered processing errors |
 | `fiddler_messages_output_errors_total` | Messages that encountered output errors |
 | `fiddler_streams_started_total` | Number of streams started |

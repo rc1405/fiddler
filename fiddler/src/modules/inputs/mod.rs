@@ -5,10 +5,18 @@ use tokio::time::{sleep, Duration};
 use tracing::{debug, trace};
 use uuid::Uuid;
 
+#[cfg(feature = "amqp")]
+pub mod amqp;
 pub mod file;
 #[cfg(feature = "http_server")]
 pub mod http_server;
+#[cfg(feature = "mqtt")]
+pub mod mqtt;
+#[cfg(feature = "redis")]
+pub mod redis;
 pub mod stdin;
+#[cfg(feature = "zeromq")]
+pub mod zeromq;
 
 /// Minimum backoff duration when no input is available (in microseconds)
 const NO_INPUT_BACKOFF_MIN_US: u64 = 1;
@@ -20,6 +28,14 @@ pub(crate) fn register_plugins() -> Result<(), Error> {
     file::register_file()?;
     #[cfg(feature = "http_server")]
     http_server::register_http_server()?;
+    #[cfg(feature = "redis")]
+    redis::register_redis()?;
+    #[cfg(feature = "mqtt")]
+    mqtt::register_mqtt()?;
+    #[cfg(feature = "zeromq")]
+    zeromq::register_zeromq()?;
+    #[cfg(feature = "amqp")]
+    amqp::register_amqp()?;
     stdin::register_stdin()?;
     Ok(())
 }

@@ -438,6 +438,7 @@ impl Interpreter {
             Expression::Float { value, .. } => Ok(Value::Float(*value)),
             Expression::String { value, .. } => Ok(Value::String(value.clone())),
             Expression::Boolean { value, .. } => Ok(Value::Boolean(*value)),
+            Expression::Null { .. } => Ok(Value::Null),
 
             Expression::Identifier { name, .. } => self.get_variable(name),
 

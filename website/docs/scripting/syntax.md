@@ -149,11 +149,23 @@ let k = keys(person);
 
 ### Null
 
-Represents the absence of a value.
+Represents the absence of a value. The `null` literal can be used directly in expressions.
 
 ```fiddlerscript
-let result = getenv("NONEXISTENT");  // Returns null
+let empty = null;                    // Direct assignment
+let result = getenv("NONEXISTENT");  // Returns null if not found
+
+// Check for null
+if (result == null) {
+    print("Variable not found");
+}
+
+// Reset a variable to null
+let data = "something";
+data = null;                         // Clear the variable
 ```
+
+**Note:** In the FiddlerScript processor, setting `this` to `null` filters out the message from the pipeline.
 
 ## Operators
 

@@ -153,6 +153,12 @@ pub enum Expression {
         position: Position,
     },
 
+    /// Null literal: `null`
+    Null {
+        /// Source position
+        position: Position,
+    },
+
     /// Variable reference: `x`
     Identifier {
         /// The variable name
@@ -248,6 +254,7 @@ impl Expression {
             | Expression::Float { position, .. }
             | Expression::String { position, .. }
             | Expression::Boolean { position, .. }
+            | Expression::Null { position }
             | Expression::Identifier { position, .. }
             | Expression::Binary { position, .. }
             | Expression::Unary { position, .. }

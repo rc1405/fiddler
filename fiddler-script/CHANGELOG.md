@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- `null` literal: can now use `null` directly in expressions (e.g., `this = null;`)
+- `drop(value)` function: convenience function that returns null for clearing variables
+- `jmespath(data, expression)` function: query JSON data using JMESPath expressions
+
 ## [0.1.1](https://github.com/rc1405/fiddler/compare/fiddler-script-v0.1.0...fiddler-script-v0.1.1) - 2026-02-01
 
 ### Other

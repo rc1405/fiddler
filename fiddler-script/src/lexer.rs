@@ -51,6 +51,8 @@ pub enum TokenKind {
     True,
     /// `false` keyword
     False,
+    /// `null` keyword
+    Null,
 
     // Operators
     /// `+`
@@ -126,6 +128,7 @@ impl std::fmt::Display for TokenKind {
             TokenKind::Return => write!(f, "return"),
             TokenKind::True => write!(f, "true"),
             TokenKind::False => write!(f, "false"),
+            TokenKind::Null => write!(f, "null"),
             TokenKind::Plus => write!(f, "+"),
             TokenKind::Minus => write!(f, "-"),
             TokenKind::Star => write!(f, "*"),
@@ -270,6 +273,7 @@ impl<'a> Lexer<'a> {
             "return" => TokenKind::Return,
             "true" => TokenKind::True,
             "false" => TokenKind::False,
+            "null" => TokenKind::Null,
             _ => TokenKind::Identifier(text.to_string()),
         };
 
@@ -512,7 +516,7 @@ mod tests {
 
     #[test]
     fn test_keywords() {
-        let mut lexer = Lexer::new("let if else for fn return true false");
+        let mut lexer = Lexer::new("let if else for fn return true false null");
         let tokens = lexer.tokenize().unwrap();
         assert!(matches!(tokens[0].kind, TokenKind::Let));
         assert!(matches!(tokens[1].kind, TokenKind::If));
@@ -522,6 +526,7 @@ mod tests {
         assert!(matches!(tokens[5].kind, TokenKind::Return));
         assert!(matches!(tokens[6].kind, TokenKind::True));
         assert!(matches!(tokens[7].kind, TokenKind::False));
+        assert!(matches!(tokens[8].kind, TokenKind::Null));
     }
 
     #[test]

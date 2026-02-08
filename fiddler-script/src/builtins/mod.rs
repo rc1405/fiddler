@@ -35,6 +35,7 @@ pub fn get_default_builtins() -> HashMap<String, BuiltinFn> {
     builtins.insert("int".to_string(), core::builtin_int);
     builtins.insert("float".to_string(), core::builtin_float);
     builtins.insert("getenv".to_string(), core::builtin_getenv);
+    builtins.insert("drop".to_string(), core::builtin_drop);
 
     // Math functions
     builtins.insert("abs".to_string(), math::builtin_abs);
@@ -60,6 +61,7 @@ pub fn get_default_builtins() -> HashMap<String, BuiltinFn> {
 
     // JSON
     builtins.insert("parse_json".to_string(), json::builtin_parse_json);
+    builtins.insert("jmespath".to_string(), json::builtin_jmespath);
 
     // Bytes conversion
     builtins.insert(
@@ -140,6 +142,7 @@ mod tests {
         assert!(builtins.contains_key("str"));
         assert!(builtins.contains_key("int"));
         assert!(builtins.contains_key("getenv"));
+        assert!(builtins.contains_key("drop"));
 
         // Math
         assert!(builtins.contains_key("abs"));
@@ -156,6 +159,7 @@ mod tests {
 
         // JSON
         assert!(builtins.contains_key("parse_json"));
+        assert!(builtins.contains_key("jmespath"));
 
         // Bytes
         assert!(builtins.contains_key("bytes_to_string"));

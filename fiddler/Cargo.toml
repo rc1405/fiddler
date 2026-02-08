@@ -20,11 +20,29 @@ aws = [
     "dep:aws-sdk-sqs",
     "dep:aws-sdk-s3",
     "dep:aws-sdk-cloudwatch",
+    "dep:aws-sdk-kinesis",
 ]
 prometheus = ["dep:metrics", "dep:metrics-exporter-prometheus"]
 clickhouse = ["dep:reqwest"]
+redis = ["dep:redis"]
+http_client = ["dep:reqwest"]
 http_server = ["dep:axum", "dep:tower-http"]
-all = ["python", "elasticsearch", "aws", "prometheus", "clickhouse", "http_server"]
+amqp = ["dep:lapin"]
+mqtt = ["dep:rumqttc"]
+zeromq = ["dep:zeromq"]
+deprecated = ["python"]
+all = [
+    "elasticsearch",
+    "aws",
+    "prometheus",
+    "clickhouse",
+    "redis",
+    "http_client",
+    "http_server",
+    "amqp",
+    "mqtt",
+    "zeromq",
+]
 
 [dependencies]
 fiddler-macros = { version = "1.1.0", path = "../fiddler-macros" }
@@ -35,6 +53,7 @@ aws-config = { version = "1.1.7", features = [
     "behavior-version-latest",
 ], optional = true }
 aws-sdk-cloudwatch = { version = "1.72.0", optional = true }
+aws-sdk-kinesis = { version = "1.72.0", optional = true }
 aws-sdk-s3 = { version = "1.83.0", optional = true }
 aws-sdk-sqs = { version = "1.64.0", optional = true }
 aws_lambda_events = { version = "0.16.0", optional = true }
@@ -66,9 +85,17 @@ base64 = "0.22.1"
 metrics = { version = "0.24", optional = true }
 metrics-exporter-prometheus = { version = "0.16", optional = true }
 reqwest = { version = "0.12", features = ["json"], optional = true }
+redis = { version = "0.27", features = [
+    "tokio-comp",
+    "connection-manager",
+], optional = true }
+lapin = { version = "2.5", optional = true }
+rumqttc = { version = "0.24", optional = true }
+zeromq = { version = "0.4", optional = true }
 axum = { version = "0.7", optional = true }
 tower-http = { version = "0.5", features = ["cors", "trace"], optional = true }
 futures = "0.3.31"
+sysinfo = "0.33"
 
 [build-dependencies]
 fs_extra = "1.3.0"
@@ -80,6 +107,9 @@ testcontainers = { version = "0.23.3" }
 testcontainers-modules = { version = "0.11.6", features = [
     "elastic_search",
     "localstack",
+    "redis",
+    "rabbitmq",
+    "mosquitto",
 ] }
 tokio-test = "0.4.4"
 aws-smithy-types = { version = "1.3.1", features = ["rt-tokio"] }

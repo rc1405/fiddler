@@ -655,6 +655,10 @@ impl Parser {
                     position,
                 })
             }
+            TokenKind::Null => {
+                self.advance();
+                Ok(Expression::Null { position })
+            }
             TokenKind::Identifier(name) => {
                 let name = name.clone();
                 self.advance();

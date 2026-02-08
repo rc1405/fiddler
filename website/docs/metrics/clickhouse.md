@@ -123,6 +123,7 @@ The following metrics can be tracked:
 |-------------|------|-------------|
 | `total_received` | counter | Total messages received from input |
 | `total_completed` | counter | Messages successfully processed |
+| `total_filtered` | counter | Messages intentionally filtered/dropped by processors |
 | `total_process_errors` | counter | Messages with processing errors |
 | `total_output_errors` | counter | Messages with output errors |
 | `streams_started` | counter | Streams initiated |
