@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.2](https://github.com/rc1405/fiddler/compare/fiddler-script-v0.1.1...fiddler-script-v0.1.2) - 2026-02-08
+
+### Added
+
+- lots of modules ([#83](https://github.com/rc1405/fiddler/pull/83))
+
 ### Added
 
 - `null` literal: can now use `null` directly in expressions (e.g., `this = null;`)
