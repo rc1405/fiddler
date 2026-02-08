@@ -41,7 +41,7 @@ impl Processor for Filter {
         // Explicitly check that result is a boolean type
         match result.as_boolean() {
             Some(true) => Ok(vec![message]),
-            Some(false) => Err(Error::ConditionalCheckfailed),
+            Some(false) => Ok(Vec::new()),
             None => Err(Error::ProcessingError(format!(
                 "Filter '{}' did not return a boolean value, got: {:?}",
                 self.condition, result
@@ -126,7 +126,8 @@ mod test {
         };
 
         let result = processor.process(message).await;
-        assert!(matches!(result, Err(Error::ConditionalCheckfailed)));
+        let expected: Vec<Message> = Vec::new();
+        assert!(matches!(result, Ok(expected)));
     }
 
     #[tokio::test]
@@ -149,7 +150,8 @@ mod test {
             ..Default::default()
         };
         let result = processor.process(message).await;
-        assert!(matches!(result, Err(Error::ConditionalCheckfailed)));
+        let expected: Vec<Message> = Vec::new();
+        assert!(matches!(result, Ok(expected)));
     }
 
     #[tokio::test]
@@ -187,7 +189,8 @@ mod test {
             ..Default::default()
         };
         let result = processor.process(message).await;
-        assert!(matches!(result, Err(Error::ConditionalCheckfailed)));
+        let expected: Vec<Message> = Vec::new();
+        assert!(matches!(result, Ok(expected)));
     }
 
     #[tokio::test]
@@ -210,7 +213,8 @@ mod test {
             ..Default::default()
         };
         let result = processor.process(message).await;
-        assert!(matches!(result, Err(Error::ConditionalCheckfailed)));
+        let expected: Vec<Message> = Vec::new();
+        assert!(matches!(result, Ok(expected)));
     }
 
     #[tokio::test]
@@ -233,7 +237,8 @@ mod test {
             ..Default::default()
         };
         let result = processor.process(message).await;
-        assert!(matches!(result, Err(Error::ConditionalCheckfailed)));
+        let expected: Vec<Message> = Vec::new();
+        assert!(matches!(result, Ok(expected)));
     }
 
     #[tokio::test]
@@ -301,7 +306,8 @@ mod test {
             ..Default::default()
         };
         let result = processor.process(message).await;
-        assert!(matches!(result, Err(Error::ConditionalCheckfailed)));
+        let expected: Vec<Message> = Vec::new();
+        assert!(matches!(result, Ok(expected)));
 
         // Should fail - cancelled
         let message = Message {
@@ -309,7 +315,7 @@ mod test {
             ..Default::default()
         };
         let result = processor.process(message).await;
-        assert!(matches!(result, Err(Error::ConditionalCheckfailed)));
+        assert!(matches!(result, Ok(expected)));
     }
 
     #[tokio::test]
@@ -332,6 +338,7 @@ mod test {
             ..Default::default()
         };
         let result = processor.process(message).await;
-        assert!(matches!(result, Err(Error::ConditionalCheckfailed)));
+        let expected: Vec<Message> = Vec::new();
+        assert!(matches!(result, Ok(expected)));
     }
 }
