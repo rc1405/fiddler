@@ -550,6 +550,37 @@ columns:
     }
 
     #[test]
+    fn test_config_deserialization_with_duration() {
+        let yaml = r#"
+url: "http://localhost:8123"
+database: "mydb"
+table: "events"
+username: "user"
+password: "pass"
+batch:
+  size: 1000
+  duration: 500ms
+create_table: true
+columns:
+  - name: timestamp
+    type: DateTime64(3)
+  - name: data
+    type: String
+"#;
+        let config: ClickHouseOutputConfig = serde_yaml::from_str(yaml).unwrap();
+        assert_eq!(config.url, "http://localhost:8123");
+        assert_eq!(config.database, "mydb");
+        assert_eq!(config.table, "events");
+        assert_eq!(config.username, Some("user".to_string()));
+        assert_eq!(config.password, Some("pass".to_string()));
+        assert!(config.create_table);
+        assert_eq!(config.columns.len(), 2);
+        assert_eq!(config.columns[0].name, "timestamp");
+        assert_eq!(config.columns[0].col_type, "DateTime64(3)");
+        assert_eq!(config.batch.as_ref().unwrap().effective_size(), 1000);
+    }
+
+    #[test]
     fn test_config_defaults() {
         let yaml = r#"
 url: "http://localhost:8123"
