@@ -1,6 +1,6 @@
 [package]
 name = "fiddler"
-version = "4.4.0"
+version = "4.4.1"
 edition = "2021"
 license-file = "../LICENSE"
 description = "Data Stream processor written in rust"
