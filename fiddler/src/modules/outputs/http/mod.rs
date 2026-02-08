@@ -453,9 +453,17 @@ properties:
 "#;
     let conf_spec = ConfigSpec::from_schema(config)?;
 
+    // Register for both Output (single message) and OutputBatch (batch mode)
+    // The create_http_output function returns the appropriate type based on batch config
     register_plugin(
         "http".into(),
         ItemType::Output,
+        conf_spec.clone(),
+        create_http_output,
+    )?;
+    register_plugin(
+        "http".into(),
+        ItemType::OutputBatch,
         conf_spec,
         create_http_output,
     )

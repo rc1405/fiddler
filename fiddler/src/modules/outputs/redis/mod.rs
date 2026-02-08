@@ -278,9 +278,17 @@ properties:
 "#;
     let conf_spec = ConfigSpec::from_schema(config)?;
 
+    // Register for both Output (pubsub mode) and OutputBatch (list mode)
+    // The create_redis_output function returns the appropriate type based on mode
     register_plugin(
         "redis".into(),
-        ItemType::OutputBatch, // Primary registration as batch
+        ItemType::Output,
+        conf_spec.clone(),
+        create_redis_output,
+    )?;
+    register_plugin(
+        "redis".into(),
+        ItemType::OutputBatch,
         conf_spec,
         create_redis_output,
     )
