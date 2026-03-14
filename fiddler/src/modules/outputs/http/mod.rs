@@ -411,6 +411,22 @@ properties:
     description: "Custom HTTP headers"
   auth:
     type: object
+    properties:
+      type:
+        type: string
+        enum: ["basic", "bearer"]
+        description: "Authentication type"
+      username:
+        type: string
+        description: "Username for basic auth"
+      password:
+        type: string
+        description: "Password for basic auth"
+      token:
+        type: string
+        description: "Token for bearer auth"
+    required:
+      - type
     description: "Authentication (type: basic with username/password, or bearer with token)"
   timeout_secs:
     type: integer
