@@ -1,6 +1,7 @@
 use crate::config::register_plugin;
 use crate::config::ItemType;
 use crate::config::{ConfigSpec, ExecutionType};
+use crate::modules::tls::ClientTlsConfig;
 use crate::{BatchingPolicy, MessageBatch};
 use crate::{Closer, Error, OutputBatch};
 use async_trait::async_trait;
@@ -22,14 +23,7 @@ use elasticsearch::{
 };
 
 use chrono::Utc;
-use elasticsearch::cert::CertificateValidation;
-
-#[derive(Deserialize, Default, Clone)]
-pub enum CertValidation {
-    #[default]
-    Default,
-    None,
-}
+use elasticsearch::cert::{Certificate, CertificateValidation};
 
 #[derive(Deserialize, Default)]
 struct ElasticConfig {
@@ -38,7 +32,7 @@ struct ElasticConfig {
     password: Option<String>,
     cloud_id: Option<String>,
     index: String,
-    cert_validation: Option<CertValidation>,
+    tls: Option<ClientTlsConfig>,
     batch_policy: Option<BatchingPolicy>,
 }
 
@@ -54,15 +48,28 @@ struct Request {
 }
 
 impl ElasticConfig {
-    fn get_client(&self) -> Result<Elasticsearch, Error> {
-        let cert_validation = match self
-            .cert_validation
-            .clone()
-            .unwrap_or(CertValidation::Default)
-        {
-            CertValidation::None => CertificateValidation::None,
-            _ => CertificateValidation::Default,
+    fn get_cert_validation(&self) -> Result<CertificateValidation, Error> {
+        let Some(ref tls) = self.tls else {
+            return Ok(CertificateValidation::Default);
         };
+
+        if tls.skip_verify {
+            return Ok(CertificateValidation::None);
+        }
+
+        if let Some(ref ca) = tls.ca {
+            let pem_bytes = crate::modules::tls::read_pem(ca, "tls.ca")?;
+            let cert = Certificate::from_pem(&pem_bytes).map_err(|e| {
+                Error::ConfigFailedValidation(format!("failed to parse tls.ca certificate: {}", e))
+            })?;
+            return Ok(CertificateValidation::Certificate(cert));
+        }
+
+        Ok(CertificateValidation::Default)
+    }
+
+    fn get_client(&self) -> Result<Elasticsearch, Error> {
+        let cert_validation = self.get_cert_validation()?;
 
         if let Some(ref cloud_id) = self.cloud_id {
             let username = self
@@ -304,11 +311,23 @@ properties:
     type: string
   index:
     type: string
-  cert_validation:
-    type: string
-    enum: 
-      - Default
-      - None
+  tls:
+    type: object
+    properties:
+      ca:
+        type: string
+        description: CA certificate — file path or inline PEM
+      cert:
+        type: string
+        description: Client certificate for mTLS — file path or inline PEM
+      key:
+        type: string
+        description: Client private key for mTLS — file path or inline PEM
+      skip_verify:
+        type: boolean
+        default: false
+        description: Skip server certificate verification
+    description: TLS configuration for custom certificates
 required:
   - index
   - url";
@@ -329,5 +348,42 @@ mod test {
     #[test]
     fn register_plugin() {
         register_elasticsearch().unwrap()
+    }
+
+    #[test]
+    fn test_config_with_tls_skip_verify() {
+        let yaml = r#"
+url: "https://localhost:9200"
+index: "logs"
+tls:
+  skip_verify: true
+"#;
+        let config: ElasticConfig = serde_yaml::from_str(yaml).unwrap();
+        let tls = config.tls.as_ref().unwrap();
+        assert!(tls.skip_verify);
+    }
+
+    #[test]
+    fn test_config_with_tls_ca() {
+        let yaml = r#"
+url: "https://localhost:9200"
+index: "logs"
+tls:
+  ca: /etc/ssl/ca.crt
+"#;
+        let config: ElasticConfig = serde_yaml::from_str(yaml).unwrap();
+        let tls = config.tls.as_ref().unwrap();
+        assert_eq!(tls.ca.as_deref(), Some("/etc/ssl/ca.crt"));
+        assert!(!tls.skip_verify);
+    }
+
+    #[test]
+    fn test_config_without_tls() {
+        let yaml = r#"
+url: "https://localhost:9200"
+index: "logs"
+"#;
+        let config: ElasticConfig = serde_yaml::from_str(yaml).unwrap();
+        assert!(config.tls.is_none());
     }
 }

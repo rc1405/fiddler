@@ -15,6 +15,8 @@ pub mod mqtt;
 #[cfg(feature = "redis")]
 pub mod redis;
 pub mod stdin;
+#[cfg(feature = "syslog")]
+pub mod syslog;
 #[cfg(feature = "zeromq")]
 pub mod zeromq;
 
@@ -34,6 +36,8 @@ pub(crate) fn register_plugins() -> Result<(), Error> {
     mqtt::register_mqtt()?;
     #[cfg(feature = "zeromq")]
     zeromq::register_zeromq()?;
+    #[cfg(feature = "syslog")]
+    syslog::register_syslog()?;
     #[cfg(feature = "amqp")]
     amqp::register_amqp()?;
     stdin::register_stdin()?;

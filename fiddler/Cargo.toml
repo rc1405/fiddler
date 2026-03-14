@@ -13,7 +13,7 @@ msrv = "1.74.1"
 [features]
 default = []
 python = ["dep:pyo3"]
-elasticsearch = ["dep:elasticsearch"]
+elasticsearch = ["dep:elasticsearch", "dep:reqwest"]
 aws = [
     "dep:aws-config",
     "dep:aws_lambda_events",
@@ -23,13 +23,20 @@ aws = [
     "dep:aws-sdk-kinesis",
 ]
 prometheus = ["dep:metrics", "dep:metrics-exporter-prometheus"]
+tls = ["dep:tokio-rustls", "dep:rustls-pemfile"]
 clickhouse = ["dep:reqwest"]
 redis = ["dep:redis"]
 http_client = ["dep:reqwest"]
-http_server = ["dep:axum", "dep:tower-http"]
+http_server = ["dep:axum", "dep:tower-http", "dep:hyper", "dep:hyper-util", "dep:tower"]
 amqp = ["dep:lapin"]
 mqtt = ["dep:rumqttc"]
 zeromq = ["dep:zeromq"]
+syslog = [
+    "tls",
+    "dep:syslog_loose",
+    "dep:ipnet",
+    "dep:socket2",
+]
 deprecated = ["python"]
 all = [
     "elasticsearch",
@@ -42,6 +49,7 @@ all = [
     "amqp",
     "mqtt",
     "zeromq",
+    "syslog",
 ]
 
 [dependencies]
@@ -85,7 +93,7 @@ flate2 = "1.1.1"
 base64 = "0.22.1"
 metrics = { version = "0.24", optional = true }
 metrics-exporter-prometheus = { version = "0.16", optional = true }
-reqwest = { version = "0.12", features = ["json"], optional = true }
+reqwest = { version = "0.12", features = ["json", "rustls-tls"], optional = true }
 redis = { version = "0.27", features = [
     "tokio-comp",
     "connection-manager",
@@ -95,6 +103,19 @@ rumqttc = { version = "0.24", optional = true }
 zeromq = { version = "0.4", optional = true }
 axum = { version = "0.7", optional = true }
 tower-http = { version = "0.5", features = ["cors", "trace"], optional = true }
+hyper = { version = "1", features = ["http1"], optional = true }
+hyper-util = { version = "0.1", features = [
+    "tokio",
+    "server-auto",
+    "http1",
+    "service",
+], optional = true }
+tower = { version = "0.5", optional = true }
+syslog_loose = { version = "0.23", optional = true }
+tokio-rustls = { version = "0.26", optional = true }
+rustls-pemfile = { version = "2.2", optional = true }
+ipnet = { version = "2.11", optional = true }
+socket2 = { version = "0.5", optional = true }
 futures = "0.3.31"
 sysinfo = "0.33"
 

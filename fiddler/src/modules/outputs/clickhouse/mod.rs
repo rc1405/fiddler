@@ -48,6 +48,7 @@
 use crate::config::register_plugin;
 use crate::config::ItemType;
 use crate::config::{ConfigSpec, ExecutionType};
+use crate::modules::tls::ClientTlsConfig;
 use crate::{BatchingPolicy, Closer, Error, MessageBatch, OutputBatch};
 use async_trait::async_trait;
 use fiddler_macros::fiddler_registration_func;
@@ -94,6 +95,8 @@ pub struct ClickHouseOutputConfig {
     /// Column definitions for table creation.
     #[serde(default)]
     pub columns: Vec<ColumnDef>,
+    /// TLS configuration for custom CA certificates and client certificates.
+    pub tls: Option<ClientTlsConfig>,
 }
 
 fn default_database() -> String {
@@ -152,11 +155,17 @@ impl ClickHouseClient {
             validate_identifier(&col.name)?;
         }
 
-        let client = reqwest::Client::builder()
+        let mut builder = reqwest::Client::builder()
             .pool_max_idle_per_host(2)
             .pool_idle_timeout(Duration::from_secs(90))
             .timeout(Duration::from_secs(60)) // Longer timeout for batch inserts
-            .connect_timeout(Duration::from_secs(10))
+            .connect_timeout(Duration::from_secs(10));
+
+        if let Some(ref tls) = config.tls {
+            builder = crate::modules::tls::configure_reqwest_tls(builder, tls)?;
+        }
+
+        let client = builder
             .build()
             .map_err(|e| Error::ExecutionError(format!("Failed to build HTTP client: {}", e)))?;
 
@@ -488,6 +497,23 @@ properties:
         - name
         - type
     description: "Column definitions for table creation"
+  tls:
+    type: object
+    properties:
+      ca:
+        type: string
+        description: "CA certificate — file path or inline PEM"
+      cert:
+        type: string
+        description: "Client certificate for mTLS — file path or inline PEM"
+      key:
+        type: string
+        description: "Client private key for mTLS — file path or inline PEM"
+      skip_verify:
+        type: boolean
+        default: false
+        description: "Skip server certificate verification"
+    description: "TLS configuration for custom certificates"
 "#;
     let conf_spec = ConfigSpec::from_schema(config)?;
 
@@ -592,6 +618,22 @@ table: "events"
         assert!(config.password.is_none());
         assert!(!config.create_table);
         assert!(config.columns.is_empty());
+    }
+
+    #[test]
+    fn test_config_with_tls() {
+        let yaml = r#"
+url: "https://localhost:8443"
+table: "events"
+tls:
+  ca: /etc/ssl/ca.crt
+  skip_verify: false
+"#;
+        let config: ClickHouseOutputConfig = serde_yaml::from_str(yaml).unwrap();
+        let tls = config.tls.as_ref().unwrap();
+        assert_eq!(tls.ca.as_deref(), Some("/etc/ssl/ca.crt"));
+        assert!(!tls.skip_verify);
+        assert!(tls.cert.is_none());
     }
 
     #[test]

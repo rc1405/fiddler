@@ -27,11 +27,28 @@ use async_trait::async_trait;
 use fiddler_macros::fiddler_registration_func;
 use flume::{bounded, Receiver, Sender};
 use futures::StreamExt;
-use redis::Client;
+use redis::{Client, ErrorKind};
 use serde::Deserialize;
 use serde_yaml::Value;
 use tokio::sync::oneshot;
 use tracing::{debug, error, warn};
+
+/// Check if a Redis error is an authentication failure.
+fn is_auth_error(e: &redis::RedisError) -> bool {
+    matches!(e.kind(), ErrorKind::AuthenticationFailed)
+        || e.to_string().to_lowercase().contains("noauth")
+        || e.to_string().to_lowercase().contains("wrongpass")
+        || e.to_string().to_lowercase().contains("invalid password")
+}
+
+/// Convert a Redis error to a fiddler Error, with special handling for auth failures.
+fn redis_error_to_fiddler_error(e: redis::RedisError, context: &str) -> Error {
+    if is_auth_error(&e) {
+        Error::ConfigFailedValidation(format!("Redis authentication failed: {}", e))
+    } else {
+        Error::ExecutionError(format!("{}: {}", context, e))
+    }
+}
 
 const DEFAULT_MODE: &str = "list";
 const DEFAULT_LIST_COMMAND: &str = "brpop";
@@ -87,10 +104,10 @@ async fn list_reader_task(
         Ok(c) => c,
         Err(e) => {
             let _ = sender
-                .send_async(Err(Error::ExecutionError(format!(
-                    "Failed to open Redis client: {}",
-                    e
-                ))))
+                .send_async(Err(redis_error_to_fiddler_error(
+                    e,
+                    "Failed to open Redis client",
+                )))
                 .await;
             return;
         }
@@ -100,10 +117,10 @@ async fn list_reader_task(
         Ok(c) => c,
         Err(e) => {
             let _ = sender
-                .send_async(Err(Error::ExecutionError(format!(
-                    "Failed to connect to Redis: {}",
-                    e
-                ))))
+                .send_async(Err(redis_error_to_fiddler_error(
+                    e,
+                    "Failed to connect to Redis",
+                )))
                 .await;
             return;
         }
@@ -152,6 +169,18 @@ async fn list_reader_task(
                 // Timeout, no data available - continue loop
             }
             Err(e) => {
+                // Check for authentication errors - these are fatal
+                if is_auth_error(&e) {
+                    error!(error = %e, "Redis authentication failed");
+                    let _ = sender
+                        .send_async(Err(Error::ConfigFailedValidation(format!(
+                            "Redis authentication failed: {}",
+                            e
+                        ))))
+                        .await;
+                    return;
+                }
+
                 error!(error = %e, "Redis BRPOP/BLPOP failed");
                 // Try to reconnect
                 match client.get_multiplexed_async_connection().await {
@@ -159,8 +188,19 @@ async fn list_reader_task(
                         conn = new_conn;
                         warn!("Reconnected to Redis");
                     }
-                    Err(e) => {
-                        error!(error = %e, "Failed to reconnect to Redis");
+                    Err(reconnect_err) => {
+                        // Check if reconnect failed due to auth
+                        if is_auth_error(&reconnect_err) {
+                            error!(error = %reconnect_err, "Redis authentication failed on reconnect");
+                            let _ = sender
+                                .send_async(Err(Error::ConfigFailedValidation(format!(
+                                    "Redis authentication failed: {}",
+                                    reconnect_err
+                                ))))
+                                .await;
+                            return;
+                        }
+                        error!(error = %reconnect_err, "Failed to reconnect to Redis");
                         tokio::time::sleep(std::time::Duration::from_secs(1)).await;
                     }
                 }
@@ -182,10 +222,10 @@ async fn pubsub_reader_task(
         Ok(c) => c,
         Err(e) => {
             let _ = sender
-                .send_async(Err(Error::ExecutionError(format!(
-                    "Failed to open Redis client: {}",
-                    e
-                ))))
+                .send_async(Err(redis_error_to_fiddler_error(
+                    e,
+                    "Failed to open Redis client",
+                )))
                 .await;
             return;
         }
@@ -195,10 +235,10 @@ async fn pubsub_reader_task(
         Ok(ps) => ps,
         Err(e) => {
             let _ = sender
-                .send_async(Err(Error::ExecutionError(format!(
-                    "Failed to create pub/sub connection: {}",
-                    e
-                ))))
+                .send_async(Err(redis_error_to_fiddler_error(
+                    e,
+                    "Failed to create pub/sub connection",
+                )))
                 .await;
             return;
         }
@@ -214,10 +254,10 @@ async fn pubsub_reader_task(
 
         if let Err(e) = result {
             let _ = sender
-                .send_async(Err(Error::ExecutionError(format!(
-                    "Failed to subscribe to {}: {}",
-                    channel, e
-                ))))
+                .send_async(Err(redis_error_to_fiddler_error(
+                    e,
+                    &format!("Failed to subscribe to {}", channel),
+                )))
                 .await;
             return;
         }

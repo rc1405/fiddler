@@ -26,6 +26,7 @@ use crate::config::register_plugin;
 use crate::config::ItemType;
 use crate::config::{ConfigSpec, ExecutionType};
 use crate::deserialize_optional_duration;
+use crate::modules::tls::ClientTlsConfig;
 use crate::{Closer, Error, Message, MessageBatch, Output, OutputBatch};
 use async_trait::async_trait;
 use fiddler_macros::fiddler_registration_func;
@@ -60,6 +61,8 @@ pub struct HttpOutputConfig {
     /// Batching policy (enables batch mode if present).
     #[serde(default)]
     pub batch: Option<BatchConfig>,
+    /// TLS configuration for custom CA certificates and client certificates.
+    pub tls: Option<ClientTlsConfig>,
 }
 
 /// Batch configuration with format option.
@@ -108,11 +111,17 @@ fn default_batch_format() -> String {
 }
 
 /// Build a configured reqwest client.
-fn build_client(timeout_secs: u64) -> Result<Client, Error> {
-    Client::builder()
+fn build_client(timeout_secs: u64, tls_config: Option<&ClientTlsConfig>) -> Result<Client, Error> {
+    let mut builder = Client::builder()
         .timeout(Duration::from_secs(timeout_secs))
         .pool_max_idle_per_host(2)
-        .pool_idle_timeout(Duration::from_secs(90))
+        .pool_idle_timeout(Duration::from_secs(90));
+
+    if let Some(tls) = tls_config {
+        builder = crate::modules::tls::configure_reqwest_tls(builder, tls)?;
+    }
+
+    builder
         .build()
         .map_err(|e| Error::ExecutionError(format!("Failed to build HTTP client: {}", e)))
 }
@@ -183,7 +192,7 @@ impl HttpOutput {
         reqwest::Url::parse(&config.url)
             .map_err(|e| Error::ConfigFailedValidation(format!("Invalid URL: {}", e)))?;
 
-        let client = build_client(config.timeout_secs)?;
+        let client = build_client(config.timeout_secs, config.tls.as_ref())?;
 
         debug!(url = %config.url, method = %config.method, "HTTP output initialized");
 
@@ -242,7 +251,7 @@ impl HttpBatchOutput {
         reqwest::Url::parse(&config.url)
             .map_err(|e| Error::ConfigFailedValidation(format!("Invalid URL: {}", e)))?;
 
-        let client = build_client(config.timeout_secs)?;
+        let client = build_client(config.timeout_secs, config.tls.as_ref())?;
 
         let batch_config = config.batch.as_ref();
         let batch_size = batch_config.and_then(|b| b.size).unwrap_or(500);
@@ -422,6 +431,23 @@ properties:
         default: "ndjson"
         description: "Batch format"
     description: "Batching configuration (enables batch mode)"
+  tls:
+    type: object
+    properties:
+      ca:
+        type: string
+        description: "CA certificate — file path or inline PEM"
+      cert:
+        type: string
+        description: "Client certificate for mTLS — file path or inline PEM"
+      key:
+        type: string
+        description: "Client private key for mTLS — file path or inline PEM"
+      skip_verify:
+        type: boolean
+        default: false
+        description: "Skip server certificate verification"
+    description: "TLS configuration for custom certificates"
 "#;
     let conf_spec = ConfigSpec::from_schema(config)?;
 
@@ -531,6 +557,42 @@ auth:
         assert!(config.headers.is_empty());
         assert!(config.auth.is_none());
         assert!(config.batch.is_none());
+    }
+
+    #[test]
+    fn test_config_deserialization_with_tls() {
+        let yaml = r#"
+url: "https://api.example.com/events"
+tls:
+  ca: |
+    -----BEGIN CERTIFICATE-----
+    MIIBxTCCAW...
+    -----END CERTIFICATE-----
+  cert: /etc/ssl/client.crt
+  key: /etc/ssl/client.key
+  skip_verify: false
+"#;
+        let config: HttpOutputConfig = serde_yaml::from_str(yaml).unwrap();
+        assert_eq!(config.url, "https://api.example.com/events");
+        let tls = config.tls.as_ref().unwrap();
+        assert!(tls.ca.as_deref().unwrap().contains("-----BEGIN"));
+        assert_eq!(tls.cert.as_deref(), Some("/etc/ssl/client.crt"));
+        assert_eq!(tls.key.as_deref(), Some("/etc/ssl/client.key"));
+        assert!(!tls.skip_verify);
+    }
+
+    #[test]
+    fn test_config_deserialization_tls_skip_verify() {
+        let yaml = r#"
+url: "https://api.example.com/events"
+tls:
+  skip_verify: true
+"#;
+        let config: HttpOutputConfig = serde_yaml::from_str(yaml).unwrap();
+        let tls = config.tls.as_ref().unwrap();
+        assert!(tls.skip_verify);
+        assert!(tls.ca.is_none());
+        assert!(tls.cert.is_none());
     }
 
     #[test]

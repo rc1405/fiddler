@@ -25,11 +25,28 @@ use crate::{BatchingPolicy, Closer, Error, Message, MessageBatch, Output, Output
 use async_trait::async_trait;
 use fiddler_macros::fiddler_registration_func;
 use redis::aio::ConnectionManager;
-use redis::{AsyncCommands, Client};
+use redis::{AsyncCommands, Client, ErrorKind};
 use serde::Deserialize;
 use serde_yaml::Value;
 use std::time::Duration;
 use tracing::{debug, warn};
+
+/// Check if a Redis error is an authentication failure.
+fn is_auth_error(e: &redis::RedisError) -> bool {
+    matches!(e.kind(), ErrorKind::AuthenticationFailed)
+        || e.to_string().to_lowercase().contains("noauth")
+        || e.to_string().to_lowercase().contains("wrongpass")
+        || e.to_string().to_lowercase().contains("invalid password")
+}
+
+/// Convert a Redis error to a fiddler Error, with special handling for auth failures.
+fn redis_error_to_fiddler_error(e: redis::RedisError, context: &str) -> Error {
+    if is_auth_error(&e) {
+        Error::ConfigFailedValidation(format!("Redis authentication failed: {}", e))
+    } else {
+        Error::ExecutionError(format!("{}: {}", context, e))
+    }
+}
 
 const DEFAULT_MODE: &str = "list";
 const DEFAULT_LIST_COMMAND: &str = "rpush";
@@ -82,11 +99,11 @@ impl RedisListOutput {
         let use_lpush = config.list_command.to_lowercase() == "lpush";
 
         let client = Client::open(config.url.as_str())
-            .map_err(|e| Error::ConfigFailedValidation(format!("Invalid Redis URL: {}", e)))?;
+            .map_err(|e| redis_error_to_fiddler_error(e, "Invalid Redis URL"))?;
 
         let conn = ConnectionManager::new(client)
             .await
-            .map_err(|e| Error::ExecutionError(format!("Failed to connect to Redis: {}", e)))?;
+            .map_err(|e| redis_error_to_fiddler_error(e, "Failed to connect to Redis"))?;
 
         let batch_size = config.batch.as_ref().map_or(500, |b| b.effective_size());
         let interval = config
@@ -124,9 +141,13 @@ impl OutputBatch for RedisListOutput {
             }
         }
 
-        pipe.query_async::<()>(&mut self.conn)
-            .await
-            .map_err(|e| Error::OutputError(format!("Redis push failed: {}", e)))?;
+        pipe.query_async::<()>(&mut self.conn).await.map_err(|e| {
+            if is_auth_error(&e) {
+                Error::ConfigFailedValidation(format!("Redis authentication failed: {}", e))
+            } else {
+                Error::OutputError(format!("Redis push failed: {}", e))
+            }
+        })?;
 
         debug!(count = messages.len(), key = %self.key, "Pushed batch to Redis");
         Ok(())
@@ -163,11 +184,11 @@ impl RedisPubSubOutput {
         })?;
 
         let client = Client::open(config.url.as_str())
-            .map_err(|e| Error::ConfigFailedValidation(format!("Invalid Redis URL: {}", e)))?;
+            .map_err(|e| redis_error_to_fiddler_error(e, "Invalid Redis URL"))?;
 
         let conn = ConnectionManager::new(client)
             .await
-            .map_err(|e| Error::ExecutionError(format!("Failed to connect to Redis: {}", e)))?;
+            .map_err(|e| redis_error_to_fiddler_error(e, "Failed to connect to Redis"))?;
 
         debug!(channel = %channel, "Redis pub/sub output initialized");
 
@@ -181,7 +202,13 @@ impl Output for RedisPubSubOutput {
         self.conn
             .publish::<_, _, ()>(&self.channel, message.bytes.as_slice())
             .await
-            .map_err(|e| Error::OutputError(format!("Redis publish failed: {}", e)))?;
+            .map_err(|e| {
+                if is_auth_error(&e) {
+                    Error::ConfigFailedValidation(format!("Redis authentication failed: {}", e))
+                } else {
+                    Error::OutputError(format!("Redis publish failed: {}", e))
+                }
+            })?;
 
         Ok(())
     }

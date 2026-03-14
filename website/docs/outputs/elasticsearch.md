@@ -18,7 +18,17 @@ Send events to elasticsearch
             password: changeme
             cloud_id: someId
             index: my_index
-            cert_validation: Default
+    ```
+
+=== "With TLS"
+    ```yml
+    output:
+        elasticsearch:
+            url: https://127.0.0.1:9200
+            index: my_index
+            tls:
+              ca: /etc/ssl/ca.crt
+              skip_verify: false
     ```
 ## Fields
 ### `url`
@@ -46,10 +56,16 @@ Elasticsearch index to utilize.  default behavior is to append `YYYY-MM-DD` to t
 Type: `string`  
 Required: `true`  
 
-### `cert_validation`
-Enum to identify which type of certification validation is utilized  
-Type: `string`  
-AcceptedValues:  
-&nbsp;&nbsp;&nbsp;&nbsp;`Default`: default mechanisms utilized by elasticsearch's SDK [default]  
-&nbsp;&nbsp;&nbsp;&nbsp;`None`: Do not perform certification validation    
-Required: `false`  
+### `tls`
+TLS configuration for custom CA certificates and client certificates.
+Type: `object`
+Required: `false`
+
+Each string field (`ca`, `cert`, `key`) accepts either a **file path** or **inline PEM content**. If the value starts with `-----BEGIN`, it is treated as inline PEM.
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `ca` | string | — | CA certificate for server verification |
+| `cert` | string | — | Client certificate for mTLS |
+| `key` | string | — | Client private key for mTLS |
+| `skip_verify` | boolean | `false` | Skip server certificate verification |
