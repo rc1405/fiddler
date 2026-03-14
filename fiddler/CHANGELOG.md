@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [4.5.1](https://github.com/rc1405/fiddler/compare/fiddler-v4.5.0...fiddler-v4.5.1) - 2026-03-14
+
+### Fixed
+
+- updated object on http output ([#89](https://github.com/rc1405/fiddler/pull/89))
+
 ## [4.5.0](https://github.com/rc1405/fiddler/compare/fiddler-v4.4.1...fiddler-v4.5.0) - 2026-03-14
 
 ### Added
