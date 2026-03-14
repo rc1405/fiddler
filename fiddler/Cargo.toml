@@ -7,7 +7,7 @@ description = "Data Stream processor written in rust"
 readme = "../README.md"
 
 [package.metadata]
-msrv = "1.74.1"
+msrv = "1.91.1"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 [features]
@@ -27,16 +27,17 @@ tls = ["dep:tokio-rustls", "dep:rustls-pemfile"]
 clickhouse = ["dep:reqwest"]
 redis = ["dep:redis"]
 http_client = ["dep:reqwest"]
-http_server = ["dep:axum", "dep:tower-http", "dep:hyper", "dep:hyper-util", "dep:tower"]
+http_server = [
+    "dep:axum",
+    "dep:tower-http",
+    "dep:hyper",
+    "dep:hyper-util",
+    "dep:tower",
+]
 amqp = ["dep:lapin"]
 mqtt = ["dep:rumqttc"]
 zeromq = ["dep:zeromq"]
-syslog = [
-    "tls",
-    "dep:syslog_loose",
-    "dep:ipnet",
-    "dep:socket2",
-]
+syslog = ["tls", "dep:syslog_loose", "dep:ipnet", "dep:socket2"]
 deprecated = ["python"]
 all = [
     "elasticsearch",
@@ -93,7 +94,10 @@ flate2 = "1.1.1"
 base64 = "0.22.1"
 metrics = { version = "0.24", optional = true }
 metrics-exporter-prometheus = { version = "0.16", optional = true }
-reqwest = { version = "0.12", features = ["json", "rustls-tls"], optional = true }
+reqwest = { version = "0.12", features = [
+    "json",
+    "rustls-tls",
+], optional = true }
 redis = { version = "0.27", features = [
     "tokio-comp",
     "connection-manager",
