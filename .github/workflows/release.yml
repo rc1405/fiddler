@@ -38,17 +38,17 @@ jobs:
   release-website:
     name: generate website
     needs: release-plz-release
-    if: needs.release-plz-release.releases[0]  
+    if: ${{ fromJson(needs.release-plz-release.outputs.releases)[0] }}
     uses: ./.github/workflows/website.yml
     with:
-      version: ${{ needs.release-plz-release.releases[0].version}}
+      version: ${{ fromJson(needs.release-plz-release.outputs.releases)[0].version }}
   release-binaries:
     name: generate binaries
     needs: release-plz-release
-    if: needs.release-plz-release.releases[0]  
+    if: ${{ fromJson(needs.release-plz-release.outputs.releases)[0] }}
     uses: ./.github/workflows/assets.yml
     with:
-      version: ${{ needs.release-plz-release.releases[0].version}}
+      version: ${{ fromJson(needs.release-plz-release.outputs.releases)[0].version }}
 
   release-plz-pr:
     name: pr

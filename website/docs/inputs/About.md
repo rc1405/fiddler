@@ -16,3 +16,4 @@ input:
 | [stdin](./stdin.md) | Read from standard input | - |
 | [aws_s3](./aws_s3.md) | Read from AWS S3 buckets | `aws` |
 | [aws_sqs](./aws_sqs.md) | Read from AWS SQS queues | `aws` |
+| [syslog](./syslog.md) | Receive logs via syslog (UDP/TCP/TLS) | `syslog` |

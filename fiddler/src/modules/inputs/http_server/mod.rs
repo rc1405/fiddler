@@ -1,7 +1,7 @@
 //! HTTP Server input module for receiving JSON data via HTTP POST requests.
 //!
 //! This module provides an HTTP server that accepts JSON objects and feeds them
-//! into the processing pipeline.
+//! into the processing pipeline, with optional authentication.
 //!
 //! # Configuration
 //!
@@ -10,10 +10,14 @@
 //!   http_server:
 //!     address: "0.0.0.0"                  # Optional: Bind address (default: "0.0.0.0")
 //!     port: 8080                          # Optional: Port number (default: 8080)
-//!     path: "/ingest"                     # Optional: Endpoint path (default: "/ingest")
+//!     path: "/ingest"                     # Optional: Endpoint path (default: "/ingest"), supports :param syntax
 //!     max_body_size: 10485760             # Optional: Max body size in bytes (default: 10MB)
 //!     acknowledgment: true                # Optional: Wait for processing before responding (default: true)
 //!     cors_enabled: false                 # Optional: Enable CORS (default: false)
+//!     auth:                               # Optional: Authentication for incoming requests
+//!       type: basic
+//!       username: admin
+//!       password: secret
 //! ```
 //!
 //! # Endpoints
@@ -69,23 +73,26 @@
 use crate::config::register_plugin;
 use crate::config::ItemType;
 use crate::config::{ConfigSpec, ExecutionType};
+use crate::modules::tls::ServerTlsConfig;
 use crate::Message;
 use crate::{new_callback_chan, CallbackChan, Status};
 use crate::{Closer, Error, Input};
 use async_trait::async_trait;
 use axum::{
     body::Bytes,
-    extract::State,
-    http::StatusCode,
+    extract::{Path, State},
+    http::{HeaderMap, StatusCode},
     response::{IntoResponse, Json},
     routing::{get, post},
     Router,
 };
+use base64::{prelude::BASE64_STANDARD, Engine};
 use fiddler_macros::fiddler_registration_func;
 use flume::{bounded, Receiver, Sender};
 use serde::Deserialize;
 use serde_json::{json, Value as JsonValue};
 use serde_yaml::Value;
+use std::collections::HashMap;
 use std::net::SocketAddr;
 use std::sync::Arc;
 use tokio::sync::oneshot;
@@ -96,6 +103,26 @@ const DEFAULT_ADDRESS: &str = "0.0.0.0";
 const DEFAULT_PORT: u16 = 8080;
 const DEFAULT_PATH: &str = "/ingest";
 const DEFAULT_MAX_BODY_SIZE: usize = 10 * 1024 * 1024; // 10MB
+
+/// Authentication configuration for incoming requests.
+#[derive(Deserialize, Clone)]
+#[serde(tag = "type")]
+pub enum AuthConfig {
+    /// HTTP Basic authentication.
+    #[serde(rename = "basic")]
+    Basic {
+        /// Username.
+        username: String,
+        /// Password.
+        password: String,
+    },
+    /// Bearer token authentication.
+    #[serde(rename = "bearer")]
+    Bearer {
+        /// Token.
+        token: String,
+    },
+}
 
 /// HTTP Server input configuration.
 #[derive(Deserialize, Clone)]
@@ -118,6 +145,10 @@ pub struct HttpServerConfig {
     /// Enable CORS headers (default: false).
     #[serde(default)]
     pub cors_enabled: bool,
+    /// TLS configuration for HTTPS support.
+    pub tls: Option<ServerTlsConfig>,
+    /// Authentication for incoming requests.
+    pub auth: Option<AuthConfig>,
 }
 
 fn default_address() -> String {
@@ -145,6 +176,7 @@ struct AppState {
     sender: Sender<Result<(Message, Option<CallbackChan>), Error>>,
     max_body_size: usize,
     acknowledgment: bool,
+    auth: Option<AuthConfig>,
 }
 
 /// Health check handler.
@@ -152,8 +184,105 @@ async fn health_handler() -> impl IntoResponse {
     Json(json!({"status": "healthy"}))
 }
 
-/// Ingest handler for receiving JSON data.
-async fn ingest_handler(State(state): State<Arc<AppState>>, body: Bytes) -> impl IntoResponse {
+/// Validate the `Authorization` header against the configured auth.
+fn validate_auth(
+    headers: &HeaderMap,
+    auth: &AuthConfig,
+) -> Result<(), (StatusCode, Json<JsonValue>)> {
+    let auth_header = headers
+        .get("authorization")
+        .and_then(|v| v.to_str().ok())
+        .ok_or_else(|| {
+            (
+                StatusCode::UNAUTHORIZED,
+                Json(json!({"error": "Unauthorized"})),
+            )
+        })?;
+
+    match auth {
+        AuthConfig::Basic { username, password } => {
+            let encoded = auth_header.strip_prefix("Basic ").ok_or_else(|| {
+                (
+                    StatusCode::UNAUTHORIZED,
+                    Json(json!({"error": "Unauthorized"})),
+                )
+            })?;
+
+            let decoded = BASE64_STANDARD.decode(encoded).map_err(|_| {
+                (
+                    StatusCode::UNAUTHORIZED,
+                    Json(json!({"error": "Unauthorized"})),
+                )
+            })?;
+
+            let decoded_str = String::from_utf8(decoded).map_err(|_| {
+                (
+                    StatusCode::UNAUTHORIZED,
+                    Json(json!({"error": "Unauthorized"})),
+                )
+            })?;
+
+            let expected = format!("{}:{}", username, password);
+            if decoded_str != expected {
+                return Err((
+                    StatusCode::UNAUTHORIZED,
+                    Json(json!({"error": "Unauthorized"})),
+                ));
+            }
+        }
+        AuthConfig::Bearer { token } => {
+            let provided = auth_header.strip_prefix("Bearer ").ok_or_else(|| {
+                (
+                    StatusCode::UNAUTHORIZED,
+                    Json(json!({"error": "Unauthorized"})),
+                )
+            })?;
+
+            if provided != token {
+                return Err((
+                    StatusCode::UNAUTHORIZED,
+                    Json(json!({"error": "Unauthorized"})),
+                ));
+            }
+        }
+    }
+
+    Ok(())
+}
+
+/// Ingest handler for requests without path parameters.
+async fn ingest_handler(
+    State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
+    body: Bytes,
+) -> impl IntoResponse {
+    process_ingest(state, HashMap::new(), headers, body).await
+}
+
+/// Ingest handler for requests with path parameters.
+async fn ingest_handler_with_path_params(
+    State(state): State<Arc<AppState>>,
+    Path(params): Path<HashMap<String, String>>,
+    headers: HeaderMap,
+    body: Bytes,
+) -> impl IntoResponse {
+    process_ingest(state, params, headers, body).await
+}
+
+/// Core ingest logic shared by both handler variants.
+async fn process_ingest(
+    state: Arc<AppState>,
+    path_params: HashMap<String, String>,
+    headers: HeaderMap,
+    body: Bytes,
+) -> (StatusCode, Json<JsonValue>) {
+    // Check authentication
+    if let Some(ref auth) = state.auth {
+        if let Err(response) = validate_auth(&headers, auth) {
+            return response;
+        }
+    }
+
     // Check body size
     if body.len() > state.max_body_size {
         return (
@@ -203,6 +332,12 @@ async fn ingest_handler(State(state): State<Arc<AppState>>, body: Bytes) -> impl
         );
     }
 
+    // Build metadata from path parameters
+    let base_metadata: HashMap<String, Value> = path_params
+        .into_iter()
+        .map(|(k, v)| (k, Value::String(v)))
+        .collect();
+
     let message_count = messages.len();
     let mut errors: Vec<String> = Vec::new();
 
@@ -224,6 +359,7 @@ async fn ingest_handler(State(state): State<Arc<AppState>>, body: Bytes) -> impl
 
         let message = Message {
             bytes,
+            metadata: base_metadata.clone(),
             ..Default::default()
         };
 
@@ -306,6 +442,94 @@ async fn ingest_handler(State(state): State<Arc<AppState>>, body: Bytes) -> impl
     }
 }
 
+/// Start an HTTPS server using TLS over manually-accepted TCP connections.
+#[cfg(feature = "tls")]
+async fn start_tls_server(
+    listener: tokio::net::TcpListener,
+    app: Router<()>,
+    tls_config: &ServerTlsConfig,
+    shutdown_rx: oneshot::Receiver<()>,
+    addr: &SocketAddr,
+    path: &str,
+) {
+    use tokio_rustls::TlsAcceptor;
+
+    let server_config = match crate::modules::tls::build_server_config(tls_config) {
+        Ok(c) => c,
+        Err(e) => {
+            error!(error = %e, "Failed to build TLS config for HTTP server");
+            return;
+        }
+    };
+    let tls_acceptor = TlsAcceptor::from(std::sync::Arc::new(server_config));
+
+    info!(address = %addr, path = %path, "Starting HTTPS server (TLS)");
+
+    let mut shutdown_rx = shutdown_rx;
+    loop {
+        tokio::select! {
+            result = listener.accept() => {
+                let (tcp_stream, peer_addr) = match result {
+                    Ok(r) => r,
+                    Err(e) => {
+                        warn!(error = %e, "HTTPS accept error");
+                        continue;
+                    }
+                };
+
+                let acceptor = tls_acceptor.clone();
+                let app = app.clone();
+
+                tokio::spawn(async move {
+                    let tls_stream = match acceptor.accept(tcp_stream).await {
+                        Ok(s) => s,
+                        Err(e) => {
+                            debug!(error = %e, source = %peer_addr, "TLS handshake failed");
+                            return;
+                        }
+                    };
+
+                    let io = hyper_util::rt::TokioIo::new(tls_stream);
+                    let hyper_service = hyper::service::service_fn(move |req: hyper::Request<hyper::body::Incoming>| {
+                        let mut svc = app.clone();
+                        let req = req.map(axum::body::Body::new);
+                        async move {
+                            use tower::Service;
+                            svc.call(req).await
+                        }
+                    });
+
+                    if let Err(e) = hyper_util::server::conn::auto::Builder::new(
+                        hyper_util::rt::TokioExecutor::new(),
+                    )
+                    .serve_connection(io, hyper_service)
+                    .await
+                    {
+                        debug!(error = %e, source = %peer_addr, "HTTPS connection ended");
+                    }
+                });
+            }
+            _ = &mut shutdown_rx => {
+                info!("HTTPS server shutting down");
+                break;
+            }
+        }
+    }
+}
+
+/// Stub for when the `tls` feature is not enabled.
+#[cfg(not(feature = "tls"))]
+async fn start_tls_server(
+    _listener: tokio::net::TcpListener,
+    _app: Router<()>,
+    _tls_config: &ServerTlsConfig,
+    _shutdown_rx: oneshot::Receiver<()>,
+    _addr: &SocketAddr,
+    _path: &str,
+) {
+    error!("TLS support requires the 'tls' feature to be enabled");
+}
+
 /// HTTP Server input.
 ///
 /// Starts an HTTP server that accepts JSON objects via POST requests
@@ -324,6 +548,7 @@ impl HttpServerInput {
             sender,
             max_body_size: config.max_body_size,
             acknowledgment: config.acknowledgment,
+            auth: config.auth.clone(),
         });
 
         let (shutdown_tx, shutdown_rx) = oneshot::channel();
@@ -332,10 +557,16 @@ impl HttpServerInput {
         let address = config.address.clone();
         let port = config.port;
         let cors_enabled = config.cors_enabled;
+        let tls_config = config.tls.clone();
 
-        // Build router
-        let mut app = Router::new()
-            .route(&path, post(ingest_handler))
+        // Build router — use the path-param-aware handler when the path contains `:` segments
+        let has_path_params = path.contains(':');
+        let router = if has_path_params {
+            Router::new().route(&path, post(ingest_handler_with_path_params))
+        } else {
+            Router::new().route(&path, post(ingest_handler))
+        };
+        let mut app = router
             .route("/health", get(health_handler))
             .with_state(state);
 
@@ -354,8 +585,6 @@ impl HttpServerInput {
                 .parse()
                 .expect("Invalid address format");
 
-            info!(address = %addr, path = %path, "Starting HTTP server");
-
             let listener = match tokio::net::TcpListener::bind(addr).await {
                 Ok(l) => l,
                 Err(e) => {
@@ -364,13 +593,18 @@ impl HttpServerInput {
                 }
             };
 
-            axum::serve(listener, app)
-                .with_graceful_shutdown(async {
-                    let _ = shutdown_rx.await;
-                    info!("HTTP server shutting down");
-                })
-                .await
-                .unwrap_or_else(|e| error!(error = %e, "HTTP server error"));
+            if let Some(ref tls) = tls_config {
+                start_tls_server(listener, app, tls, shutdown_rx, &addr, &path).await;
+            } else {
+                info!(address = %addr, path = %path, "Starting HTTP server");
+                axum::serve(listener, app)
+                    .with_graceful_shutdown(async {
+                        let _ = shutdown_rx.await;
+                        info!("HTTP server shutting down");
+                    })
+                    .await
+                    .unwrap_or_else(|e| error!(error = %e, "HTTP server error"));
+            }
         });
 
         debug!(
@@ -419,6 +653,19 @@ fn create_http_server(conf: Value) -> Result<ExecutionType, Error> {
         ));
     }
 
+    // Validate TLS client_auth if provided
+    if let Some(ref tls) = config.tls {
+        match tls.client_auth.as_str() {
+            "none" | "optional" | "required" => {}
+            other => {
+                return Err(Error::ConfigFailedValidation(format!(
+                    "invalid tls.client_auth '{}': must be 'none', 'optional', or 'required'",
+                    other
+                )));
+            }
+        }
+    }
+
     Ok(ExecutionType::Input(Box::new(HttpServerInput::new(
         config,
     )?)))
@@ -439,7 +686,7 @@ properties:
   path:
     type: string
     default: "/ingest"
-    description: "Endpoint path for ingestion"
+    description: "Endpoint path for ingestion. Supports path parameters using :name syntax (e.g. /ingest/:logtype) which are added to message metadata"
   max_body_size:
     type: integer
     default: 10485760
@@ -452,6 +699,46 @@ properties:
     type: boolean
     default: false
     description: "Enable CORS headers"
+  auth:
+    type: object
+    properties:
+      type:
+        type: string
+        enum: ["basic", "bearer"]
+        description: "Authentication type"
+      username:
+        type: string
+        description: "Username for basic auth"
+      password:
+        type: string
+        description: "Password for basic auth"
+      token:
+        type: string
+        description: "Token for bearer auth"
+    required:
+      - type
+    description: "Authentication for incoming requests"
+  tls:
+    type: object
+    properties:
+      cert:
+        type: string
+        description: "Server certificate — file path or inline PEM"
+      key:
+        type: string
+        description: "Server private key — file path or inline PEM"
+      ca:
+        type: string
+        description: "CA certificate for client verification — file path or inline PEM"
+      client_auth:
+        type: string
+        default: "none"
+        enum: ["none", "optional", "required"]
+        description: "Client authentication mode"
+    required:
+      - cert
+      - key
+    description: "TLS configuration for HTTPS support"
 "#;
     let conf_spec = ConfigSpec::from_schema(config)?;
 
@@ -505,6 +792,114 @@ cors_enabled: true
         assert_eq!(config.max_body_size, 10 * 1024 * 1024);
         assert!(config.acknowledgment);
         assert!(!config.cors_enabled);
+    }
+
+    #[test]
+    fn test_config_with_tls() {
+        let yaml = r#"
+port: 8443
+tls:
+  cert: /etc/ssl/server.crt
+  key: /etc/ssl/server.key
+"#;
+        let config: HttpServerConfig = serde_yaml::from_str(yaml).unwrap();
+        assert_eq!(config.port, 8443);
+        let tls = config.tls.as_ref().unwrap();
+        assert_eq!(tls.cert, "/etc/ssl/server.crt");
+        assert_eq!(tls.key, "/etc/ssl/server.key");
+        assert!(tls.ca.is_none());
+        assert_eq!(tls.client_auth, "none");
+    }
+
+    #[test]
+    fn test_config_with_tls_inline_pem() {
+        let yaml = r#"
+port: 8443
+tls:
+  cert: |
+    -----BEGIN CERTIFICATE-----
+    MIIBxTCCAW...
+    -----END CERTIFICATE-----
+  key: |
+    -----BEGIN PRIVATE KEY-----
+    MIIEvQ...
+    -----END PRIVATE KEY-----
+  client_auth: required
+  ca: /etc/ssl/ca.crt
+"#;
+        let config: HttpServerConfig = serde_yaml::from_str(yaml).unwrap();
+        let tls = config.tls.as_ref().unwrap();
+        assert!(tls.cert.contains("-----BEGIN CERTIFICATE-----"));
+        assert!(tls.key.contains("-----BEGIN PRIVATE KEY-----"));
+        assert_eq!(tls.client_auth, "required");
+        assert_eq!(tls.ca.as_deref(), Some("/etc/ssl/ca.crt"));
+    }
+
+    #[test]
+    fn test_config_deserialization_basic_auth() {
+        let yaml = r#"
+port: 8080
+auth:
+  type: basic
+  username: admin
+  password: secret123
+"#;
+        let config: HttpServerConfig = serde_yaml::from_str(yaml).expect("deserialize basic auth");
+        let auth = config.auth.expect("auth should be present");
+        match auth {
+            AuthConfig::Basic { username, password } => {
+                assert_eq!(username, "admin");
+                assert_eq!(password, "secret123");
+            }
+            _ => panic!("Expected Basic auth"),
+        }
+    }
+
+    #[test]
+    fn test_config_deserialization_bearer_auth() {
+        let yaml = r#"
+port: 8080
+auth:
+  type: bearer
+  token: my-api-token
+"#;
+        let config: HttpServerConfig = serde_yaml::from_str(yaml).expect("deserialize bearer auth");
+        let auth = config.auth.expect("auth should be present");
+        match auth {
+            AuthConfig::Bearer { token } => {
+                assert_eq!(token, "my-api-token");
+            }
+            _ => panic!("Expected Bearer auth"),
+        }
+    }
+
+    #[test]
+    fn test_config_no_auth() {
+        let yaml = r#"
+port: 8080
+"#;
+        let config: HttpServerConfig = serde_yaml::from_str(yaml).expect("deserialize no auth");
+        assert!(config.auth.is_none());
+    }
+
+    #[test]
+    fn test_config_with_path_params() {
+        let yaml = r#"
+port: 8080
+path: "/ingest/:logtype"
+"#;
+        let config: HttpServerConfig = serde_yaml::from_str(yaml).unwrap();
+        assert_eq!(config.path, "/ingest/:logtype");
+    }
+
+    #[test]
+    fn test_config_with_multiple_path_params() {
+        let yaml = r#"
+port: 8080
+path: "/ingest/:source/:logtype"
+"#;
+        let config: HttpServerConfig = serde_yaml::from_str(yaml).unwrap();
+        assert_eq!(config.path, "/ingest/:source/:logtype");
     }
 
     #[test]

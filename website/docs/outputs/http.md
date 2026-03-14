@@ -31,6 +31,17 @@ Send data to HTTP endpoints via POST or PUT requests. This output supports authe
           format: "json_array"
     ```
 
+=== "With TLS"
+    ```yml
+    output:
+      http:
+        url: "https://api.example.com/events"
+        tls:
+          ca: "/etc/ssl/ca.crt"
+          cert: "/etc/ssl/client.crt"
+          key: "/etc/ssl/client.key"
+    ```
+
 ## Fields
 
 ### `url`
@@ -112,6 +123,22 @@ Required: `false`
 |--------|-------------|
 | `ndjson` | Newline-delimited JSON (one JSON per line) |
 | `json_array` | JSON array of objects |
+
+### `tls`
+
+TLS configuration for custom CA certificates and client certificates (mTLS).
+
+Type: `object`
+Required: `false`
+
+Each string field (`ca`, `cert`, `key`) accepts either a **file path** or **inline PEM content**. If the value starts with `-----BEGIN`, it is treated as inline PEM.
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `ca` | string | — | CA certificate for server verification |
+| `cert` | string | — | Client certificate for mTLS |
+| `key` | string | — | Client private key for mTLS |
+| `skip_verify` | boolean | `false` | Skip server certificate verification |
 
 ## How It Works
 

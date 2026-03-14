@@ -8,7 +8,7 @@ description = "Data Stream processor CLI written in rust"
 readme = "../README.md"
 
 [package.metadata]
-msrv = "1.74.1"
+msrv = "1.91.1"
 
 [lib]
 name = "fiddler_cmd"

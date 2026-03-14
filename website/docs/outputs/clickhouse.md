@@ -97,6 +97,21 @@ Required: `false` (required if `create_table: true`)
 | `name` | string | Column name |
 | `type` | string | ClickHouse data type (e.g., `String`, `DateTime64(3)`, `UInt64`) |
 
+### `tls`
+TLS configuration for custom CA certificates and client certificates (mTLS).
+
+Type: `object`
+Required: `false`
+
+Each string field (`ca`, `cert`, `key`) accepts either a **file path** or **inline PEM content**. If the value starts with `-----BEGIN`, it is treated as inline PEM.
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `ca` | string | — | CA certificate for server verification |
+| `cert` | string | — | Client certificate for mTLS |
+| `key` | string | — | Client private key for mTLS |
+| `skip_verify` | boolean | `false` | Skip server certificate verification |
+
 ## Message Format
 
 Messages must be valid JSON objects. Each JSON object becomes one row in ClickHouse. JSON keys must match the column names in your table.

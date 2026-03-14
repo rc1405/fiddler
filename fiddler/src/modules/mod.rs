@@ -4,6 +4,7 @@ pub mod inputs;
 pub mod metrics;
 pub mod outputs;
 pub mod processors;
+pub mod tls;
 
 #[cfg(feature = "aws")]
 pub mod aws;

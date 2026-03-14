@@ -30,6 +30,68 @@ Receive JSON data via HTTP POST requests. This input starts an HTTP server that 
         cors_enabled: true
     ```
 
+=== "With Basic Auth"
+    ```yml
+    input:
+      http_server:
+        port: 8080
+        path: "/events"
+        auth:
+          type: basic
+          username: admin
+          password: secret123
+    ```
+
+=== "With Bearer Auth"
+    ```yml
+    input:
+      http_server:
+        port: 8080
+        path: "/events"
+        auth:
+          type: bearer
+          token: "my-api-token"
+    ```
+
+=== "With Path Parameters"
+    ```yml
+    input:
+      http_server:
+        port: 8080
+        path: "/ingest/:logtype"
+    ```
+
+=== "Multiple Path Parameters"
+    ```yml
+    input:
+      http_server:
+        port: 8080
+        path: "/ingest/:source/:logtype"
+    ```
+
+=== "With TLS"
+    ```yml
+    input:
+      http_server:
+        port: 8443
+        path: "/events"
+        tls:
+          cert: "/etc/fiddler/server.crt"
+          key: "/etc/fiddler/server.key"
+    ```
+
+=== "TLS with mTLS"
+    ```yml
+    input:
+      http_server:
+        port: 8443
+        tls:
+          cert: "/etc/fiddler/server.crt"
+          key: "/etc/fiddler/server.key"
+          ca: "/etc/fiddler/ca.crt"
+          client_auth: "required"
+    ```
+
 ## Fields
 
 ### `address`
@@ -50,7 +112,7 @@ Default: `8080`
 
 ### `path`
 
-URL path for the ingestion endpoint.
+URL path for the ingestion endpoint. Supports path parameters using `:name` syntax (e.g. `/ingest/:logtype`). Path parameter values are added to each message's metadata.
 
 Type: `string`
 Required: `false`
@@ -88,6 +150,103 @@ Default: `false`
 
 When enabled, allows requests from any origin with any method and headers.
 
+### `auth`
+
+Authentication for incoming requests. When configured, all requests to the ingestion endpoint must include valid credentials. The health endpoint (`/health`) remains unauthenticated.
+
+Type: `object`
+Required: `false`
+
+#### `auth.type`
+
+Authentication type.
+
+Type: `string`
+Required: `true` (when `auth` is present)
+
+| Value | Description |
+|-------|-------------|
+| `basic` | HTTP Basic authentication |
+| `bearer` | Bearer token authentication |
+
+#### `auth.username`
+
+Username for basic authentication.
+
+Type: `string`
+Required: Required when `auth.type` is `"basic"`
+
+#### `auth.password`
+
+Password for basic authentication.
+
+Type: `string`
+Required: Required when `auth.type` is `"basic"`
+
+#### `auth.token`
+
+Token for bearer authentication.
+
+Type: `string`
+Required: Required when `auth.type` is `"bearer"`
+
+Unauthenticated requests receive a `401 Unauthorized` response:
+```json
+{"error": "Unauthorized"}
+```
+
+### `tls`
+
+TLS configuration for HTTPS. When present, the server accepts HTTPS connections instead of plain HTTP.
+
+!!! note "Feature Flag Required"
+    TLS support requires both the `http_server` and `tls` features to be enabled when building fiddler.
+    ```bash
+    cargo build --features http_server,tls
+    ```
+
+Type: `object`
+Required: `false`
+
+Each string field (`cert`, `key`, `ca`) accepts either a **file path** or **inline PEM content**. If the value starts with `-----BEGIN`, it is treated as inline PEM.
+
+#### `tls.cert`
+
+Server certificate — file path or inline PEM.
+
+Type: `string`
+Required: `true` (when `tls` is present)
+
+#### `tls.key`
+
+Server private key — file path or inline PEM.
+
+Type: `string`
+Required: `true` (when `tls` is present)
+
+#### `tls.ca`
+
+CA certificate for verifying client certificates — file path or inline PEM.
+
+Type: `string`
+Required: Required when `tls.client_auth` is not `"none"`
+
+#### `tls.client_auth`
+
+Client certificate authentication mode.
+
+Type: `string`
+Required: `false`
+Default: `"none"`
+
+| Value | Description |
+|-------|-------------|
+| `none` | No client certificate required |
+| `optional` | Client certificate is requested but not required |
+| `required` | Client must present a valid certificate signed by the CA |
+
+When set to `"optional"` or `"required"`, `tls.ca` must also be provided.
+
 ## Endpoints
 
 ### POST `{path}`
@@ -100,6 +259,7 @@ The main ingestion endpoint accepts JSON data.
 
 **Response:**
 - `200 OK`: Message(s) accepted/processed
+- `401 Unauthorized`: Missing or invalid credentials (when `auth` is configured)
 - `400 Bad Request`: Invalid JSON
 - `413 Payload Too Large`: Body exceeds max size
 - `500 Internal Server Error`: Processing failed
@@ -236,6 +396,60 @@ output:
   stdout: {}
 ```
 
+### HTTPS Server
+
+```yml
+input:
+  http_server:
+    port: 8443
+    path: "/events"
+    tls:
+      cert: "/etc/fiddler/server.crt"
+      key: "/etc/fiddler/server.key"
+
+output:
+  stdout: {}
+```
+
+Send data:
+```bash
+curl -X POST https://localhost:8443/events \
+  -H "Content-Type: application/json" \
+  --cacert /etc/fiddler/ca.crt \
+  -d '{"event": "click"}'
+```
+
+### Path Parameter Routing
+
+Use path parameters to classify incoming data by URL segment. Each parameter is added to the message metadata.
+
+```yml
+input:
+  http_server:
+    port: 8080
+    path: "/ingest/:source/:logtype"
+
+processors:
+  - fiddlerscript:
+      code: |
+        let data = parse_json(this);
+        let meta = metadata();
+        data = set(data, "source", meta.source);
+        data = set(data, "logtype", meta.logtype);
+        this = bytes(str(data));
+
+output:
+  stdout: {}
+```
+
+Send data:
+```bash
+# metadata: { "source": "firewall", "logtype": "network" }
+curl -X POST http://localhost:8080/ingest/firewall/network \
+  -H "Content-Type: application/json" \
+  -d '{"event": "connection", "ip": "10.0.0.1"}'
+```
+
 ### Webhook Receiver
 
 ```yml
@@ -316,6 +530,7 @@ Client ──POST──► Server ──► Pipeline ──► Output
 
 | Error | HTTP Status | Cause |
 |-------|-------------|-------|
+| Unauthorized | 401 | Missing or invalid credentials (when `auth` is configured) |
 | Invalid JSON | 400 | Malformed JSON in request body |
 | Payload Too Large | 413 | Body exceeds `max_body_size` |
 | Processing Failed | 500 | Pipeline returned error (with `acknowledgment: true`) |
@@ -325,6 +540,7 @@ Client ──POST──► Server ──► Pipeline ──► Output
 - **Max body size**: Set appropriately for your use case
 - **Acknowledgment**: Disable for lower latency if errors can be tolerated
 - **Connection handling**: Uses Axum with efficient async I/O
+- **TLS**: Adds per-connection handshake overhead; use when security is required
 
 ## See Also
 
