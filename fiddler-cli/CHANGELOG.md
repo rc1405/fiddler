@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [4.5.0](https://github.com/rc1405/fiddler/compare/fiddler-cli-v4.4.1...fiddler-cli-v4.5.0) - 2026-03-14
+
+### Added
+
+- added syslog, tls, and other improvements ([#88](https://github.com/rc1405/fiddler/pull/88))
+
+### Other
+
+- release v4.4.1 ([#86](https://github.com/rc1405/fiddler/pull/86))
+
 ## [4.4.1](https://github.com/rc1405/fiddler/compare/fiddler-cli-v4.4.0...fiddler-cli-v4.4.1) - 2026-02-08
 
 ### Other
