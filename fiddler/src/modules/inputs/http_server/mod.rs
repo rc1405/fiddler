@@ -384,11 +384,7 @@ async fn process_ingest(
         // the callback when all messages in the stream complete.
         let (callback_tx, callback_rx) = new_callback_chan();
 
-        if let Err(e) = state
-            .sender
-            .send_async((batch, Some(callback_tx)))
-            .await
-        {
+        if let Err(e) = state.sender.send_async((batch, Some(callback_tx))).await {
             return (
                 StatusCode::INTERNAL_SERVER_ERROR,
                 Json(json!({

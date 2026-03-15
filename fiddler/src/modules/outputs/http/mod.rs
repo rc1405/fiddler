@@ -346,8 +346,7 @@ impl OutputBatch for HttpBatchOutput {
         );
 
         // Set Content-Type if not already provided in custom headers
-        if !self.headers.contains_key("Content-Type")
-            && !self.headers.contains_key("content-type")
+        if !self.headers.contains_key("Content-Type") && !self.headers.contains_key("content-type")
         {
             req = req.header("Content-Type", content_type);
         }
