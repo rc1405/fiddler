@@ -27,6 +27,9 @@ const STALE_CLEANUP_INTERVAL_SECS: u64 = 300;
 /// Higher values allow more buffering and parallelism but use more memory.
 const CHANNEL_CAPACITY: usize = 10_000;
 
+/// Grace period for tasks to shut down after Ctrl+C before they are forcibly aborted.
+const GRACEFUL_SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(10);
+
 /// Tracks message processing statistics for observability.
 ///
 /// This struct maintains counters for various message processing events
@@ -612,7 +615,40 @@ impl Runtime {
                             debug!(error = ?e, "Failed to send kill signal from signal handler");
                         }
                     }
-                    // Continue the loop to let tasks shut down gracefully
+                    // Drop the kill switch sender — it's no longer needed and avoids
+                    // keeping the input alive if it checks is_disconnected.
+                    drop(ks_send);
+
+                    // Give tasks a grace period to shut down cleanly
+                    let graceful = async {
+                        while let Some(res) = handles.join_next().await {
+                            match res {
+                                Ok(Ok(())) => {}
+                                Ok(Err(e)) => {
+                                    warn!(error = %e, "Task error during shutdown");
+                                }
+                                Err(e) => {
+                                    warn!(error = %e, "Task panic during shutdown");
+                                }
+                            }
+                        }
+                    };
+
+                    match tokio::time::timeout(GRACEFUL_SHUTDOWN_TIMEOUT, graceful).await {
+                        Ok(()) => {
+                            info!("All tasks completed graceful shutdown");
+                        }
+                        Err(_) => {
+                            warn!(
+                                timeout_secs = GRACEFUL_SHUTDOWN_TIMEOUT.as_secs(),
+                                "Graceful shutdown timed out, aborting remaining tasks"
+                            );
+                            handles.abort_all();
+                            // Drain the abort results
+                            while handles.join_next().await.is_some() {}
+                        }
+                    }
+                    break;
                 }
             }
         }
@@ -764,7 +800,7 @@ fn process_state(
                             remove_entry = true;
                             message_latency = Some(state.created_at.elapsed());
                             if let Some(chan) = state.closure.take() {
-                                info!(message_id = msg.message_id, "calling closure");
+                                trace!(message_id = msg.message_id, "calling closure");
                                 let err = std::mem::take(&mut state.errors);
                                 let _ = chan.send(Status::Errored(err));
                             }
@@ -788,7 +824,7 @@ fn process_state(
                             message_completed_successfully = true;
                             message_latency = Some(state.created_at.elapsed());
                             if let Some(chan) = state.closure.take() {
-                                info!(message_id = msg.message_id, "calling closure");
+                                trace!(message_id = msg.message_id, "calling closure");
                                 let _ = chan.send(Status::Processed);
                             }
                         } else if stream_closed
@@ -800,7 +836,7 @@ fn process_state(
                             remove_entry = true;
                             message_latency = Some(state.created_at.elapsed());
                             if let Some(chan) = state.closure.take() {
-                                info!(message_id = msg.message_id, "calling closure");
+                                trace!(message_id = msg.message_id, "calling closure");
                                 let err = std::mem::take(&mut state.errors);
                                 let _ = chan.send(Status::Errored(err));
                             }
@@ -822,7 +858,7 @@ fn process_state(
                             if remove_entry {
                                 message_latency = Some(state.created_at.elapsed());
                                 if let Some(chan) = state.closure.take() {
-                                    info!(message_id = msg.message_id, "calling closure");
+                                    trace!(message_id = msg.message_id, "calling closure");
                                     let err = std::mem::take(&mut state.errors);
                                     let _ = chan.send(Status::Errored(err));
                                 }
@@ -856,7 +892,7 @@ fn process_state(
                                 message_completed_successfully = true;
                                 message_latency = Some(state.created_at.elapsed());
                                 if let Some(chan) = state.closure.take() {
-                                    info!(
+                                    trace!(
                                         message_id = msg.message_id,
                                         "message filtered - calling closure"
                                     );
@@ -882,7 +918,7 @@ fn process_state(
                             message_completed_successfully = true;
                             message_latency = Some(state.created_at.elapsed());
                             if let Some(chan) = state.closure.take() {
-                                info!(message_id = msg.message_id, "calling closure");
+                                trace!(message_id = msg.message_id, "calling closure");
                                 let _ = chan.send(Status::Processed);
                             }
                         } else if (state.output_count
@@ -893,7 +929,7 @@ fn process_state(
                             remove_entry = true;
                             message_latency = Some(state.created_at.elapsed());
                             if let Some(chan) = state.closure.take() {
-                                info!(message_id = msg.message_id, "calling closure");
+                                trace!(message_id = msg.message_id, "calling closure");
                                 let err = std::mem::take(&mut state.errors);
                                 let _ = chan.send(Status::Errored(err));
                             }
