@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [4.5.2](https://github.com/rc1405/fiddler/compare/fiddler-v4.5.1...fiddler-v4.5.2) - 2026-03-15
+
+### Fixed
+
+- throughput handling of http_server and client ([#92](https://github.com/rc1405/fiddler/pull/92))
+
 ## [4.5.1](https://github.com/rc1405/fiddler/compare/fiddler-v4.5.0...fiddler-v4.5.1) - 2026-03-14
 
 ### Fixed
