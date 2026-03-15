@@ -36,7 +36,7 @@ use serde_yaml::Value;
 use std::collections::HashMap;
 use std::str::FromStr;
 use std::time::Duration;
-use tracing::debug;
+use tracing::{debug, error};
 
 const DEFAULT_METHOD: &str = "POST";
 const DEFAULT_TIMEOUT_SECS: u64 = 30;
@@ -164,6 +164,7 @@ async fn send_request(req: reqwest::RequestBuilder) -> Result<(), Error> {
     if !response.status().is_success() {
         let status = response.status();
         let body = response.text().await.unwrap_or_default();
+        error!("HTTP request failed with status {}: {}", status, body);
         return Err(Error::OutputError(format!(
             "HTTP request failed with status {}: {}",
             status, body
@@ -287,10 +288,16 @@ impl HttpBatchOutput {
 
     /// Format messages as JSON array.
     fn format_json_array(&self, messages: &MessageBatch) -> Result<Vec<u8>, Error> {
-        let json_values: Vec<serde_json::Value> = messages
-            .iter()
-            .filter_map(|msg| serde_json::from_slice(&msg.bytes).ok())
-            .collect();
+        let mut json_values: Vec<serde_json::Value> = Vec::with_capacity(messages.len());
+        for (i, msg) in messages.iter().enumerate() {
+            let value: serde_json::Value = serde_json::from_slice(&msg.bytes).map_err(|e| {
+                Error::OutputError(format!(
+                    "Failed to parse message {} as JSON for batch: {}",
+                    i, e
+                ))
+            })?;
+            json_values.push(value);
+        }
 
         serde_json::to_vec(&json_values)
             .map_err(|e| Error::OutputError(format!("JSON serialization failed: {}", e)))
@@ -298,7 +305,8 @@ impl HttpBatchOutput {
 
     /// Format messages as newline-delimited JSON.
     fn format_ndjson(&self, messages: &MessageBatch) -> Vec<u8> {
-        let mut result = Vec::new();
+        let total_bytes: usize = messages.iter().map(|m| m.bytes.len()).sum();
+        let mut result = Vec::with_capacity(total_bytes + messages.len());
         for (i, msg) in messages.iter().enumerate() {
             if i > 0 {
                 result.push(b'\n');
@@ -322,7 +330,13 @@ impl OutputBatch for HttpBatchOutput {
             self.format_ndjson(&messages)
         };
 
-        let req = build_request(
+        let content_type = if self.use_json_array {
+            "application/json"
+        } else {
+            "application/x-ndjson"
+        };
+
+        let mut req = build_request(
             &self.client,
             &self.method,
             &self.url,
@@ -330,6 +344,13 @@ impl OutputBatch for HttpBatchOutput {
             &self.auth,
             body,
         );
+
+        // Set Content-Type if not already provided in custom headers
+        if !self.headers.contains_key("Content-Type")
+            && !self.headers.contains_key("content-type")
+        {
+            req = req.header("Content-Type", content_type);
+        }
 
         send_request(req).await?;
 
@@ -354,16 +375,12 @@ impl Closer for HttpBatchOutput {
     }
 }
 
-#[fiddler_registration_func]
-fn create_http_output(conf: Value) -> Result<ExecutionType, Error> {
-    let config: HttpOutputConfig = serde_yaml::from_value(conf)?;
-
-    // Validate URL
+/// Validate shared HTTP output configuration.
+fn validate_http_config(config: &HttpOutputConfig) -> Result<(), Error> {
     if config.url.is_empty() {
         return Err(Error::ConfigFailedValidation("url is required".into()));
     }
 
-    // Validate method
     let method_upper = config.method.to_uppercase();
     if !["POST", "PUT"].contains(&method_upper.as_str()) {
         return Err(Error::ConfigFailedValidation(
@@ -371,7 +388,6 @@ fn create_http_output(conf: Value) -> Result<ExecutionType, Error> {
         ));
     }
 
-    // Validate batch format if present
     if let Some(ref batch) = config.batch {
         if !["json_array", "ndjson"].contains(&batch.format.as_str()) {
             return Err(Error::ConfigFailedValidation(
@@ -379,6 +395,14 @@ fn create_http_output(conf: Value) -> Result<ExecutionType, Error> {
             ));
         }
     }
+
+    Ok(())
+}
+
+#[fiddler_registration_func]
+fn create_http_output(conf: Value) -> Result<ExecutionType, Error> {
+    let config: HttpOutputConfig = serde_yaml::from_value(conf)?;
+    validate_http_config(&config)?;
 
     // Choose Output vs OutputBatch based on batch config
     if config.batch.is_some() {
@@ -388,6 +412,25 @@ fn create_http_output(conf: Value) -> Result<ExecutionType, Error> {
     } else {
         Ok(ExecutionType::Output(Box::new(HttpOutput::new(config)?)))
     }
+}
+
+#[fiddler_registration_func]
+fn create_http_batch_output(conf: Value) -> Result<ExecutionType, Error> {
+    let mut config: HttpOutputConfig = serde_yaml::from_value(conf)?;
+    validate_http_config(&config)?;
+
+    // http_batch always runs in batch mode; apply defaults when batch block is absent
+    if config.batch.is_none() {
+        config.batch = Some(BatchConfig {
+            size: None,
+            duration: None,
+            format: default_batch_format(),
+        });
+    }
+
+    Ok(ExecutionType::OutputBatch(Box::new(HttpBatchOutput::new(
+        config,
+    )?)))
 }
 
 /// Registers the HTTP output plugin.
@@ -476,10 +519,10 @@ properties:
         create_http_output,
     )?;
     register_plugin(
-        "http".into(),
+        "http_batch".into(),
         ItemType::OutputBatch,
         conf_spec,
-        create_http_output,
+        create_http_batch_output,
     )
 }
 

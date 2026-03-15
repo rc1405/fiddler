@@ -76,7 +76,7 @@ use crate::config::{ConfigSpec, ExecutionType};
 use crate::modules::tls::ServerTlsConfig;
 use crate::Message;
 use crate::{new_callback_chan, CallbackChan, Status};
-use crate::{Closer, Error, Input};
+use crate::{Closer, Error, InputBatch, MessageBatch};
 use async_trait::async_trait;
 use axum::{
     body::Bytes,
@@ -173,7 +173,7 @@ fn default_acknowledgment() -> bool {
 
 /// Shared state for the HTTP server handlers.
 struct AppState {
-    sender: Sender<Result<(Message, Option<CallbackChan>), Error>>,
+    sender: Sender<(Vec<Message>, Option<CallbackChan>)>,
     max_body_size: usize,
     acknowledgment: bool,
     auth: Option<AuthConfig>,
@@ -341,6 +341,9 @@ async fn process_ingest(
     let message_count = messages.len();
     let mut errors: Vec<String> = Vec::new();
 
+    // Build all messages from the JSON array
+    let mut batch: Vec<Message> = Vec::with_capacity(message_count);
+
     for (idx, msg_json) in messages.into_iter().enumerate() {
         if !msg_json.is_object() {
             warn!(index = idx, "Skipping non-object JSON element");
@@ -348,7 +351,6 @@ async fn process_ingest(
             continue;
         }
 
-        // Serialize back to bytes
         let bytes = match serde_json::to_vec(&msg_json) {
             Ok(b) => b,
             Err(e) => {
@@ -357,60 +359,63 @@ async fn process_ingest(
             }
         };
 
-        let message = Message {
+        batch.push(Message {
             bytes,
             metadata: base_metadata.clone(),
             ..Default::default()
-        };
+        });
+    }
 
-        if state.acknowledgment {
-            // Create callback channel for acknowledgment
-            let (callback_tx, callback_rx) = new_callback_chan();
-            let (response_tx, response_rx) = oneshot::channel();
+    if batch.is_empty() && !errors.is_empty() {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(json!({
+                "error": "All elements failed validation",
+                "errors": errors
+            })),
+        );
+    }
 
-            // Spawn task to wait for callback and send response
-            let response_tx_clone = response_tx;
-            tokio::spawn(async move {
-                match callback_rx.await {
-                    Ok(Status::Processed) => {
-                        let _ = response_tx_clone.send(Ok(()));
-                    }
-                    Ok(Status::Errored(errs)) => {
-                        let _ = response_tx_clone.send(Err(errs.join(", ")));
-                    }
-                    Err(_) => {
-                        let _ = response_tx_clone.send(Err("Callback channel closed".to_string()));
-                    }
-                }
-            });
+    let accepted = batch.len();
 
-            // Send message to pipeline
-            if let Err(e) = state
-                .sender
-                .send_async(Ok((message, Some(callback_tx))))
-                .await
-            {
-                errors.push(format!("Failed to send message {}: {}", idx, e));
-                continue;
+    if state.acknowledgment {
+        // Create a single callback for the entire batch — the runtime's
+        // run_input_batch() wraps it in BeginStream/EndStream and fires
+        // the callback when all messages in the stream complete.
+        let (callback_tx, callback_rx) = new_callback_chan();
+
+        if let Err(e) = state
+            .sender
+            .send_async((batch, Some(callback_tx)))
+            .await
+        {
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({
+                    "error": format!("Failed to send batch: {}", e)
+                })),
+            );
+        }
+
+        // Await the single stream-level callback
+        match callback_rx.await {
+            Ok(Status::Processed) => {}
+            Ok(Status::Errored(errs)) => {
+                errors.extend(errs);
             }
-
-            // Wait for acknowledgment
-            match response_rx.await {
-                Ok(Ok(())) => {
-                    // Success
-                }
-                Ok(Err(e)) => {
-                    errors.push(format!("Processing failed for message {}: {}", idx, e));
-                }
-                Err(_) => {
-                    errors.push(format!("Response channel closed for message {}", idx));
-                }
+            Err(_) => {
+                errors.push("Callback channel closed".to_string());
             }
-        } else {
-            // Fire and forget mode
-            if let Err(e) = state.sender.send_async(Ok((message, None))).await {
-                errors.push(format!("Failed to send message {}: {}", idx, e));
-            }
+        }
+    } else {
+        // Fire and forget — no callback
+        if let Err(e) = state.sender.send_async((batch, None)).await {
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({
+                    "error": format!("Failed to send batch: {}", e)
+                })),
+            );
         }
     }
 
@@ -418,11 +423,11 @@ async fn process_ingest(
         (
             StatusCode::OK,
             Json(json!({
-                "accepted": message_count,
-                "processed": message_count
+                "accepted": accepted,
+                "processed": accepted
             })),
         )
-    } else if errors.len() == message_count {
+    } else if accepted == 0 {
         (
             StatusCode::INTERNAL_SERVER_ERROR,
             Json(json!({
@@ -434,8 +439,8 @@ async fn process_ingest(
         (
             StatusCode::OK,
             Json(json!({
-                "accepted": message_count,
-                "processed": message_count - errors.len(),
+                "accepted": accepted,
+                "processed": accepted - errors.len(),
                 "errors": errors
             })),
         )
@@ -535,7 +540,7 @@ async fn start_tls_server(
 /// Starts an HTTP server that accepts JSON objects via POST requests
 /// and feeds them into the processing pipeline.
 pub struct HttpServerInput {
-    receiver: Receiver<Result<(Message, Option<CallbackChan>), Error>>,
+    receiver: Receiver<(Vec<Message>, Option<CallbackChan>)>,
     shutdown_tx: Option<oneshot::Sender<()>>,
 }
 
@@ -622,10 +627,10 @@ impl HttpServerInput {
 }
 
 #[async_trait]
-impl Input for HttpServerInput {
-    async fn read(&mut self) -> Result<(Message, Option<CallbackChan>), Error> {
+impl InputBatch for HttpServerInput {
+    async fn read_batch(&mut self) -> Result<(MessageBatch, Option<CallbackChan>), Error> {
         match self.receiver.recv_async().await {
-            Ok(result) => result,
+            Ok((batch, callback)) => Ok((batch, callback)),
             Err(_) => Err(Error::EndOfInput),
         }
     }
@@ -666,7 +671,7 @@ fn create_http_server(conf: Value) -> Result<ExecutionType, Error> {
         }
     }
 
-    Ok(ExecutionType::Input(Box::new(HttpServerInput::new(
+    Ok(ExecutionType::InputBatch(Box::new(HttpServerInput::new(
         config,
     )?)))
 }
@@ -744,7 +749,7 @@ properties:
 
     register_plugin(
         "http_server".into(),
-        ItemType::Input,
+        ItemType::InputBatch,
         conf_spec,
         create_http_server,
     )
