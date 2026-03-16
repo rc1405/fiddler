@@ -18,6 +18,10 @@ Send events to elasticsearch
             password: changeme
             cloud_id: someId
             index: my_index
+            batch_policy:
+              size: 1000
+              duration: 10s
+              max_batch_bytes: 10485760
     ```
 
 === "With TLS"
@@ -69,3 +73,14 @@ Each string field (`ca`, `cert`, `key`) accepts either a **file path** or **inli
 | `cert` | string | — | Client certificate for mTLS |
 | `key` | string | — | Client private key for mTLS |
 | `skip_verify` | boolean | `false` | Skip server certificate verification |
+
+### `batch_policy`
+Batching policy for bulk inserts.
+Type: `object`
+Required: `false`
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `size` | integer | Maximum documents per batch (default: 500) |
+| `duration` | string | Maximum time before flush (default: "10s") |
+| `max_batch_bytes` | integer | Maximum cumulative byte size per batch (default: 10MB) |

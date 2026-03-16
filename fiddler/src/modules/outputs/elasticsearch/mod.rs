@@ -40,6 +40,7 @@ pub struct Elastic {
     sender: Sender<Request>,
     size: usize,
     duration: Duration,
+    max_batch_bytes: usize,
 }
 
 struct Request {
@@ -249,6 +250,10 @@ impl OutputBatch for Elastic {
     async fn interval(&self) -> Duration {
         self.duration
     }
+
+    async fn max_batch_bytes(&self) -> usize {
+        self.max_batch_bytes
+    }
 }
 
 #[async_trait]
@@ -290,10 +295,15 @@ fn create_elasticsearch(conf: Value) -> Result<ExecutionType, Error> {
         Some(i) => i.duration.unwrap_or(Duration::from_secs(10)),
         None => Duration::from_secs(10),
     };
+    let max_batch_bytes = match &elastic.batch_policy {
+        Some(i) => i.max_batch_bytes.unwrap_or(10_485_760),
+        None => 10_485_760,
+    };
     Ok(ExecutionType::OutputBatch(Box::new(Elastic {
         sender,
         size,
         duration,
+        max_batch_bytes,
     })))
 }
 
@@ -328,6 +338,16 @@ properties:
         default: false
         description: Skip server certificate verification
     description: TLS configuration for custom certificates
+  batch_policy:
+    type: object
+    properties:
+      size:
+        type: integer
+      duration:
+        type: string
+      max_batch_bytes:
+        type: integer
+        default: 10485760
 required:
   - index
   - url";

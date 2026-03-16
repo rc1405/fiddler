@@ -130,6 +130,7 @@ pub struct AmqpOutput {
     client: Arc<Mutex<AmqpClient>>,
     batch_size: usize,
     interval: Duration,
+    max_batch_bytes: usize,
 }
 
 impl AmqpOutput {
@@ -139,6 +140,10 @@ impl AmqpOutput {
             .batch
             .as_ref()
             .map_or(Duration::from_secs(10), |b| b.effective_duration());
+        let max_batch_bytes = config
+            .batch
+            .as_ref()
+            .map_or(10_485_760, |b| b.effective_max_batch_bytes());
 
         let client = AmqpClient::new(&config);
 
@@ -148,6 +153,7 @@ impl AmqpOutput {
             client: Arc::new(Mutex::new(client)),
             batch_size,
             interval,
+            max_batch_bytes,
         })
     }
 }
@@ -169,6 +175,10 @@ impl OutputBatch for AmqpOutput {
 
     async fn interval(&self) -> Duration {
         self.interval
+    }
+
+    async fn max_batch_bytes(&self) -> usize {
+        self.max_batch_bytes
     }
 }
 
@@ -230,6 +240,10 @@ properties:
         type: integer
       duration:
         type: string
+      max_batch_bytes:
+        type: integer
+        default: 10485760
+        description: "Maximum cumulative byte size per batch (default: 10MB)"
     description: "Batching configuration"
 "#;
     let conf_spec = ConfigSpec::from_schema(config)?;

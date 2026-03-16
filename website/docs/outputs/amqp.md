@@ -97,6 +97,7 @@ Required: `false`
 |-------|------|-------------|
 | `size` | integer | Maximum messages per batch (default: 500) |
 | `duration` | string | Maximum time to wait before flushing (default: "10s") |
+| `max_batch_bytes` | integer | Maximum cumulative byte size per batch (default: 10MB) |
 
 ## How It Works
 

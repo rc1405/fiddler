@@ -80,6 +80,11 @@ Maximum time to wait before flushing a batch.
 Type: `duration`
 Default: `10s`
 
+#### `batch.max_batch_bytes`
+Maximum cumulative byte size per batch. When adding a message would exceed this limit, the current batch is flushed first.
+Type: `integer`
+Default: `10485760` (10MB)
+
 ### `create_table`
 Automatically create the table if it doesn't exist. Requires `columns` to be defined.
 Type: `boolean`

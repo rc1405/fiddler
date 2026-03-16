@@ -87,6 +87,7 @@ pub struct RedisListOutput {
     use_lpush: bool,
     batch_size: usize,
     interval: Duration,
+    max_batch_bytes: usize,
 }
 
 impl RedisListOutput {
@@ -110,6 +111,10 @@ impl RedisListOutput {
             .batch
             .as_ref()
             .map_or(Duration::from_secs(10), |b| b.effective_duration());
+        let max_batch_bytes = config
+            .batch
+            .as_ref()
+            .map_or(10_485_760, |b| b.effective_max_batch_bytes());
 
         debug!(key = %key, use_lpush = use_lpush, "Redis list output initialized");
 
@@ -119,6 +124,7 @@ impl RedisListOutput {
             use_lpush,
             batch_size,
             interval,
+            max_batch_bytes,
         })
     }
 }
@@ -159,6 +165,10 @@ impl OutputBatch for RedisListOutput {
 
     async fn interval(&self) -> Duration {
         self.interval
+    }
+
+    async fn max_batch_bytes(&self) -> usize {
+        self.max_batch_bytes
     }
 }
 
@@ -301,6 +311,10 @@ properties:
       duration:
         type: string
         description: "Flush interval (default: 10s)"
+      max_batch_bytes:
+        type: integer
+        default: 10485760
+        description: "Maximum cumulative byte size per batch (default: 10MB)"
     description: "Batching policy (list mode only)"
 "#;
     let conf_spec = ConfigSpec::from_schema(config)?;

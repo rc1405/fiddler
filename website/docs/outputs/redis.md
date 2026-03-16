@@ -94,6 +94,7 @@ Required: `false`
 |-------|------|-------------|
 | `size` | integer | Maximum messages per batch (default: 500) |
 | `duration` | string | Maximum time before flush (default: "10s") |
+| `max_batch_bytes` | integer | Maximum cumulative byte size per batch (default: 10MB) |
 
 **Note**: Batching is not supported in pubsub mode and will be ignored.
 

@@ -25,9 +25,8 @@
 use crate::config::register_plugin;
 use crate::config::ItemType;
 use crate::config::{ConfigSpec, ExecutionType};
-use crate::deserialize_optional_duration;
 use crate::modules::tls::ClientTlsConfig;
-use crate::{Closer, Error, Message, MessageBatch, Output, OutputBatch};
+use crate::{BatchingPolicy, Closer, Error, Message, MessageBatch, Output, OutputBatch};
 use async_trait::async_trait;
 use fiddler_macros::fiddler_registration_func;
 use reqwest::{Client, Method};
@@ -40,7 +39,7 @@ use tracing::{debug, error};
 
 const DEFAULT_METHOD: &str = "POST";
 const DEFAULT_TIMEOUT_SECS: u64 = 30;
-const DEFAULT_BATCH_FORMAT: &str = "ndjson";
+const DEFAULT_BATCH_FORMAT: &str = "json_array";
 
 /// HTTP output configuration.
 #[derive(Deserialize, Clone)]
@@ -68,11 +67,9 @@ pub struct HttpOutputConfig {
 /// Batch configuration with format option.
 #[derive(Deserialize, Clone)]
 pub struct BatchConfig {
-    /// Batch size.
-    pub size: Option<usize>,
-    /// Flush interval.
-    #[serde(default, deserialize_with = "deserialize_optional_duration")]
-    pub duration: Option<Duration>,
+    /// Common batching policy (size, duration, max_batch_bytes).
+    #[serde(flatten)]
+    pub policy: BatchingPolicy,
     /// Batch format: "json_array" or "ndjson" (default: ndjson).
     #[serde(default = "default_batch_format")]
     pub format: String,
@@ -240,6 +237,7 @@ pub struct HttpBatchOutput {
     batch_size: usize,
     interval: Duration,
     use_json_array: bool,
+    max_batch_bytes: usize,
 }
 
 impl HttpBatchOutput {
@@ -255,12 +253,11 @@ impl HttpBatchOutput {
         let client = build_client(config.timeout_secs, config.tls.as_ref())?;
 
         let batch_config = config.batch.as_ref();
-        let batch_size = batch_config.and_then(|b| b.size).unwrap_or(500);
-
-        // Parse duration string or use default
-        let interval = batch_config
-            .and_then(|b| b.duration)
-            .unwrap_or(Duration::from_secs(10));
+        let batch_size = batch_config.map_or(500, |b| b.policy.effective_size());
+        let interval =
+            batch_config.map_or(Duration::from_secs(10), |b| b.policy.effective_duration());
+        let max_batch_bytes =
+            batch_config.map_or(10_485_760, |b| b.policy.effective_max_batch_bytes());
 
         let use_json_array = batch_config
             .map(|b| b.format == "json_array")
@@ -283,6 +280,7 @@ impl HttpBatchOutput {
             batch_size,
             interval,
             use_json_array,
+            max_batch_bytes,
         })
     }
 
@@ -364,6 +362,10 @@ impl OutputBatch for HttpBatchOutput {
     async fn interval(&self) -> Duration {
         self.interval
     }
+
+    async fn max_batch_bytes(&self) -> usize {
+        self.max_batch_bytes
+    }
 }
 
 #[async_trait]
@@ -421,8 +423,7 @@ fn create_http_batch_output(conf: Value) -> Result<ExecutionType, Error> {
     // http_batch always runs in batch mode; apply defaults when batch block is absent
     if config.batch.is_none() {
         config.batch = Some(BatchConfig {
-            size: None,
-            duration: None,
+            policy: BatchingPolicy::default(),
             format: default_batch_format(),
         });
     }
@@ -488,6 +489,10 @@ properties:
         enum: ["json_array", "ndjson"]
         default: "ndjson"
         description: "Batch format"
+      max_batch_bytes:
+        type: integer
+        default: 10485760
+        description: "Maximum cumulative byte size per batch (default: 10MB)"
     description: "Batching configuration (enables batch mode)"
   tls:
     type: object
@@ -564,9 +569,9 @@ batch:
         assert_eq!(config.method, "PUT");
         assert!(config.batch.is_some());
         let batch = config.batch.unwrap();
-        assert_eq!(batch.size, Some(100));
+        assert_eq!(batch.policy.size, Some(100));
         let expected = parse_duration::parse("5s").unwrap();
-        assert_eq!(batch.duration, Some(expected));
+        assert_eq!(batch.policy.duration, Some(expected));
         assert_eq!(batch.format, "json_array");
     }
 
