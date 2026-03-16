@@ -32,6 +32,31 @@ Accepted values:
 &nbsp;&nbsp;&nbsp;&nbsp;`Tail`: Read the file line by line, waiting for new data to be written  
 
 ### `position_filename`
-Filename to track the position of tailed files  
-Type: `string`  
-Required: with `codec`: `Tail`  
+Filename to track the position of tailed files
+Type: `string`
+Required: with `codec`: `Tail`
+
+### `retry`
+
+Retry policy for failed reads. When present, the runtime retries failed reads with backoff.
+
+Type: `object`
+Required: `false`
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `max_retries` | integer | 3 | Maximum retry attempts |
+| `initial_wait` | string | "1s" | Wait before first retry |
+| `max_wait` | string | "30s" | Maximum wait cap |
+| `backoff` | string | "exponential" | Strategy: `constant`, `linear`, or `exponential` |
+
+=== "With Retry"
+    ```yml
+    input:
+      retry:
+        max_retries: 3
+        initial_wait: "1s"
+        backoff: "exponential"
+      file:
+        filename: path_to_file
+    ```

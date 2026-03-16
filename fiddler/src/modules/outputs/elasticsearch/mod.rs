@@ -185,7 +185,7 @@ async fn elasticsearch_handler(
 
                     if !failed.is_empty() {
                         req.output
-                            .send_async(Err(Error::OutputError(format!(
+                            .send_async(Err(Error::UnRetryable(format!(
                                 "failed to insert record: {}",
                                 failed.join(",")
                             ))))

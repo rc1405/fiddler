@@ -38,6 +38,17 @@ Consume records from an AWS Kinesis Data Stream. This input reads from a specifi
         endpoint_url: "http://localhost:4566"
     ```
 
+=== "With Retry"
+    ```yml
+    input:
+      retry:
+        max_retries: 3
+        initial_wait: "1s"
+        backoff: "exponential"
+      aws_kinesis:
+        stream_name: "my-stream"
+    ```
+
 ## Fields
 
 ### `stream_name`
@@ -109,6 +120,20 @@ Required: `false`
 | `access_key_id` | string | Yes | AWS access key ID |
 | `secret_access_key` | string | Yes | AWS secret access key |
 | `session_token` | string | No | AWS session token (for temporary credentials) |
+
+### `retry`
+
+Retry policy for failed reads. When present, the runtime retries failed reads with backoff.
+
+Type: `object`
+Required: `false`
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `max_retries` | integer | 3 | Maximum retry attempts |
+| `initial_wait` | string | "1s" | Wait before first retry |
+| `max_wait` | string | "30s" | Maximum wait cap |
+| `backoff` | string | "exponential" | Strategy: `constant`, `linear`, or `exponential` |
 
 ## How It Works
 

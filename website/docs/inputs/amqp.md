@@ -29,6 +29,18 @@ Consume messages from an AMQP 0-9-1 queue. This input connects to RabbitMQ or ot
         auto_ack: true
     ```
 
+=== "With Retry"
+    ```yml
+    input:
+      retry:
+        max_retries: 3
+        initial_wait: "1s"
+        backoff: "exponential"
+      amqp:
+        url: "amqp://guest:guest@localhost:5672/%2f"
+        queue: "events"
+    ```
+
 ## Fields
 
 ### `url`
@@ -78,6 +90,20 @@ Required: `false`
 Default: `false`
 
 **Warning**: Enabling `auto_ack` means messages may be lost if processing fails.
+
+### `retry`
+
+Retry policy for failed reads. When present, the runtime retries failed reads with backoff.
+
+Type: `object`
+Required: `false`
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `max_retries` | integer | 3 | Maximum retry attempts |
+| `initial_wait` | string | "1s" | Wait before first retry |
+| `max_wait` | string | "30s" | Maximum wait cap |
+| `backoff` | string | "exponential" | Strategy: `constant`, `linear`, or `exponential` |
 
 ## How It Works
 

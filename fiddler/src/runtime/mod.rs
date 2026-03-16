@@ -68,6 +68,10 @@ pub struct MessageMetrics {
     latency_min_us: Option<u64>,
     /// Maximum latency in microseconds
     latency_max_us: u64,
+    /// Total retry attempts across all messages
+    pub total_retries: u64,
+    /// Total messages/batches where all retries were exhausted
+    pub total_retries_exhausted: u64,
 }
 
 impl MessageMetrics {
@@ -201,6 +205,8 @@ impl MessageMetrics {
             latency_avg_ms: self.latency_avg_ms(),
             latency_min_ms: self.latency_min_ms(),
             latency_max_ms: self.latency_max_ms(),
+            total_retries: self.total_retries,
+            total_retries_exhausted: self.total_retries_exhausted,
         });
     }
 }
@@ -254,6 +260,8 @@ pub(crate) enum MessageStatus {
     Filtered,
     Shutdown,
     StreamComplete,
+    Retry,
+    RetriesExhausted,
 }
 
 impl fmt::Display for MessageStatus {
@@ -267,6 +275,8 @@ impl fmt::Display for MessageStatus {
             MessageStatus::Filtered => write!(f, "Filtered"),
             MessageStatus::Shutdown => write!(f, "Shutdown"),
             MessageStatus::StreamComplete => write!(f, "StreamComplete"),
+            MessageStatus::Retry => write!(f, "Retry"),
+            MessageStatus::RetriesExhausted => write!(f, "RetriesExhausted"),
         }
     }
 }
@@ -564,7 +574,14 @@ impl Runtime {
         // Kill switch only needs capacity of 1 - it's a signal channel
         let (ks_send, ks_recv) = bounded(1);
 
-        let input = input(self.config.input.clone(), processors, msg_tx, ks_recv);
+        let input = input(
+            self.config.input.clone(),
+            processors,
+            msg_tx,
+            ks_recv,
+            self.config.input_retry.clone(),
+            self.state_tx.clone(),
+        );
 
         spawn_task(&mut handles, input);
 
@@ -705,12 +722,17 @@ impl Runtime {
                 ExecutionType::Output(o) => {
                     let state_tx = self.state_tx.clone();
                     let new_rx = rx.clone();
-                    spawn_task(handles, outputs::run_output(new_rx, state_tx, o));
+                    let retry = self.config.output_retry.clone();
+                    spawn_task(handles, outputs::run_output(new_rx, state_tx, o, retry));
                 }
                 ExecutionType::OutputBatch(o) => {
                     let state_tx = self.state_tx.clone();
                     let new_rx = rx.clone();
-                    spawn_task(handles, outputs::run_output_batch(new_rx, state_tx, o));
+                    let retry = self.config.output_retry.clone();
+                    spawn_task(
+                        handles,
+                        outputs::run_output_batch(new_rx, state_tx, o, retry),
+                    );
                 }
                 _ => {
                     error!("invalid execution type for output");
@@ -746,6 +768,19 @@ fn process_state(
     initial_msg: InternalMessageState,
     metrics: &mut MessageMetrics,
 ) -> Result<(), Error> {
+    // Metric-only events — short-circuit before per-message state lookup
+    match initial_msg.status {
+        MessageStatus::Retry => {
+            metrics.total_retries += 1;
+            return Ok(());
+        }
+        MessageStatus::RetriesExhausted => {
+            metrics.total_retries_exhausted += 1;
+            return Ok(());
+        }
+        _ => {}
+    }
+
     // Use a stack for iterative processing instead of recursion
     // Pre-allocate with realistic capacity to avoid reallocation
     let mut pending_messages = Vec::with_capacity(4);
@@ -934,6 +969,13 @@ fn process_state(
                                 let _ = chan.send(Status::Errored(err));
                             }
                         };
+                    }
+                    // Retry and RetriesExhausted are handled by the short-circuit
+                    // at the top of process_state and should never reach here.
+                    MessageStatus::Retry | MessageStatus::RetriesExhausted => {
+                        unreachable!(
+                            "Retry/RetriesExhausted should be short-circuited before state lookup"
+                        );
                     }
                 };
 
@@ -1208,6 +1250,8 @@ async fn input(
     output: Sender<InternalMessage>,
     state_handle: Sender<MessageHandle>,
     kill_switch: Receiver<()>,
+    retry_policy: Option<crate::RetryPolicy>,
+    state_tx: Sender<InternalMessageState>,
 ) -> Result<(), Error> {
     trace!("started input");
 
@@ -1215,10 +1259,26 @@ async fn input(
 
     match item {
         ExecutionType::Input(i) => {
-            crate::modules::inputs::run_input(i, output, state_handle, kill_switch).await
+            crate::modules::inputs::run_input(
+                i,
+                output,
+                state_handle,
+                kill_switch,
+                retry_policy,
+                state_tx,
+            )
+            .await
         }
         ExecutionType::InputBatch(i) => {
-            crate::modules::inputs::run_input_batch(i, output, state_handle, kill_switch).await
+            crate::modules::inputs::run_input_batch(
+                i,
+                output,
+                state_handle,
+                kill_switch,
+                retry_policy,
+                state_tx,
+            )
+            .await
         }
         _ => {
             error!("invalid execution type for input");
@@ -1243,6 +1303,8 @@ mod tests {
         assert_eq!(metrics.duplicates_rejected, 0);
         assert_eq!(metrics.stale_entries_removed, 0);
         assert!(metrics.started_at.is_some());
+        assert_eq!(metrics.total_retries, 0);
+        assert_eq!(metrics.total_retries_exhausted, 0);
     }
 
     #[test]
@@ -1447,5 +1509,51 @@ mod tests {
             format!("{}", MessageStatus::StreamComplete),
             "StreamComplete"
         );
+        assert_eq!(format!("{}", MessageStatus::Retry), "Retry");
+        assert_eq!(
+            format!("{}", MessageStatus::RetriesExhausted),
+            "RetriesExhausted"
+        );
+    }
+
+    #[test]
+    fn test_message_metrics_retry_fields_default() {
+        let metrics = MessageMetrics::new();
+        assert_eq!(metrics.total_retries, 0);
+        assert_eq!(metrics.total_retries_exhausted, 0);
+    }
+
+    #[test]
+    fn test_process_state_retry_increments_counter() {
+        let mut handles = FxHashMap::default();
+        let mut closed_outputs = 0;
+        let mut metrics = MessageMetrics::new();
+
+        let msg = InternalMessageState {
+            message_id: "test-1".into(),
+            status: MessageStatus::Retry,
+            ..Default::default()
+        };
+
+        let result = process_state(&mut handles, &1, &mut closed_outputs, msg, &mut metrics);
+        assert!(result.is_ok());
+        assert_eq!(metrics.total_retries, 1);
+    }
+
+    #[test]
+    fn test_process_state_retries_exhausted_increments_counter() {
+        let mut handles = FxHashMap::default();
+        let mut closed_outputs = 0;
+        let mut metrics = MessageMetrics::new();
+
+        let msg = InternalMessageState {
+            message_id: "test-1".into(),
+            status: MessageStatus::RetriesExhausted,
+            ..Default::default()
+        };
+
+        let result = process_state(&mut handles, &1, &mut closed_outputs, msg, &mut metrics);
+        assert!(result.is_ok());
+        assert_eq!(metrics.total_retries_exhausted, 1);
     }
 }

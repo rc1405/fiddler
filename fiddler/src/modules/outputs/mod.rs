@@ -1,6 +1,7 @@
 use crate::runtime::{InternalMessage, InternalMessageState, MessageStatus};
 use crate::{Error, Output, OutputBatch, SHUTDOWN_MESSAGE_ID};
 use flume::{Receiver, Sender};
+use std::time::Duration;
 use tokio::time::{timeout, Instant};
 use tracing::{debug, error, trace};
 
@@ -47,6 +48,7 @@ pub(crate) async fn run_output(
     input: Receiver<InternalMessage>,
     state: Sender<InternalMessageState>,
     mut o: Box<dyn Output + Send + Sync>,
+    retry_policy: Option<crate::RetryPolicy>,
 ) -> Result<(), Error> {
     debug!("output connected");
 
@@ -54,43 +56,113 @@ pub(crate) async fn run_output(
         match input.recv_async().await {
             Ok(msg) => {
                 trace!("received output message");
-                // Extract fields before moving message to avoid clone
                 let stream_id = msg.message.stream_id.clone();
                 let message_id = msg.message_id;
                 let output_bytes = msg.message.bytes.len() as u64;
 
-                match o.write(msg.message).await {
-                    Ok(_) => {
-                        trace!("sending message");
-                        state
-                            .send_async(InternalMessageState {
-                                message_id,
-                                status: MessageStatus::Output,
-                                stream_id,
-                                is_stream: false,
-                                bytes: output_bytes,
-                            })
-                            .await
-                            .map_err(|e| Error::UnableToSendToChannel(format!("{e}")))?;
-                    }
-                    Err(e) => match e {
-                        Error::ConditionalCheckfailed => {
-                            debug!("conditional check failed for output");
-                        }
-                        _ => {
-                            trace!("sending state");
+                let max_attempts = retry_policy.as_ref().map_or(1, |r| r.max_retries + 1);
+                let mut last_error = None;
+
+                for attempt in 0..max_attempts {
+                    let msg_clone = msg.message.clone();
+                    match o.write(msg_clone).await {
+                        Ok(_) => {
+                            trace!("sending message");
                             state
                                 .send_async(InternalMessageState {
-                                    message_id,
-                                    status: MessageStatus::OutputError(format!("{e}")),
-                                    stream_id,
+                                    message_id: message_id.clone(),
+                                    status: MessageStatus::Output,
+                                    stream_id: stream_id.clone(),
                                     is_stream: false,
-                                    bytes: 0,
+                                    bytes: output_bytes,
                                 })
                                 .await
                                 .map_err(|e| Error::UnableToSendToChannel(format!("{e}")))?;
+                            last_error = None;
+                            break;
                         }
-                    },
+                        Err(e) => match e {
+                            Error::ConditionalCheckfailed => {
+                                debug!("conditional check failed for output");
+                                last_error = None;
+                                break;
+                            }
+                            Error::UnRetryable(ref msg) => {
+                                debug!(error = %msg, "unretryable output error");
+                                state
+                                    .send_async(InternalMessageState {
+                                        message_id: message_id.clone(),
+                                        status: MessageStatus::OutputError(format!("{e}")),
+                                        stream_id: stream_id.clone(),
+                                        is_stream: false,
+                                        bytes: 0,
+                                    })
+                                    .await
+                                    .map_err(|e| Error::UnableToSendToChannel(format!("{e}")))?;
+                                last_error = None;
+                                break;
+                            }
+                            _ => {
+                                if attempt + 1 < max_attempts {
+                                    let wait = retry_policy
+                                        .as_ref()
+                                        .map_or(Duration::from_secs(1), |rp| {
+                                            rp.compute_wait(attempt)
+                                        });
+                                    tracing::warn!(
+                                        attempt = attempt + 1,
+                                        max_retries = max_attempts - 1,
+                                        wait_ms = wait.as_millis() as u64,
+                                        error = %e,
+                                        "output write failed, retrying"
+                                    );
+                                    state
+                                        .send_async(InternalMessageState {
+                                            message_id: message_id.clone(),
+                                            status: MessageStatus::Retry,
+                                            stream_id: stream_id.clone(),
+                                            is_stream: false,
+                                            bytes: 0,
+                                        })
+                                        .await
+                                        .map_err(|e| {
+                                            Error::UnableToSendToChannel(format!("{e}"))
+                                        })?;
+                                    tokio::time::sleep(wait).await;
+                                } else {
+                                    last_error = Some(e);
+                                }
+                            }
+                        },
+                    }
+                }
+
+                if let Some(e) = last_error {
+                    tracing::error!(
+                        attempts = max_attempts,
+                        error = %e,
+                        "output write failed after all retries"
+                    );
+                    state
+                        .send_async(InternalMessageState {
+                            message_id: message_id.clone(),
+                            status: MessageStatus::RetriesExhausted,
+                            stream_id: stream_id.clone(),
+                            is_stream: false,
+                            bytes: 0,
+                        })
+                        .await
+                        .map_err(|e| Error::UnableToSendToChannel(format!("{e}")))?;
+                    state
+                        .send_async(InternalMessageState {
+                            message_id,
+                            status: MessageStatus::OutputError(format!("{e}")),
+                            stream_id,
+                            is_stream: false,
+                            bytes: 0,
+                        })
+                        .await
+                        .map_err(|e| Error::UnableToSendToChannel(format!("{e}")))?;
                 }
             }
             Err(_) => {
@@ -115,6 +187,7 @@ pub(crate) async fn run_output_batch(
     input: Receiver<InternalMessage>,
     state: Sender<InternalMessageState>,
     mut o: Box<dyn OutputBatch + Send + Sync>,
+    retry_policy: Option<crate::RetryPolicy>,
 ) -> Result<(), Error> {
     debug!("output connected");
 
@@ -152,7 +225,7 @@ pub(crate) async fn run_output_batch(
                         && estimated_total > max_batch_bytes
                         && !internal_msg_batch.is_empty()
                     {
-                        process_batch(&mut o, &state, internal_msg_batch).await?;
+                        process_batch(&mut o, &state, internal_msg_batch, &retry_policy).await?;
                         internal_msg_batch = Vec::with_capacity(batch_size);
                         batch_bytes = 0;
                     }
@@ -163,7 +236,7 @@ pub(crate) async fn run_output_batch(
                 Ok(Err(_)) => {
                     // Channel disconnected - process remaining batch and exit
                     if !internal_msg_batch.is_empty() {
-                        process_batch(&mut o, &state, internal_msg_batch).await?;
+                        process_batch(&mut o, &state, internal_msg_batch, &retry_policy).await?;
                     }
                     o.close().await?;
                     match state
@@ -184,7 +257,7 @@ pub(crate) async fn run_output_batch(
         }
 
         if !internal_msg_batch.is_empty() {
-            process_batch(&mut o, &state, internal_msg_batch).await?;
+            process_batch(&mut o, &state, internal_msg_batch, &retry_policy).await?;
         }
     }
 }
@@ -194,9 +267,8 @@ async fn process_batch(
     o: &mut Box<dyn OutputBatch + Send + Sync>,
     state: &Sender<InternalMessageState>,
     internal_msg_batch: Vec<InternalMessage>,
+    retry_policy: &Option<crate::RetryPolicy>,
 ) -> Result<(), Error> {
-    // Extract metadata before moving messages to avoid clones
-    // Include bytes for output tracking
     let metadata: Vec<(String, Option<String>, u64)> = internal_msg_batch
         .iter()
         .map(|i| {
@@ -208,44 +280,112 @@ async fn process_batch(
         })
         .collect();
 
-    // Move messages instead of cloning
-    let msg_batch: Vec<crate::Message> =
-        internal_msg_batch.into_iter().map(|i| i.message).collect();
+    let max_attempts = retry_policy.as_ref().map_or(1, |r| r.max_retries + 1);
+    let mut last_error = None;
 
-    match o.write_batch(msg_batch).await {
-        Ok(_) => {
-            for (message_id, stream_id, bytes) in metadata {
-                state
-                    .send_async(InternalMessageState {
-                        message_id,
-                        status: MessageStatus::Output,
-                        stream_id,
-                        is_stream: false,
-                        bytes,
-                    })
-                    .await
-                    .map_err(|e| Error::UnableToSendToChannel(format!("{e}")))?;
-            }
-        }
-        Err(e) => match e {
-            Error::ConditionalCheckfailed => {
-                debug!("conditional check failed for output");
-            }
-            _ => {
-                for (message_id, stream_id, _bytes) in metadata {
+    for attempt in 0..max_attempts {
+        let msg_batch: Vec<crate::Message> = internal_msg_batch
+            .iter()
+            .map(|i| i.message.clone())
+            .collect();
+
+        match o.write_batch(msg_batch).await {
+            Ok(_) => {
+                for (message_id, stream_id, bytes) in &metadata {
                     state
                         .send_async(InternalMessageState {
-                            message_id,
-                            status: MessageStatus::OutputError(format!("{e}")),
-                            stream_id,
+                            message_id: message_id.clone(),
+                            status: MessageStatus::Output,
+                            stream_id: stream_id.clone(),
                             is_stream: false,
-                            bytes: 0,
+                            bytes: *bytes,
                         })
                         .await
                         .map_err(|e| Error::UnableToSendToChannel(format!("{e}")))?;
                 }
+                last_error = None;
+                break;
             }
-        },
+            Err(e) => match e {
+                Error::ConditionalCheckfailed => {
+                    debug!("conditional check failed for output");
+                    last_error = None;
+                    break;
+                }
+                Error::UnRetryable(ref msg) => {
+                    debug!(error = %msg, "unretryable batch output error");
+                    for (message_id, stream_id, _bytes) in &metadata {
+                        state
+                            .send_async(InternalMessageState {
+                                message_id: message_id.clone(),
+                                status: MessageStatus::OutputError(format!("{e}")),
+                                stream_id: stream_id.clone(),
+                                is_stream: false,
+                                bytes: 0,
+                            })
+                            .await
+                            .map_err(|e| Error::UnableToSendToChannel(format!("{e}")))?;
+                    }
+                    last_error = None;
+                    break;
+                }
+                _ => {
+                    if attempt + 1 < max_attempts {
+                        let wait = retry_policy
+                            .as_ref()
+                            .map_or(Duration::from_secs(1), |rp| rp.compute_wait(attempt));
+                        tracing::warn!(
+                            attempt = attempt + 1,
+                            max_retries = max_attempts - 1,
+                            batch_size = metadata.len(),
+                            wait_ms = wait.as_millis() as u64,
+                            error = %e,
+                            "batch output write failed, retrying"
+                        );
+                        state
+                            .send_async(InternalMessageState {
+                                message_id: String::new(),
+                                status: MessageStatus::Retry,
+                                ..Default::default()
+                            })
+                            .await
+                            .map_err(|e| Error::UnableToSendToChannel(format!("{e}")))?;
+                        tokio::time::sleep(wait).await;
+                    } else {
+                        last_error = Some(e);
+                    }
+                }
+            },
+        }
+    }
+
+    if let Some(e) = last_error {
+        tracing::error!(
+            attempts = max_attempts,
+            batch_size = metadata.len(),
+            error = %e,
+            "batch output write failed after all retries"
+        );
+        state
+            .send_async(InternalMessageState {
+                message_id: String::new(),
+                status: MessageStatus::RetriesExhausted,
+                ..Default::default()
+            })
+            .await
+            .map_err(|e| Error::UnableToSendToChannel(format!("{e}")))?;
+        for (message_id, stream_id, _bytes) in &metadata {
+            state
+                .send_async(InternalMessageState {
+                    message_id: message_id.clone(),
+                    status: MessageStatus::OutputError(format!("{e}")),
+                    stream_id: stream_id.clone(),
+                    is_stream: false,
+                    bytes: 0,
+                })
+                .await
+                .map_err(|e| Error::UnableToSendToChannel(format!("{e}")))?;
+        }
     }
     Ok(())
 }

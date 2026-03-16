@@ -92,6 +92,17 @@ Receive JSON data via HTTP POST requests. This input starts an HTTP server that 
           client_auth: "required"
     ```
 
+=== "With Retry"
+    ```yml
+    input:
+      retry:
+        max_retries: 3
+        initial_wait: "1s"
+        backoff: "exponential"
+      http_server:
+        port: 8080
+    ```
+
 ## Fields
 
 ### `address`
@@ -246,6 +257,20 @@ Default: `"none"`
 | `required` | Client must present a valid certificate signed by the CA |
 
 When set to `"optional"` or `"required"`, `tls.ca` must also be provided.
+
+### `retry`
+
+Retry policy for failed reads. When present, the runtime retries failed reads with backoff.
+
+Type: `object`
+Required: `false`
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `max_retries` | integer | 3 | Maximum retry attempts |
+| `initial_wait` | string | "1s" | Wait before first retry |
+| `max_wait` | string | "30s" | Maximum wait cap |
+| `backoff` | string | "exponential" | Strategy: `constant`, `linear`, or `exponential` |
 
 ## Endpoints
 

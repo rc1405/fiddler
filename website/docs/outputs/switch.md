@@ -25,6 +25,20 @@ Type: `string`
 Required: `true`  
 
 #### `output`
-Valid fiddler output module  
-Type: `object`  
-Required: `true`  
+Valid fiddler output module
+Type: `object`
+Required: `true`
+
+## `retry`
+
+Retry policy for failed writes. When present, the runtime retries failed writes with backoff.
+
+Type: `object`
+Required: `false`
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `max_retries` | integer | 3 | Maximum retry attempts |
+| `initial_wait` | string | "1s" | Wait before first retry |
+| `max_wait` | string | "30s" | Maximum wait cap |
+| `backoff` | string | "exponential" | Strategy: `constant`, `linear`, or `exponential` |  

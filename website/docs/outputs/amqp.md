@@ -32,6 +32,18 @@ Publish messages to an AMQP 0-9-1 exchange. This output connects to RabbitMQ or 
           duration: "10s"
     ```
 
+=== "With Retry"
+    ```yml
+    output:
+      retry:
+        max_retries: 5
+        initial_wait: "2s"
+        backoff: "exponential"
+      amqp:
+        url: "amqp://guest:guest@localhost:5672/%2f"
+        exchange: "events"
+    ```
+
 ## Fields
 
 ### `url`
@@ -98,6 +110,20 @@ Required: `false`
 | `size` | integer | Maximum messages per batch (default: 500) |
 | `duration` | string | Maximum time to wait before flushing (default: "10s") |
 | `max_batch_bytes` | integer | Maximum cumulative byte size per batch (default: 10MB) |
+
+### `retry`
+
+Retry policy for failed writes. When present, the runtime retries failed writes with backoff.
+
+Type: `object`
+Required: `false`
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `max_retries` | integer | 3 | Maximum retry attempts |
+| `initial_wait` | string | "1s" | Wait before first retry |
+| `max_wait` | string | "30s" | Maximum wait cap |
+| `backoff` | string | "exponential" | Strategy: `constant`, `linear`, or `exponential` |
 
 ## How It Works
 

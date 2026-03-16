@@ -32,6 +32,19 @@ Send data to Redis using list operations (LPUSH/RPUSH) or Pub/Sub publishing. Th
           duration: "5s"
     ```
 
+=== "With Retry"
+    ```yml
+    output:
+      retry:
+        max_retries: 5
+        initial_wait: "2s"
+        backoff: "exponential"
+      redis:
+        url: "redis://localhost:6379"
+        mode: "list"
+        key: "output_queue"
+    ```
+
 ## Fields
 
 ### `url`
@@ -97,6 +110,22 @@ Required: `false`
 | `max_batch_bytes` | integer | Maximum cumulative byte size per batch (default: 10MB) |
 
 **Note**: Batching is not supported in pubsub mode and will be ignored.
+
+### `retry`
+
+Retry policy for failed writes. When present, the runtime retries failed writes with backoff.
+
+Type: `object`
+Required: `false`
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `max_retries` | integer | 3 | Maximum retry attempts |
+| `initial_wait` | string | "1s" | Wait before first retry |
+| `max_wait` | string | "30s" | Maximum wait cap |
+| `backoff` | string | "exponential" | Strategy: `constant`, `linear`, or `exponential` |
+
+Authentication failures are never retried.
 
 ## How It Works
 

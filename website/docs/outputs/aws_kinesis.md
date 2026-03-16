@@ -39,6 +39,17 @@ Put records to an AWS Kinesis Data Stream. This output batches messages and publ
           duration: "5s"
     ```
 
+=== "With Retry"
+    ```yml
+    output:
+      retry:
+        max_retries: 5
+        initial_wait: "2s"
+        backoff: "exponential"
+      aws_kinesis:
+        stream_name: "my-stream"
+    ```
+
 ## Fields
 
 ### `stream_name`
@@ -103,6 +114,20 @@ Required: `false`
 | `max_batch_bytes` | integer | Maximum cumulative byte size per batch (default: 5MB) |
 
 **Note**: Kinesis PutRecords API has a hard limit of 500 records per call. The batch size is automatically capped at 500. The `max_batch_bytes` default is 5MB to match the Kinesis PutRecords payload limit.
+
+### `retry`
+
+Retry policy for failed writes. When present, the runtime retries failed writes with backoff.
+
+Type: `object`
+Required: `false`
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `max_retries` | integer | 3 | Maximum retry attempts |
+| `initial_wait` | string | "1s" | Wait before first retry |
+| `max_wait` | string | "30s" | Maximum wait cap |
+| `backoff` | string | "exponential" | Strategy: `constant`, `linear`, or `exponential` |
 
 ## How It Works
 
