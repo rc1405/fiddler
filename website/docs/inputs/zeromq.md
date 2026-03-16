@@ -33,6 +33,18 @@ Receive messages using ZeroMQ sockets. This input supports PULL and SUB socket t
           - "tcp://worker3:5555"
     ```
 
+=== "With Retry"
+    ```yml
+    input:
+      retry:
+        max_retries: 3
+        initial_wait: "1s"
+        backoff: "exponential"
+      zeromq:
+        socket_type: "pull"
+        bind: "tcp://*:5555"
+    ```
+
 ## Fields
 
 ### `socket_type`
@@ -73,6 +85,20 @@ Type: `array[string]`
 Required: Required for `sub` socket type
 
 Use `""` (empty string) to receive all messages.
+
+### `retry`
+
+Retry policy for failed reads. When present, the runtime retries failed reads with backoff.
+
+Type: `object`
+Required: `false`
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `max_retries` | integer | 3 | Maximum retry attempts |
+| `initial_wait` | string | "1s" | Wait before first retry |
+| `max_wait` | string | "30s" | Maximum wait cap |
+| `backoff` | string | "exponential" | Strategy: `constant`, `linear`, or `exponential` |
 
 ## How It Works
 

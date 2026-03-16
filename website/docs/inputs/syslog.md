@@ -63,6 +63,17 @@ Receive log data via syslog protocol over UDP, TCP, or TLS. Supports both RFC 54
         channel_buffer_size: 10000
     ```
 
+=== "With Retry"
+    ```yml
+    input:
+      retry:
+        max_retries: 3
+        initial_wait: "1s"
+        backoff: "exponential"
+      syslog:
+        port: 1514
+    ```
+
 ## Fields
 
 ### `address`
@@ -229,6 +240,20 @@ Required: `false`
 Default: `10000`
 
 When the channel is full, incoming messages are dropped with a warning log.
+
+### `retry`
+
+Retry policy for failed reads. When present, the runtime retries failed reads with backoff.
+
+Type: `object`
+Required: `false`
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `max_retries` | integer | 3 | Maximum retry attempts |
+| `initial_wait` | string | "1s" | Wait before first retry |
+| `max_wait` | string | "30s" | Maximum wait cap |
+| `backoff` | string | "exponential" | Strategy: `constant`, `linear`, or `exponential` |
 
 ## Message Output
 

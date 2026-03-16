@@ -1,4 +1,4 @@
-use crate::runtime::{InternalMessage, MessageHandle, MessageStatus};
+use crate::runtime::{InternalMessage, InternalMessageState, MessageHandle, MessageStatus};
 use crate::{Error, Input, InputBatch, MessageType};
 use flume::{Receiver, Sender};
 use tokio::time::{sleep, Duration};
@@ -50,11 +50,14 @@ pub(crate) async fn run_input(
     output: Sender<InternalMessage>,
     state_handle: Sender<MessageHandle>,
     kill_switch: Receiver<()>,
+    retry_policy: Option<crate::RetryPolicy>,
+    state_tx: Sender<InternalMessageState>,
 ) -> Result<(), Error> {
     debug!("input connected");
 
     // Track consecutive no-input errors for exponential backoff
     let mut no_input_count: u32 = 0;
+    let mut input_retry_count: u32 = 0;
 
     loop {
         tokio::select! {
@@ -69,6 +72,7 @@ pub(crate) async fn run_input(
                     Ok((msg, closure)) => {
                         // Reset backoff on successful read
                         no_input_count = 0;
+                        input_retry_count = 0;
                         let message_type = msg.message_type.clone();
 
                         let message_id: String = match &message_type {
@@ -126,7 +130,50 @@ pub(crate) async fn run_input(
                             no_input_count = no_input_count.saturating_add(1);
                             continue;
                         }
+                        Error::UnRetryable(ref msg) => {
+                            i.close().await?;
+                            debug!("input closed");
+                            tracing::error!(error = %msg, "unretryable input error");
+                            return Err(Error::ExecutionError(format!(
+                                "Unretryable error from read: {}",
+                                e
+                            )));
+                        }
                         _ => {
+                            if let Some(ref policy) = retry_policy {
+                                if input_retry_count < policy.max_retries {
+                                    let wait = policy.compute_wait(input_retry_count);
+                                    tracing::warn!(
+                                        attempt = input_retry_count + 1,
+                                        max_retries = policy.max_retries,
+                                        wait_ms = wait.as_millis() as u64,
+                                        error = %e,
+                                        "input read failed, retrying"
+                                    );
+                                    let _ = state_tx
+                                        .send_async(InternalMessageState {
+                                            message_id: String::new(),
+                                            status: MessageStatus::Retry,
+                                            ..Default::default()
+                                        })
+                                        .await;
+                                    input_retry_count += 1;
+                                    tokio::time::sleep(wait).await;
+                                    continue;
+                                }
+                                tracing::error!(
+                                    attempts = policy.max_retries,
+                                    error = %e,
+                                    "input read failed after all retries"
+                                );
+                                let _ = state_tx
+                                    .send_async(InternalMessageState {
+                                        message_id: String::new(),
+                                        status: MessageStatus::RetriesExhausted,
+                                        ..Default::default()
+                                    })
+                                    .await;
+                            }
                             i.close().await?;
                             debug!("input closed");
                             tracing::error!(error = format!("{}", e), "read error from input");
@@ -154,11 +201,14 @@ pub(crate) async fn run_input_batch(
     output: Sender<InternalMessage>,
     state_handle: Sender<MessageHandle>,
     kill_switch: Receiver<()>,
+    retry_policy: Option<crate::RetryPolicy>,
+    state_tx: Sender<InternalMessageState>,
 ) -> Result<(), Error> {
     debug!("batch input connected");
 
     // Track consecutive no-input errors for exponential backoff
     let mut no_input_count: u32 = 0;
+    let mut input_retry_count: u32 = 0;
 
     loop {
         tokio::select! {
@@ -173,6 +223,7 @@ pub(crate) async fn run_input_batch(
                     Ok((batch, closure)) => {
                         // Reset backoff on successful read
                         no_input_count = 0;
+                        input_retry_count = 0;
 
                         if batch.is_empty() {
                             // Empty batch, nothing to process but still trigger callback if present
@@ -270,7 +321,50 @@ pub(crate) async fn run_input_batch(
                             no_input_count = no_input_count.saturating_add(1);
                             continue;
                         }
+                        Error::UnRetryable(ref msg) => {
+                            i.close().await?;
+                            debug!("batch input closed");
+                            tracing::error!(error = %msg, "unretryable batch input error");
+                            return Err(Error::ExecutionError(format!(
+                                "Unretryable error from read_batch: {}",
+                                e
+                            )));
+                        }
                         _ => {
+                            if let Some(ref policy) = retry_policy {
+                                if input_retry_count < policy.max_retries {
+                                    let wait = policy.compute_wait(input_retry_count);
+                                    tracing::warn!(
+                                        attempt = input_retry_count + 1,
+                                        max_retries = policy.max_retries,
+                                        wait_ms = wait.as_millis() as u64,
+                                        error = %e,
+                                        "batch input read failed, retrying"
+                                    );
+                                    let _ = state_tx
+                                        .send_async(InternalMessageState {
+                                            message_id: String::new(),
+                                            status: MessageStatus::Retry,
+                                            ..Default::default()
+                                        })
+                                        .await;
+                                    input_retry_count += 1;
+                                    tokio::time::sleep(wait).await;
+                                    continue;
+                                }
+                                tracing::error!(
+                                    attempts = policy.max_retries,
+                                    error = %e,
+                                    "batch input read failed after all retries"
+                                );
+                                let _ = state_tx
+                                    .send_async(InternalMessageState {
+                                        message_id: String::new(),
+                                        status: MessageStatus::RetriesExhausted,
+                                        ..Default::default()
+                                    })
+                                    .await;
+                            }
                             i.close().await?;
                             debug!("batch input closed");
                             tracing::error!(error = format!("{}", e), "read error from batch input");

@@ -525,6 +525,8 @@ dimensions:
             latency_avg_ms: 5.5,
             latency_min_ms: 1.0,
             latency_max_ms: 15.0,
+            total_retries: 0,
+            total_retries_exhausted: 0,
         };
 
         let include_set: HashSet<String> = ALL_METRICS.iter().map(|s| s.to_string()).collect();
@@ -557,6 +559,8 @@ dimensions:
             latency_avg_ms: 5.5,
             latency_min_ms: 1.0,
             latency_max_ms: 15.0,
+            total_retries: 0,
+            total_retries_exhausted: 0,
         };
 
         let include_set: HashSet<String> = vec![
@@ -594,6 +598,8 @@ dimensions:
             latency_avg_ms: 5.5,
             latency_min_ms: 1.0,
             latency_max_ms: 15.0,
+            total_retries: 0,
+            total_retries_exhausted: 0,
         };
 
         let include_set: HashSet<String> = ALL_METRICS.iter().map(|s| s.to_string()).collect();

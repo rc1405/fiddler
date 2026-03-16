@@ -43,6 +43,17 @@ Send data to HTTP endpoints via POST or PUT requests. This output supports authe
           key: "/etc/ssl/client.key"
     ```
 
+=== "With Retry"
+    ```yml
+    output:
+      retry:
+        max_retries: 5
+        initial_wait: "2s"
+        backoff: "exponential"
+      http:
+        url: "https://api.example.com/events"
+    ```
+
 ## Fields
 
 ### `url`
@@ -141,6 +152,22 @@ Each string field (`ca`, `cert`, `key`) accepts either a **file path** or **inli
 | `cert` | string | — | Client certificate for mTLS |
 | `key` | string | — | Client private key for mTLS |
 | `skip_verify` | boolean | `false` | Skip server certificate verification |
+
+### `retry`
+
+Retry policy for failed writes. When present, the runtime retries failed writes with backoff.
+
+Type: `object`
+Required: `false`
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `max_retries` | integer | 3 | Maximum retry attempts |
+| `initial_wait` | string | "1s" | Wait before first retry |
+| `max_wait` | string | "30s" | Maximum wait cap |
+| `backoff` | string | "exponential" | Strategy: `constant`, `linear`, or `exponential` |
+
+4xx responses are never retried (permanent failures). 5xx and connection errors are retried.
 
 ## How It Works
 

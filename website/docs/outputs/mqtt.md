@@ -31,6 +31,18 @@ Publish messages to an MQTT topic. This output connects to an MQTT broker and pu
         password: "secret"
     ```
 
+=== "With Retry"
+    ```yml
+    output:
+      retry:
+        max_retries: 5
+        initial_wait: "2s"
+        backoff: "exponential"
+      mqtt:
+        broker: "tcp://localhost:1883"
+        topic: "events/processed"
+    ```
+
 ## Fields
 
 ### `broker`
@@ -103,6 +115,20 @@ Password for broker authentication.
 
 Type: `string`
 Required: `false`
+
+### `retry`
+
+Retry policy for failed writes. When present, the runtime retries failed writes with backoff.
+
+Type: `object`
+Required: `false`
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `max_retries` | integer | 3 | Maximum retry attempts |
+| `initial_wait` | string | "1s" | Wait before first retry |
+| `max_wait` | string | "30s" | Maximum wait cap |
+| `backoff` | string | "exponential" | Strategy: `constant`, `linear`, or `exponential` |
 
 ## How It Works
 

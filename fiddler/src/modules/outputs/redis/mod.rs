@@ -149,7 +149,7 @@ impl OutputBatch for RedisListOutput {
 
         pipe.query_async::<()>(&mut self.conn).await.map_err(|e| {
             if is_auth_error(&e) {
-                Error::ConfigFailedValidation(format!("Redis authentication failed: {}", e))
+                Error::UnRetryable(format!("Redis authentication failed: {}", e))
             } else {
                 Error::OutputError(format!("Redis push failed: {}", e))
             }
@@ -214,7 +214,7 @@ impl Output for RedisPubSubOutput {
             .await
             .map_err(|e| {
                 if is_auth_error(&e) {
-                    Error::ConfigFailedValidation(format!("Redis authentication failed: {}", e))
+                    Error::UnRetryable(format!("Redis authentication failed: {}", e))
                 } else {
                     Error::OutputError(format!("Redis publish failed: {}", e))
                 }

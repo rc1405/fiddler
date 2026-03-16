@@ -161,6 +161,12 @@ async fn send_request(req: reqwest::RequestBuilder) -> Result<(), Error> {
     if !response.status().is_success() {
         let status = response.status();
         let body = response.text().await.unwrap_or_default();
+        if status.is_client_error() {
+            return Err(Error::UnRetryable(format!(
+                "HTTP request failed with status {}: {}",
+                status, body
+            )));
+        }
         error!("HTTP request failed with status {}: {}", status, body);
         return Err(Error::OutputError(format!(
             "HTTP request failed with status {}: {}",

@@ -37,6 +37,15 @@ where
     }
 }
 
+/// Deserialize a duration from a string like "10s", "5m", "1h", etc.
+pub(crate) fn deserialize_duration<'de, D>(deserializer: D) -> Result<Duration, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    let s: String = String::deserialize(deserializer)?;
+    parse_duration::parse(&s).map_err(serde::de::Error::custom)
+}
+
 /// BatchingPolicy defines common configuration items for used in batching operations
 /// such as OutputBatch modules.
 ///
@@ -74,6 +83,84 @@ impl BatchingPolicy {
     /// Get the effective max batch bytes, using default (10MB) if not specified.
     pub fn effective_max_batch_bytes(&self) -> usize {
         self.max_batch_bytes.unwrap_or(10_485_760)
+    }
+}
+
+/// Backoff strategy for retry policies.
+#[derive(Deserialize, Serialize, Clone, Debug, Default, PartialEq)]
+#[serde(rename_all = "snake_case")]
+pub enum BackoffStrategy {
+    /// Same wait duration every retry
+    Constant,
+    /// Wait increases linearly: initial_wait * (attempt + 1)
+    Linear,
+    /// Wait doubles each retry: initial_wait * 2^attempt
+    #[default]
+    Exponential,
+}
+
+fn default_max_retries() -> u32 {
+    3
+}
+
+fn default_initial_wait() -> Duration {
+    Duration::from_secs(1)
+}
+
+fn default_max_wait() -> Duration {
+    Duration::from_secs(30)
+}
+
+/// Configurable retry policy for inputs and outputs.
+///
+/// When present on an input or output configuration block, the runtime will
+/// retry failed read/write operations according to this policy.
+///
+/// # Example Configuration
+///
+/// ```yaml
+/// output:
+///   retry:
+///     max_retries: 5
+///     initial_wait: "2s"
+///     max_wait: "60s"
+///     backoff: "exponential"
+///   http:
+///     url: "https://api.example.com"
+/// ```
+#[derive(Deserialize, Serialize, Clone, Debug)]
+pub struct RetryPolicy {
+    /// Maximum number of retry attempts (default: 3)
+    #[serde(default = "default_max_retries")]
+    pub max_retries: u32,
+    /// Wait duration before the first retry (default: 1s)
+    #[serde(
+        default = "default_initial_wait",
+        deserialize_with = "deserialize_duration"
+    )]
+    pub initial_wait: Duration,
+    /// Maximum wait duration cap (default: 30s)
+    #[serde(
+        default = "default_max_wait",
+        deserialize_with = "deserialize_duration"
+    )]
+    pub max_wait: Duration,
+    /// Backoff strategy (default: exponential)
+    #[serde(default)]
+    pub backoff: BackoffStrategy,
+}
+
+impl RetryPolicy {
+    /// Compute the wait duration for the given attempt number (0-indexed).
+    pub fn compute_wait(&self, attempt: u32) -> Duration {
+        let wait = match self.backoff {
+            BackoffStrategy::Constant => self.initial_wait,
+            BackoffStrategy::Linear => self.initial_wait.saturating_mul(attempt + 1),
+            BackoffStrategy::Exponential => self
+                .initial_wait
+                .saturating_mul(1u32.checked_shl(attempt).unwrap_or(u32::MAX)),
+        };
+        wait.min(self.max_wait)
     }
 }
 
@@ -186,6 +273,10 @@ pub struct MetricEntry {
     pub latency_min_ms: f64,
     /// * `latency_max_ms` - Maximum message processing latency in milliseconds
     pub latency_max_ms: f64,
+    /// Total retry attempts across all messages
+    pub total_retries: u64,
+    /// Total messages/batches where all retries were exhausted
+    pub total_retries_exhausted: u64,
 }
 
 /// Channel for sending acknowledgment status back to input modules.
@@ -423,6 +514,11 @@ pub enum Error {
     /// Error returned by input module to indicate there are no messages to process
     #[error("No input to return")]
     NoInputToReturn,
+
+    /// An error that should not be retried (permanent failure).
+    /// Used by modules to signal that retrying will not succeed.
+    #[error("unretryable error: {0}")]
+    UnRetryable(String),
 }
 
 #[cfg(test)]
@@ -498,5 +594,111 @@ size: 1000
         let policy: BatchingPolicy = serde_yaml::from_str(yaml).unwrap();
         assert_eq!(policy.effective_size(), 1000);
         assert_eq!(policy.effective_duration(), Duration::from_secs(30));
+    }
+
+    #[test]
+    fn test_deserialize_duration_valid() {
+        #[derive(Deserialize)]
+        struct T {
+            #[serde(deserialize_with = "deserialize_duration")]
+            d: Duration,
+        }
+        let t: T = serde_yaml::from_str("d: \"5s\"").expect("failed to deserialize");
+        assert_eq!(t.d, Duration::from_secs(5));
+    }
+
+    #[test]
+    fn test_deserialize_duration_millis() {
+        #[derive(Deserialize)]
+        struct T {
+            #[serde(deserialize_with = "deserialize_duration")]
+            d: Duration,
+        }
+        let t: T = serde_yaml::from_str("d: \"100ms\"").expect("failed to deserialize");
+        assert_eq!(t.d, Duration::from_millis(100));
+    }
+
+    #[test]
+    fn test_retry_policy_defaults() {
+        let policy: RetryPolicy = serde_yaml::from_str("{}").expect("failed to deserialize");
+        assert_eq!(policy.max_retries, 3);
+        assert_eq!(policy.initial_wait, Duration::from_secs(1));
+        assert_eq!(policy.max_wait, Duration::from_secs(30));
+        assert!(matches!(policy.backoff, BackoffStrategy::Exponential));
+    }
+
+    #[test]
+    fn test_retry_policy_custom() {
+        let yaml = r#"
+max_retries: 5
+initial_wait: "2s"
+max_wait: "60s"
+backoff: "linear"
+"#;
+        let policy: RetryPolicy = serde_yaml::from_str(yaml).expect("failed to deserialize");
+        assert_eq!(policy.max_retries, 5);
+        assert_eq!(policy.initial_wait, Duration::from_secs(2));
+        assert_eq!(policy.max_wait, Duration::from_secs(60));
+        assert!(matches!(policy.backoff, BackoffStrategy::Linear));
+    }
+
+    #[test]
+    fn test_retry_policy_constant_backoff() {
+        let yaml = r#"
+max_retries: 3
+initial_wait: "2s"
+backoff: "constant"
+"#;
+        let policy: RetryPolicy = serde_yaml::from_str(yaml).expect("failed to deserialize");
+        assert!(matches!(policy.backoff, BackoffStrategy::Constant));
+    }
+
+    #[test]
+    fn test_compute_wait_exponential() {
+        let policy = RetryPolicy {
+            max_retries: 5,
+            initial_wait: Duration::from_secs(1),
+            max_wait: Duration::from_secs(30),
+            backoff: BackoffStrategy::Exponential,
+        };
+        assert_eq!(policy.compute_wait(0), Duration::from_secs(1));
+        assert_eq!(policy.compute_wait(1), Duration::from_secs(2));
+        assert_eq!(policy.compute_wait(2), Duration::from_secs(4));
+        assert_eq!(policy.compute_wait(3), Duration::from_secs(8));
+        assert_eq!(policy.compute_wait(10), Duration::from_secs(30));
+    }
+
+    #[test]
+    fn test_compute_wait_linear() {
+        let policy = RetryPolicy {
+            max_retries: 5,
+            initial_wait: Duration::from_secs(2),
+            max_wait: Duration::from_secs(30),
+            backoff: BackoffStrategy::Linear,
+        };
+        assert_eq!(policy.compute_wait(0), Duration::from_secs(2));
+        assert_eq!(policy.compute_wait(1), Duration::from_secs(4));
+        assert_eq!(policy.compute_wait(2), Duration::from_secs(6));
+        assert_eq!(policy.compute_wait(20), Duration::from_secs(30));
+    }
+
+    #[test]
+    fn test_compute_wait_constant() {
+        let policy = RetryPolicy {
+            max_retries: 5,
+            initial_wait: Duration::from_secs(3),
+            max_wait: Duration::from_secs(30),
+            backoff: BackoffStrategy::Constant,
+        };
+        assert_eq!(policy.compute_wait(0), Duration::from_secs(3));
+        assert_eq!(policy.compute_wait(1), Duration::from_secs(3));
+        assert_eq!(policy.compute_wait(5), Duration::from_secs(3));
+    }
+
+    #[test]
+    fn test_unretryable_error() {
+        let err = Error::UnRetryable("auth failed".into());
+        assert_eq!(format!("{err}"), "unretryable error: auth failed");
+        assert!(matches!(err, Error::UnRetryable(_)));
     }
 }

@@ -201,6 +201,12 @@ impl ClickHouseClient {
         if !response.status().is_success() {
             let status = response.status();
             let body = response.text().await.unwrap_or_default();
+            if status.is_client_error() {
+                return Err(Error::UnRetryable(format!(
+                    "ClickHouse query failed with status {}: {}",
+                    status, body
+                )));
+            }
             return Err(Error::OutputError(format!(
                 "ClickHouse query failed with status {}: {}",
                 status, body
@@ -299,6 +305,12 @@ ORDER BY ({})"#,
         if !response.status().is_success() {
             let status = response.status();
             let body = response.text().await.unwrap_or_default();
+            if status.is_client_error() {
+                return Err(Error::UnRetryable(format!(
+                    "ClickHouse insert failed with status {}: {}",
+                    status, body
+                )));
+            }
             return Err(Error::OutputError(format!(
                 "ClickHouse insert failed with status {}: {}",
                 status, body

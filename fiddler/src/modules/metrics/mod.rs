@@ -165,6 +165,8 @@ mod tests {
             latency_avg_ms: 5.5,
             latency_min_ms: 1.0,
             latency_max_ms: 15.0,
+            total_retries: 0,
+            total_retries_exhausted: 0,
         });
     }
 
@@ -199,6 +201,8 @@ mod tests {
             latency_avg_ms: 0.0,
             latency_min_ms: 0.0,
             latency_max_ms: 0.0,
+            total_retries: 0,
+            total_retries_exhausted: 0,
         });
     }
 
@@ -228,6 +232,8 @@ mod tests {
             latency_avg_ms: 0.0,
             latency_min_ms: 0.0,
             latency_max_ms: 0.0,
+            total_retries: 0,
+            total_retries_exhausted: 0,
         });
     }
 
@@ -274,6 +280,8 @@ mod tests {
             latency_avg_ms: 5.5,
             latency_min_ms: 1.0,
             latency_max_ms: 15.0,
+            total_retries: 0,
+            total_retries_exhausted: 0,
         });
     }
 
@@ -319,6 +327,8 @@ mod tests {
             latency_avg_ms: 5.5,
             latency_min_ms: 1.0,
             latency_max_ms: 15.0,
+            total_retries: 0,
+            total_retries_exhausted: 0,
         });
     }
 

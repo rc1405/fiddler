@@ -104,6 +104,9 @@ pub(crate) struct ParsedRegisteredItem {
 pub(crate) struct Item {
     pub label: Option<String>,
 
+    /// Optional retry policy for this component
+    pub retry: Option<crate::RetryPolicy>,
+
     #[serde(flatten)]
     pub extra: HashMap<String, Value>,
 }
@@ -350,10 +353,12 @@ impl Config {
         Ok(ParsedConfig {
             label,
             input,
+            input_retry: self.input.retry.clone(),
             processors,
             num_threads,
             metrics,
             output,
+            output_retry: self.output.retry.clone(),
         })
     }
 }
@@ -370,12 +375,16 @@ pub struct ParsedConfig {
     /// Input configuration following [crate::Input] or [crate::InputBatch] traits
     #[allow(private_interfaces)]
     pub input: ParsedRegisteredItem,
+    /// Optional retry policy for input
+    pub input_retry: Option<crate::RetryPolicy>,
     /// Processor configuration following [crate::Processor] traits
     #[allow(private_interfaces)]
     pub processors: Vec<ParsedRegisteredItem>,
     /// Input configuration following [crate::Output] or [crate::OutputBatch] traits
     #[allow(private_interfaces)]
     pub output: ParsedRegisteredItem,
+    /// Optional retry policy for output
+    pub output_retry: Option<crate::RetryPolicy>,
 }
 
 /// Plugin configuration validation snippet
@@ -781,6 +790,35 @@ output:
         } else {
             panic!("Expected ConfigFailedValidation error");
         }
+    }
+
+    #[test]
+    fn test_item_with_retry() {
+        let yaml = r#"
+retry:
+  max_retries: 5
+  initial_wait: "2s"
+http:
+  url: "https://example.com"
+"#;
+        let item: Item = serde_yaml::from_str(yaml).unwrap();
+        assert!(item.retry.is_some());
+        let retry = item.retry.unwrap();
+        assert_eq!(retry.max_retries, 5);
+        assert_eq!(retry.initial_wait, std::time::Duration::from_secs(2));
+        assert!(item.extra.contains_key("http"));
+        assert!(!item.extra.contains_key("retry"));
+    }
+
+    #[test]
+    fn test_item_without_retry() {
+        let yaml = r#"
+http:
+  url: "https://example.com"
+"#;
+        let item: Item = serde_yaml::from_str(yaml).unwrap();
+        assert!(item.retry.is_none());
+        assert!(item.extra.contains_key("http"));
     }
 
     #[test]
