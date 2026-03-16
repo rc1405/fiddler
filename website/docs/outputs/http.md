@@ -28,6 +28,7 @@ Send data to HTTP endpoints via POST or PUT requests. This output supports authe
         batch:
           size: 100
           duration: "5s"
+          max_batch_bytes: 5242880
           format: "json_array"
     ```
 
@@ -115,6 +116,7 @@ Required: `false`
 |-------|------|---------|-------------|
 | `size` | integer | 500 | Maximum messages per batch |
 | `duration` | string | "10s" | Maximum time before flush |
+| `max_batch_bytes` | integer | 10485760 | Maximum cumulative byte size per batch (default: 10MB) |
 | `format` | string | "ndjson" | Batch payload format |
 
 #### Batch Formats

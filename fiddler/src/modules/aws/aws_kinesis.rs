@@ -312,12 +312,16 @@ impl Closer for KinesisInput {
 // Output Implementation
 // ============================================================================
 
+/// Maximum batch payload size for Kinesis PutRecords (5MB).
+const MAX_KINESIS_BATCH_BYTES: usize = 5_242_880;
+
 pub struct KinesisOutput {
     client: Client,
     stream_name: String,
     partition_key: Option<String>,
     batch_size: usize,
     interval: Duration,
+    max_batch_bytes: usize,
 }
 
 impl KinesisOutput {
@@ -338,6 +342,9 @@ impl KinesisOutput {
             .batch
             .as_ref()
             .map_or(Duration::from_secs(5), |b| b.effective_duration());
+        let max_batch_bytes = config.batch.as_ref().map_or(MAX_KINESIS_BATCH_BYTES, |b| {
+            b.effective_max_batch_bytes().min(MAX_KINESIS_BATCH_BYTES)
+        });
 
         debug!(stream = %config.stream_name, "Kinesis output initialized");
 
@@ -347,6 +354,7 @@ impl KinesisOutput {
             partition_key: config.partition_key,
             batch_size,
             interval,
+            max_batch_bytes,
         })
     }
 }
@@ -408,6 +416,10 @@ impl OutputBatch for KinesisOutput {
 
     async fn interval(&self) -> Duration {
         self.interval
+    }
+
+    async fn max_batch_bytes(&self) -> usize {
+        self.max_batch_bytes
     }
 }
 
@@ -528,6 +540,10 @@ properties:
       duration:
         type: string
         description: "Flush interval"
+      max_batch_bytes:
+        type: integer
+        default: 5242880
+        description: "Maximum cumulative byte size per batch (default: 5MB, Kinesis limit)"
 "#;
 
     let input_spec = ConfigSpec::from_schema(input_config)?;

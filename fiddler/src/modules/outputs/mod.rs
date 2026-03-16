@@ -120,12 +120,14 @@ pub(crate) async fn run_output_batch(
 
     let batch_size = o.batch_size().await;
     let interval = o.interval().await;
+    let max_batch_bytes = o.max_batch_bytes().await;
 
     loop {
         let deadline = Instant::now() + interval;
         let mut internal_msg_batch: Vec<InternalMessage> = Vec::with_capacity(batch_size);
+        let mut batch_bytes: usize = 0;
 
-        // Collect messages until batch is full or timeout reached
+        // Collect messages until batch is full, byte limit reached, or timeout
         while internal_msg_batch.len() < batch_size {
             let remaining = deadline.saturating_duration_since(Instant::now());
             if remaining.is_zero() {
@@ -133,7 +135,31 @@ pub(crate) async fn run_output_batch(
             }
 
             match timeout(remaining, input.recv_async()).await {
-                Ok(Ok(msg)) => internal_msg_batch.push(msg),
+                Ok(Ok(msg)) => {
+                    let msg_bytes = msg.message.bytes.len();
+
+                    // Estimate total serialized size including minimal JSON
+                    // array framing: [] brackets (2 bytes) + commas between
+                    // items (count - 1 bytes after adding this message).
+                    let new_count = internal_msg_batch.len() + 1;
+                    let estimated_total = batch_bytes + msg_bytes + 2 + new_count.saturating_sub(1);
+
+                    // If adding this message would exceed the byte limit and we
+                    // already have messages, flush current batch first.
+                    // A single message larger than the limit is always accepted
+                    // (batch of 1) so we don't drop oversized messages.
+                    if max_batch_bytes > 0
+                        && estimated_total > max_batch_bytes
+                        && !internal_msg_batch.is_empty()
+                    {
+                        process_batch(&mut o, &state, internal_msg_batch).await?;
+                        internal_msg_batch = Vec::with_capacity(batch_size);
+                        batch_bytes = 0;
+                    }
+
+                    batch_bytes += msg_bytes;
+                    internal_msg_batch.push(msg);
+                }
                 Ok(Err(_)) => {
                     // Channel disconnected - process remaining batch and exit
                     if !internal_msg_batch.is_empty() {

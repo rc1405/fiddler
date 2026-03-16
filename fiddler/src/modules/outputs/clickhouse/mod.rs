@@ -340,6 +340,7 @@ pub struct ClickHouseOutput {
     sender: Sender<Request>,
     batch_size: usize,
     interval: Duration,
+    max_batch_bytes: usize,
 }
 
 impl ClickHouseOutput {
@@ -353,6 +354,10 @@ impl ClickHouseOutput {
             .batch
             .as_ref()
             .map_or(Duration::from_secs(10), |b| b.effective_duration());
+        let max_batch_bytes = config
+            .batch
+            .as_ref()
+            .map_or(10_485_760, |b| b.effective_max_batch_bytes());
 
         // Create channel for requests
         let (sender, receiver) = bounded(0);
@@ -373,6 +378,7 @@ impl ClickHouseOutput {
             sender,
             batch_size,
             interval,
+            max_batch_bytes,
         })
     }
 }
@@ -405,6 +411,10 @@ impl OutputBatch for ClickHouseOutput {
 
     async fn interval(&self) -> Duration {
         self.interval
+    }
+
+    async fn max_batch_bytes(&self) -> usize {
+        self.max_batch_bytes
     }
 }
 
@@ -479,6 +489,10 @@ properties:
       duration:
         type: string
         description: "Flush interval (default: 10s)"
+      max_batch_bytes:
+        type: integer
+        default: 10485760
+        description: "Maximum cumulative byte size per batch (default: 10MB)"
     description: "Batching policy configuration"
   create_table:
     type: boolean

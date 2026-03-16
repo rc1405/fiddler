@@ -100,8 +100,9 @@ Required: `false`
 |-------|------|-------------|
 | `size` | integer | Maximum records per batch (max: 500) |
 | `duration` | string | Maximum time before flush (default: "5s") |
+| `max_batch_bytes` | integer | Maximum cumulative byte size per batch (default: 5MB) |
 
-**Note**: Kinesis PutRecords API has a hard limit of 500 records per call. The batch size is automatically capped at 500.
+**Note**: Kinesis PutRecords API has a hard limit of 500 records per call. The batch size is automatically capped at 500. The `max_batch_bytes` default is 5MB to match the Kinesis PutRecords payload limit.
 
 ## How It Works
 

@@ -56,6 +56,8 @@ pub struct BatchingPolicy {
     pub duration: Option<Duration>,
     /// Maximum number of messages in a batch before flushing
     pub size: Option<usize>,
+    /// Maximum cumulative byte size of a batch before flushing
+    pub max_batch_bytes: Option<usize>,
 }
 
 impl BatchingPolicy {
@@ -67,6 +69,11 @@ impl BatchingPolicy {
     /// Get the effective interval, using default (10 seconds) if not specified.
     pub fn effective_duration(&self) -> Duration {
         self.duration.unwrap_or_else(|| Duration::from_secs(10))
+    }
+
+    /// Get the effective max batch bytes, using default (10MB) if not specified.
+    pub fn effective_max_batch_bytes(&self) -> usize {
+        self.max_batch_bytes.unwrap_or(10_485_760)
     }
 }
 
@@ -284,6 +291,13 @@ pub trait OutputBatch: Closer {
     /// the output.
     async fn interval(&self) -> Duration {
         Duration::from_secs(10)
+    }
+
+    /// Returns the maximum cumulative byte size for a batch.
+    /// The runtime will flush the batch before this limit is exceeded.
+    /// Default: 10MB (10_485_760 bytes). Return `0` to disable the byte limit.
+    async fn max_batch_bytes(&self) -> usize {
+        10_485_760
     }
 }
 
