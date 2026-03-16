@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [4.6.0](https://github.com/rc1405/fiddler/compare/fiddler-v4.5.2...fiddler-v4.6.0) - 2026-03-16
+
+### Added
+
+- batching size limits ([#94](https://github.com/rc1405/fiddler/pull/94))
+
 ## [4.5.2](https://github.com/rc1405/fiddler/compare/fiddler-v4.5.1...fiddler-v4.5.2) - 2026-03-15
 
 ### Fixed
