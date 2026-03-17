@@ -13,6 +13,7 @@
 //!     path: "/ingest"                     # Optional: Endpoint path (default: "/ingest"), supports :param syntax
 //!     max_body_size: 10485760             # Optional: Max body size in bytes (default: 10MB)
 //!     acknowledgment: true                # Optional: Wait for processing before responding (default: true)
+//!     timeout: "30s"                      # Optional: Max wait for pipeline processing (default: "30s")
 //!     cors_enabled: false                 # Optional: Enable CORS (default: false)
 //!     auth:                               # Optional: Authentication for incoming requests
 //!       type: basic
@@ -36,6 +37,7 @@
 //! - 400 Bad Request: Invalid JSON
 //! - 413 Payload Too Large: Body exceeds max_body_size
 //! - 500 Internal Server Error: Processing failed
+//! - 504 Gateway Timeout: Pipeline processing exceeded timeout
 //!
 //! ## GET `/health`
 //!
@@ -103,6 +105,7 @@ const DEFAULT_ADDRESS: &str = "0.0.0.0";
 const DEFAULT_PORT: u16 = 8080;
 const DEFAULT_PATH: &str = "/ingest";
 const DEFAULT_MAX_BODY_SIZE: usize = 10 * 1024 * 1024; // 10MB
+const DEFAULT_TIMEOUT: &str = "30s";
 
 /// Authentication configuration for incoming requests.
 #[derive(Deserialize, Clone)]
@@ -145,6 +148,13 @@ pub struct HttpServerConfig {
     /// Enable CORS headers (default: false).
     #[serde(default)]
     pub cors_enabled: bool,
+    /// Maximum time to wait for pipeline processing before responding (default: "30s").
+    /// Only applies when acknowledgment is true.
+    #[serde(
+        default = "default_timeout",
+        deserialize_with = "crate::deserialize_duration"
+    )]
+    pub timeout: std::time::Duration,
     /// TLS configuration for HTTPS support.
     pub tls: Option<ServerTlsConfig>,
     /// Authentication for incoming requests.
@@ -171,11 +181,16 @@ fn default_acknowledgment() -> bool {
     true
 }
 
+fn default_timeout() -> std::time::Duration {
+    parse_duration::parse(DEFAULT_TIMEOUT).expect("valid default timeout")
+}
+
 /// Shared state for the HTTP server handlers.
 struct AppState {
     sender: Sender<(Vec<Message>, Option<CallbackChan>)>,
     max_body_size: usize,
     acknowledgment: bool,
+    timeout: std::time::Duration,
     auth: Option<AuthConfig>,
 }
 
@@ -393,14 +408,28 @@ async fn process_ingest(
             );
         }
 
-        // Await the single stream-level callback
-        match callback_rx.await {
-            Ok(Status::Processed) => {}
-            Ok(Status::Errored(errs)) => {
+        // Await the single stream-level callback with timeout
+        match tokio::time::timeout(state.timeout, callback_rx).await {
+            Ok(Ok(Status::Processed)) => {}
+            Ok(Ok(Status::Errored(errs))) => {
                 errors.extend(errs);
             }
-            Err(_) => {
+            Ok(Err(_)) => {
                 errors.push("Callback channel closed".to_string());
+            }
+            Err(_) => {
+                warn!(
+                    timeout_ms = state.timeout.as_millis() as u64,
+                    "Pipeline processing timed out, message may still be in flight"
+                );
+                return (
+                    StatusCode::GATEWAY_TIMEOUT,
+                    Json(json!({
+                        "error": "Pipeline processing timed out",
+                        "accepted": accepted,
+                        "timeout_ms": state.timeout.as_millis() as u64
+                    })),
+                );
             }
         }
     } else {
@@ -549,6 +578,7 @@ impl HttpServerInput {
             sender,
             max_body_size: config.max_body_size,
             acknowledgment: config.acknowledgment,
+            timeout: config.timeout,
             auth: config.auth.clone(),
         });
 
@@ -700,6 +730,10 @@ properties:
     type: boolean
     default: false
     description: "Enable CORS headers"
+  timeout:
+    type: string
+    default: "30s"
+    description: "Maximum time to wait for pipeline processing before responding (only applies when acknowledgment is true)"
   auth:
     type: object
     properties:
