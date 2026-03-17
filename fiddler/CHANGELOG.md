@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [4.7.1](https://github.com/rc1405/fiddler/compare/fiddler-v4.7.0...fiddler-v4.7.1) - 2026-03-17
+
+### Fixed
+
+- added timeout so http_server doesnt wait forever ([#98](https://github.com/rc1405/fiddler/pull/98))
+
 ## [4.7.0](https://github.com/rc1405/fiddler/compare/fiddler-v4.6.0...fiddler-v4.7.0) - 2026-03-16
 
 ### Added
