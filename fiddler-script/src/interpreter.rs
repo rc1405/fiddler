@@ -10,8 +10,6 @@ use indexmap::IndexMap;
 use crate::ast::{BinaryOp, Block, ElseClause, Expression, Program, Statement, UnaryOp};
 use crate::builtins::get_default_builtins;
 use crate::error::RuntimeError;
-use crate::lexer::Lexer;
-use crate::parser::Parser;
 use crate::Value;
 
 /// Maximum recursion depth to prevent stack overflow.
@@ -121,12 +119,17 @@ impl Interpreter {
         }
     }
 
+    /// Parse FiddlerScript source without executing it.
+    ///
+    /// Identical to [`crate::parse`] but provided as a method for API symmetry
+    /// with [`Interpreter::run`].
+    pub fn parse_only(&self, source: &str) -> Result<crate::ast::Program, crate::FiddlerError> {
+        crate::parse(source)
+    }
+
     /// Run FiddlerScript source code.
     pub fn run(&mut self, source: &str) -> Result<Value, crate::FiddlerError> {
-        let mut lexer = Lexer::new(source);
-        let tokens = lexer.tokenize()?;
-        let mut parser = Parser::new(tokens);
-        let program = parser.parse()?;
+        let program = crate::parse(source)?;
         Ok(self.execute(&program)?)
     }
 
