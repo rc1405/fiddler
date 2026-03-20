@@ -173,6 +173,8 @@ impl Closer for FiddlerScriptProcessor {}
 #[fiddler_registration_func]
 fn create_fiddlerscript(conf: YamlValue) -> Result<ExecutionType, Error> {
     let c: FiddlerScriptSpec = serde_yaml::from_value(conf)?;
+    fiddler_script::check(&c.code)
+        .map_err(|e| Error::ConfigFailedValidation(format!("FiddlerScript syntax error: {e}")))?;
     Ok(ExecutionType::Processor(Box::new(FiddlerScriptProcessor {
         code: c.code,
     })))

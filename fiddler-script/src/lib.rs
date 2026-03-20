@@ -62,6 +62,42 @@ pub use interpreter::Interpreter;
 pub use lexer::{Lexer, Token};
 pub use parser::Parser;
 
+/// Parse FiddlerScript source without executing it.
+///
+/// Runs the lexer and parser but does not create an interpreter or execute
+/// any code. Use this to validate script syntax at configuration time.
+///
+/// Returns the parsed [`Program`] AST on success, or a [`FiddlerError`]
+/// describing the first lex or parse error encountered.
+///
+/// # Example
+///
+/// ```
+/// use fiddler_script::parse;
+///
+/// // Valid script parses successfully
+/// assert!(parse("let x = 10;").is_ok());
+///
+/// // Syntax errors are caught without execution
+/// assert!(parse("let x = ;").is_err());
+/// ```
+pub fn parse(source: &str) -> Result<Program, FiddlerError> {
+    let mut lexer = Lexer::new(source);
+    let tokens = lexer.tokenize()?;
+    let mut parser = Parser::new(tokens);
+    let program = parser.parse()?;
+    Ok(program)
+}
+
+/// Check whether FiddlerScript source is syntactically valid.
+///
+/// Returns `Ok(())` if the source parses successfully, or the first
+/// [`FiddlerError`] encountered. This is a convenience wrapper around
+/// [`parse`] that discards the AST.
+pub fn check(source: &str) -> Result<(), FiddlerError> {
+    parse(source).map(|_| ())
+}
+
 /// A runtime value in FiddlerScript.
 #[derive(Debug, Clone)]
 pub enum Value {
@@ -238,5 +274,52 @@ impl Value {
             Value::Dictionary(dict) => Some(dict),
             _ => None,
         }
+    }
+}
+
+#[cfg(test)]
+mod lint_tests {
+    use super::*;
+
+    #[test]
+    fn parse_valid_source() {
+        let program = parse("let x = 10; let y = x + 1;").unwrap();
+        assert!(!program.statements.is_empty());
+    }
+
+    #[test]
+    fn parse_returns_lex_error_for_bad_char() {
+        let err = parse("let x = @;").unwrap_err();
+        assert!(matches!(err, FiddlerError::Lex(_)));
+    }
+
+    #[test]
+    fn parse_returns_lex_error_for_unterminated_string() {
+        let err = parse(r#"let x = "hello;"#).unwrap_err();
+        assert!(matches!(err, FiddlerError::Lex(_)));
+    }
+
+    #[test]
+    fn parse_returns_parse_error_for_missing_semicolon() {
+        let err = parse("let x = 10\nlet y = 20;").unwrap_err();
+        assert!(matches!(err, FiddlerError::Parse(_)));
+    }
+
+    #[test]
+    fn parse_does_not_execute() {
+        // Script references undefined variable — this is a runtime error only.
+        // parse should succeed because the syntax is valid.
+        let result = parse("let x = undefined_var + 1;");
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn check_valid_source() {
+        assert!(check("let x = 10;").is_ok());
+    }
+
+    #[test]
+    fn check_invalid_source() {
+        assert!(check("let x = ;").is_err());
     }
 }
