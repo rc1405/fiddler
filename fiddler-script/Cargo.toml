@@ -1,6 +1,6 @@
 [package]
 name = "fiddler-script"
-version = "0.1.2"
+version = "0.1.3"
 edition = "2021"
 description = "A minimal C-style scripting language interpreter"
 license-file = "../LICENSE"
