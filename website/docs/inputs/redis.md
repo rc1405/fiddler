@@ -1,6 +1,6 @@
 # redis
 
-Consume data from Redis using list operations (BLPOP/BRPOP) or Pub/Sub subscriptions. This input supports both queue-like consumption from lists and real-time message streaming via Pub/Sub.
+Consume data from Redis using list operations (BLPOP/BRPOP), Pub/Sub subscriptions, or streams with consumer groups (XREADGROUP). This input supports queue-like consumption from lists, real-time message streaming via Pub/Sub, and at-least-once delivery with acknowledgment via Redis Streams.
 
 === "List Mode"
     ```yml
@@ -21,6 +21,37 @@ Consume data from Redis using list operations (BLPOP/BRPOP) or Pub/Sub subscript
         channels:
           - "events"
           - "notifications"
+    ```
+
+=== "Stream Mode"
+    ```yml
+    input:
+      redis:
+        url: "redis://localhost:6379"
+        mode: "stream"
+        streams:
+          - "my_stream"
+        consumer_group: "my_group"
+        consumer_name: "worker-1"
+    ```
+
+=== "Stream with Auto-Claim"
+    ```yml
+    input:
+      redis:
+        url: "redis://localhost:6379"
+        mode: "stream"
+        streams:
+          - "my_stream"
+        consumer_group: "my_group"
+        stream_read_count: 100
+        block_ms: 5000
+        auto_claim:
+          enabled: true
+          idle_ms: 30000
+          interval_ms: 10000
+          batch_size: 100
+        create_group: true
     ```
 
 === "Pattern Subscribe"
@@ -72,6 +103,7 @@ Default: `"list"`
 |-------|-------------|
 | `list` | Pop messages from Redis lists using BLPOP/BRPOP |
 | `pubsub` | Subscribe to channels for real-time messages |
+| `stream` | Read from streams using consumer groups (XREADGROUP) with at-least-once delivery |
 
 ### `keys`
 
@@ -110,6 +142,72 @@ Type: `integer`
 Required: `false`
 Default: `1`
 
+### `streams`
+
+Stream names to read from (stream mode only).
+
+Type: `array[string]`
+Required: Required for `stream` mode
+
+### `consumer_group`
+
+Consumer group name for stream mode.
+
+Type: `string`
+Required: Required for `stream` mode
+
+### `consumer_name`
+
+Consumer name within the group.
+
+Type: `string`
+Required: `false`
+Default: `hostname:pid`
+
+Defaults to `hostname:pid` if not specified. Supports Handlebars templating (e.g. `"{{HOSTNAME}}:{{PID}}"`).
+
+### `stream_read_count`
+
+Maximum entries per XREADGROUP call.
+
+Type: `integer`
+Required: `false`
+Default: `100`
+
+### `block_ms`
+
+How long XREADGROUP blocks waiting for new messages, in milliseconds.
+
+Type: `integer`
+Required: `false`
+Default: `5000`
+
+### `auto_claim`
+
+Controls periodic reclamation of idle pending messages from dead consumers using XAUTOCLAIM (requires Redis 6.2+).
+
+Type: `object`
+Required: `false`
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `enabled` | boolean | `true` | Enable auto-claim background task |
+| `idle_ms` | integer | `30000` | Minimum idle time (ms) before a message is eligible for reclamation |
+| `interval_ms` | integer | `10000` | How often the auto-claim task runs (ms) |
+| `batch_size` | integer | `100` | Maximum messages to reclaim per cycle |
+
+Set `idle_ms` high enough to avoid stealing in-flight messages from healthy consumers.
+
+### `create_group`
+
+Automatically create the consumer group (and stream via MKSTREAM) on startup.
+
+Type: `boolean`
+Required: `false`
+Default: `true`
+
+If `false` and the group or stream doesn't exist, startup fails with a validation error.
+
 ### `use_patterns`
 
 Enable pattern matching for Pub/Sub subscriptions.
@@ -142,6 +240,15 @@ Required: `false`
 2. Executes BRPOP/BLPOP on the specified keys with timeout
 3. Returns the first available message from any key
 4. Repeats indefinitely until shutdown
+
+### Stream Mode
+
+1. Connects to Redis and creates the consumer group if `create_group: true`
+2. Reads any pending messages for this consumer first (crash recovery)
+3. Enters the main read loop using XREADGROUP with BLOCK
+4. When a message is processed by the output, XACK is sent to acknowledge it
+5. Unacknowledged messages remain in the pending entry list (PEL) and are reprocessed on restart
+6. If auto-claim is enabled, a background task periodically runs XAUTOCLAIM to reclaim idle messages from dead consumers
 
 ### Pub/Sub Mode
 
@@ -237,6 +344,36 @@ output:
     table: "sensor_data"
 ```
 
+### Stream Consumer Group
+
+```yml
+input:
+  redis:
+    url: "redis://localhost:6379"
+    mode: "stream"
+    streams:
+      - "order_events"
+    consumer_group: "order_processors"
+    block_ms: 5000
+    auto_claim:
+      enabled: true
+      idle_ms: 30000
+    create_group: true
+
+processors:
+  - fiddlerscript:
+      code: |
+        let order = parse_json(this);
+        // Process order...
+        this = bytes(str(order));
+
+output:
+  http:
+    url: "https://api.example.com/orders"
+```
+
+Messages are acknowledged after successful output processing. If a consumer crashes, pending messages are automatically reclaimed by other consumers via XAUTOCLAIM.
+
 ### Stack Processing (LIFO)
 
 ```yml
@@ -266,25 +403,33 @@ output:
   stdout: {}
 ```
 
-## List vs Pub/Sub
+## List vs Pub/Sub vs Stream
 
-| Feature | List Mode | Pub/Sub Mode |
-|---------|-----------|--------------|
-| Persistence | Messages persist until consumed | Messages are ephemeral |
-| Multiple consumers | Load distributed | All consumers receive all messages |
-| Ordering | FIFO/LIFO guaranteed | Order not guaranteed |
-| Backpressure | Natural (list grows) | Messages dropped if slow |
-| Replay | Possible (data persists) | Not possible |
+| Feature | List Mode | Pub/Sub Mode | Stream Mode |
+|---------|-----------|--------------|-------------|
+| Persistence | Until consumed | Ephemeral | Persistent with trimming |
+| Multiple consumers | Load distributed | All receive all | Consumer groups distribute load |
+| Ordering | FIFO/LIFO guaranteed | Not guaranteed | Guaranteed within stream |
+| Backpressure | Natural (list grows) | Messages dropped if slow | Natural (stream grows) |
+| Replay | Not possible (consumed) | Not possible | Possible (stream persists) |
+| Acknowledgment | Implicit (pop removes) | None | Explicit (XACK) |
+| Dead consumer recovery | N/A | N/A | Auto-claim from PEL |
 
 ### When to Use List Mode
-- Job queues and task processing
-- Reliable message delivery
+- Simple job queues and task processing
 - Load distribution across workers
+- No need for message replay
 
 ### When to Use Pub/Sub
 - Real-time notifications
 - Event broadcasting
 - Fan-out patterns
+
+### When to Use Stream Mode
+- At-least-once delivery guarantees
+- Consumer group coordination across instances
+- Dead consumer recovery without message loss
+- Message replay and audit trails
 
 ## Pattern Syntax (Pub/Sub)
 
@@ -315,4 +460,4 @@ redis://:password@host:6379/0        # Password only (no username)
 
 ## See Also
 
-- [redis output](../outputs/redis.md) - Push data to Redis lists or publish to channels
+- [redis output](../outputs/redis.md) - Push data to Redis lists, publish to channels, or write to streams
