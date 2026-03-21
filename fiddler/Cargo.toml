@@ -25,7 +25,7 @@ aws = [
 prometheus = ["dep:metrics", "dep:metrics-exporter-prometheus"]
 tls = ["dep:tokio-rustls", "dep:rustls-pemfile"]
 clickhouse = ["dep:reqwest"]
-redis = ["dep:redis"]
+redis = ["dep:redis", "dep:hostname"]
 http_client = ["dep:reqwest"]
 http_server = [
     "dep:axum",
@@ -120,6 +120,7 @@ tokio-rustls = { version = "0.26", optional = true }
 rustls-pemfile = { version = "2.2", optional = true }
 ipnet = { version = "2.11", optional = true }
 socket2 = { version = "0.5", optional = true }
+hostname = { version = "0.4", optional = true }
 futures = "0.3.31"
 sysinfo = "0.33"
 
