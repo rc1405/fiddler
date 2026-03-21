@@ -1,21 +1,46 @@
 //! Redis output module for publishing data.
 //!
 //! This module provides output implementations for sending data to Redis
-//! using either list operations (LPUSH/RPUSH) or pub/sub (PUBLISH).
+//! using either list operations (LPUSH/RPUSH), pub/sub (PUBLISH), or streams (XADD).
 //!
 //! # Configuration
+//!
+//! ## List mode
 //!
 //! ```yaml
 //! output:
 //!   redis:
 //!     url: "redis://localhost:6379/0"   # Required: Redis connection URL
-//!     mode: "list"                       # Optional: "list" or "pubsub" (default: "list")
+//!     mode: "list"                       # Optional: "list", "pubsub", or "stream" (default: "list")
 //!     key: "events"                      # Required for list mode: key name
-//!     channel: "events"                  # Required for pubsub mode: channel name
 //!     list_command: "rpush"              # Optional: "lpush" or "rpush" (default: "rpush")
 //!     batch:                             # Optional: Batching policy (list mode only)
 //!       size: 500
 //!       duration: "5s"
+//! ```
+//!
+//! ## Pubsub mode
+//!
+//! ```yaml
+//! output:
+//!   redis:
+//!     url: "redis://localhost:6379/0"
+//!     mode: "pubsub"
+//!     channel: "events"                  # Required for pubsub mode: channel name
+//! ```
+//!
+//! ## Stream mode
+//!
+//! ```yaml
+//! output:
+//!   redis:
+//!     url: "redis://localhost:6379"
+//!     mode: stream
+//!     stream: my_stream
+//!     max_len: 10000
+//!     batch:
+//!       size: 500
+//!       duration: "10s"
 //! ```
 
 use crate::config::register_plugin;
@@ -64,6 +89,10 @@ pub struct RedisOutputConfig {
     pub key: Option<String>,
     /// Channel name for pubsub mode.
     pub channel: Option<String>,
+    /// Stream name for stream mode.
+    pub stream: Option<String>,
+    /// Maximum stream length for approximate trimming (stream mode only).
+    pub max_len: Option<usize>,
     /// List command: "lpush" or "rpush" (default: "rpush").
     #[serde(default = "default_list_command")]
     pub list_command: String,
@@ -232,6 +261,122 @@ impl Closer for RedisPubSubOutput {
     }
 }
 
+/// Redis stream output using XADD with optional MAXLEN trimming.
+pub struct RedisStreamOutput {
+    conn: ConnectionManager,
+    stream: String,
+    max_len: Option<usize>,
+    batch_size: usize,
+    interval: Duration,
+    max_batch_bytes: usize,
+}
+
+impl RedisStreamOutput {
+    /// Creates a new Redis stream output.
+    pub async fn new(config: RedisOutputConfig) -> Result<Self, Error> {
+        let stream = config.stream.ok_or_else(|| {
+            Error::ConfigFailedValidation("stream required for stream mode".into())
+        })?;
+
+        let client = Client::open(config.url.as_str())
+            .map_err(|e| redis_error_to_fiddler_error(e, "Invalid Redis URL"))?;
+
+        let conn = ConnectionManager::new(client)
+            .await
+            .map_err(|e| redis_error_to_fiddler_error(e, "Failed to connect to Redis"))?;
+
+        let batch_size = config.batch.as_ref().map_or(500, |b| b.effective_size());
+        let interval = config
+            .batch
+            .as_ref()
+            .map_or(Duration::from_secs(10), |b| b.effective_duration());
+        let max_batch_bytes = config
+            .batch
+            .as_ref()
+            .map_or(10_485_760, |b| b.effective_max_batch_bytes());
+
+        let max_len = config.max_len;
+
+        debug!(stream = %stream, max_len = ?max_len, "Redis stream output initialized");
+
+        Ok(Self {
+            conn,
+            stream,
+            max_len,
+            batch_size,
+            interval,
+            max_batch_bytes,
+        })
+    }
+
+    /// Build an XADD command for a single message.
+    fn build_xadd_cmd(stream: &str, max_len: Option<usize>, message: &Message) -> redis::Cmd {
+        let mut cmd = redis::cmd("XADD");
+        cmd.arg(stream);
+
+        if let Some(len) = max_len {
+            cmd.arg("MAXLEN").arg("~").arg(len);
+        }
+
+        cmd.arg("*");
+        cmd.arg("data").arg(message.bytes.as_slice());
+
+        for (key, value) in &message.metadata {
+            if let Some(s) = value.as_str() {
+                cmd.arg(format!("meta:{}", key)).arg(s);
+            }
+        }
+
+        cmd
+    }
+}
+
+#[async_trait]
+impl OutputBatch for RedisStreamOutput {
+    async fn write_batch(&mut self, messages: MessageBatch) -> Result<(), Error> {
+        if messages.is_empty() {
+            return Ok(());
+        }
+
+        let mut pipe = redis::pipe();
+
+        for msg in &messages {
+            pipe.add_command(Self::build_xadd_cmd(&self.stream, self.max_len, msg));
+        }
+
+        pipe.query_async::<()>(&mut self.conn).await.map_err(|e| {
+            if is_auth_error(&e) {
+                Error::UnRetryable(format!("Redis authentication failed: {}", e))
+            } else {
+                Error::OutputError(format!("Redis XADD failed: {}", e))
+            }
+        })?;
+
+        debug!(count = messages.len(), stream = %self.stream, "XADD batch to Redis stream");
+        Ok(())
+    }
+
+    async fn batch_size(&self) -> usize {
+        self.batch_size
+    }
+
+    async fn interval(&self) -> Duration {
+        self.interval
+    }
+
+    async fn max_batch_bytes(&self) -> usize {
+        self.max_batch_bytes
+    }
+}
+
+#[async_trait]
+impl Closer for RedisStreamOutput {
+    async fn close(&mut self) -> Result<(), Error> {
+        debug!("Redis stream output closing");
+        Ok(())
+    }
+}
+
 #[fiddler_registration_func]
 fn create_redis_output(conf: Value) -> Result<ExecutionType, Error> {
     let config: RedisOutputConfig = serde_yaml::from_value(conf)?;
@@ -271,8 +416,18 @@ fn create_redis_output(conf: Value) -> Result<ExecutionType, Error> {
                 RedisPubSubOutput::new(config).await?,
             )))
         }
+        "stream" => {
+            if config.stream.is_none() {
+                return Err(Error::ConfigFailedValidation(
+                    "stream is required for stream mode".into(),
+                ));
+            }
+            Ok(ExecutionType::OutputBatch(Box::new(
+                RedisStreamOutput::new(config).await?,
+            )))
+        }
         _ => Err(Error::ConfigFailedValidation(
-            "mode must be 'list' or 'pubsub'".into(),
+            "mode must be 'list', 'pubsub', or 'stream'".into(),
         )),
     }
 }
@@ -288,7 +443,7 @@ properties:
     description: "Redis connection URL (redis://host:port/db)"
   mode:
     type: string
-    enum: ["list", "pubsub"]
+    enum: ["list", "pubsub", "stream"]
     default: "list"
     description: "Operation mode"
   key:
@@ -297,6 +452,12 @@ properties:
   channel:
     type: string
     description: "Pub/Sub channel name (required for pubsub mode)"
+  stream:
+    type: string
+    description: "Stream name (required for stream mode)"
+  max_len:
+    type: integer
+    description: "Approximate maximum stream length for trimming (stream mode only)"
   list_command:
     type: string
     enum: ["lpush", "rpush"]
@@ -380,6 +541,48 @@ key: "test"
         assert_eq!(config.mode, "list");
         assert_eq!(config.list_command, "rpush");
         assert!(config.batch.is_none());
+    }
+
+    #[test]
+    fn test_config_deserialization_stream() {
+        let yaml = r#"
+url: "redis://localhost:6379/0"
+mode: "stream"
+stream: "my_stream"
+max_len: 10000
+batch:
+  size: 1000
+"#;
+        let config: RedisOutputConfig = serde_yaml::from_str(yaml).unwrap();
+        assert_eq!(config.url, "redis://localhost:6379/0");
+        assert_eq!(config.mode, "stream");
+        assert_eq!(config.stream, Some("my_stream".to_string()));
+        assert_eq!(config.max_len, Some(10000));
+        assert!(config.batch.is_some());
+    }
+
+    #[test]
+    fn test_config_deserialization_stream_no_trim() {
+        let yaml = r#"
+url: "redis://localhost:6379"
+mode: "stream"
+stream: "events"
+"#;
+        let config: RedisOutputConfig = serde_yaml::from_str(yaml).unwrap();
+        assert_eq!(config.mode, "stream");
+        assert_eq!(config.stream, Some("events".to_string()));
+        assert_eq!(config.max_len, None);
+        assert!(config.batch.is_none());
+    }
+
+    #[test]
+    fn test_stream_mode_requires_stream_field() {
+        let yaml = r#"
+url: "redis://localhost:6379"
+mode: "stream"
+"#;
+        let config: RedisOutputConfig = serde_yaml::from_str(yaml).unwrap();
+        assert!(config.stream.is_none());
     }
 
     #[test]
