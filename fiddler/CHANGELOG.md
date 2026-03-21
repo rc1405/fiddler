@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [4.9.0](https://github.com/rc1405/fiddler/compare/fiddler-v4.8.0...fiddler-v4.9.0) - 2026-03-21
+
+### Added
+
+- added redis streams support ([#102](https://github.com/rc1405/fiddler/pull/102))
+
 ## [4.8.0](https://github.com/rc1405/fiddler/compare/fiddler-v4.7.1...fiddler-v4.8.0) - 2026-03-20
 
 ### Added
