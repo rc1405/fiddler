@@ -14,6 +14,12 @@ base64 = "0.22"
 indexmap = "2"
 chrono = "0.4"
 jmespath = "0.3"
+clap = { version = "4", features = ["derive"] }
+rustyline = "17"
+
+[[bin]]
+name = "fiddler-script"
+path = "src/main.rs"
 
 [dev-dependencies]
 

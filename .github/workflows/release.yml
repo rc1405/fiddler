@@ -10,7 +10,7 @@ on:
       - main
 env:
   BIN_NAME: fiddler-cli
-  
+
 jobs:
   release-plz-release:
     name: release
@@ -20,6 +20,7 @@ jobs:
       contents: write
     outputs:
       releases: ${{ steps.release-plz.outputs.releases }}
+      version: ${{ steps.normalized_version.version }}
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -35,20 +36,25 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.RELEASE_TOKEN }}
           CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_TOKEN }}
+      - name: normalized_version
+        if: ${{ fromJson(steps.release-plz-release.outputs.releases)[0] }}
+        run: |
+          version=$(echo ${{ steps.release-plz.outputs.releases }} |jq -r '.releases[] | select(.package_name == "fiddler")|.version')
+          echo "version=$version" >> $GITHUB_OUTPUT
   release-website:
     name: generate website
     needs: release-plz-release
     if: ${{ fromJson(needs.release-plz-release.outputs.releases)[0] }}
     uses: ./.github/workflows/website.yml
     with:
-      version: ${{ fromJson(needs.release-plz-release.outputs.releases)[0].version }}
+      version: ${{ needs.release-plz-release.outputs.version }}
   release-binaries:
     name: generate binaries
     needs: release-plz-release
     if: ${{ fromJson(needs.release-plz-release.outputs.releases)[0] }}
     uses: ./.github/workflows/assets.yml
     with:
-      version: ${{ fromJson(needs.release-plz-release.outputs.releases)[0].version }}
+      version: ${{ needs.release-plz-release.outputs.version }}
 
   release-plz-pr:
     name: pr
