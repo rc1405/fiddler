@@ -37,7 +37,7 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.RELEASE_TOKEN }}
           CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_TOKEN }}
       - name: normalized_version
-        if: ${{ fromJson(steps.release-plz-release.outputs.releases)[0] }}
+        if: ${{ steps.release-plz-release.outputs.releases[0] }}
         run: |
           version=$(echo ${{ steps.release-plz.outputs.releases }} |jq -r '.releases[] | select(.package_name == "fiddler")|.version')
           echo "version=$version" >> $GITHUB_OUTPUT
