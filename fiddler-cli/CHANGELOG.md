@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [4.9.1](https://github.com/rc1405/fiddler/compare/fiddler-cli-v4.9.0...fiddler-cli-v4.9.1) - 2026-03-28
+
+### Other
+
+- updated the following local packages: fiddler
+
 ## [4.5.0](https://github.com/rc1405/fiddler/compare/fiddler-cli-v4.4.1...fiddler-cli-v4.5.0) - 2026-03-14
 
 ### Added
