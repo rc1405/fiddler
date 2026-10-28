@@ -10,7 +10,7 @@ description = "Macros for internal use of registering plugins in fiddler"
 [dependencies]
 proc-macro2 = "1.0.79"
 quote = "1.0.35"
-syn = { version = "2.0.53", features = ["full"] }
+syn = { version = "3.0.9", features = ["full"] }
 
 [lib]
 proc_macro = true
