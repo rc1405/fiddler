@@ -104,7 +104,7 @@ redis = { version = "0.27", features = [
 ], optional = true }
 lapin = { version = "2.5", optional = true }
 rumqttc = { version = "0.24", optional = true }
-zeromq = { version = "0.4", optional = true }
+zeromq = { version = "0.6", optional = true }
 axum = { version = "0.7", optional = true }
 tower-http = { version = "0.5", features = ["cors", "trace"], optional = true }
 hyper = { version = "1", features = ["http1"], optional = true }
